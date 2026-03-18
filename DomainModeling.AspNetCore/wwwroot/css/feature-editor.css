@@ -1,0 +1,420 @@
+/* ── Feature Editor ────────────────────────────────── */
+
+.fe-layout {
+  display: flex;
+  height: calc(100vh - 80px);
+  gap: 0;
+}
+
+/* ── Sidebar (left panel) ─────────────────────────── */
+.fe-sidebar {
+  width: 280px;
+  min-width: 280px;
+  background: var(--bg-surface);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.fe-sidebar::-webkit-scrollbar { width: 4px; }
+.fe-sidebar::-webkit-scrollbar-track { background: transparent; }
+.fe-sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+.fe-section {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.fe-section-header {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+/* ── Feature list ─────────────────────────────────── */
+.fe-feature-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 8px;
+}
+
+.fe-feature-item {
+  padding: 6px 10px;
+  font-size: 13px;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: var(--radius);
+  transition: background .1s, color .1s;
+}
+
+.fe-feature-item:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.fe-feature-item.active {
+  background: var(--accent-dim);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.fe-new-feature {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+/* ── Inputs ───────────────────────────────────────── */
+.fe-input {
+  width: 100%;
+  padding: 5px 8px;
+  font-size: 12px;
+  font-family: inherit;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.fe-input:focus {
+  outline: none;
+  border-color: #6366f1;
+}
+
+.fe-search {
+  margin-bottom: 8px;
+}
+
+/* ── Buttons ──────────────────────────────────────── */
+.fe-btn {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  background: var(--bg-hover);
+  color: var(--text);
+  cursor: pointer;
+  transition: all .15s;
+  font-family: inherit;
+  white-space: nowrap;
+}
+
+.fe-btn:hover:not(:disabled) { background: var(--border); }
+.fe-btn:disabled { opacity: .4; cursor: default; }
+
+.fe-btn.primary {
+  background: #6366f1;
+  border-color: #6366f1;
+  color: #fff;
+  font-weight: 600;
+}
+.fe-btn.primary:hover:not(:disabled) { background: #4f46e5; }
+
+.fe-btn.danger {
+  border-color: #ef444460;
+  color: #ef4444;
+  background: transparent;
+}
+.fe-btn.danger:hover { background: rgba(239,68,68,.12); }
+
+.fe-connect-btn {
+  width: 100%;
+  background: rgba(99,102,241,.15);
+  border-color: #6366f1;
+  color: #a5b4fc;
+}
+.fe-connect-btn:hover { background: rgba(99,102,241,.25); }
+
+/* ── Type palette ─────────────────────────────────── */
+.fe-palette {
+  max-height: 300px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.fe-palette::-webkit-scrollbar { width: 4px; }
+.fe-palette::-webkit-scrollbar-track { background: transparent; }
+.fe-palette::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+.fe-palette-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 5px;
+  transition: background .1s;
+}
+
+.fe-palette-item:hover {
+  background: var(--bg-hover);
+}
+
+.fe-palette-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.fe-palette-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.fe-palette-kind {
+  font-size: 10px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.fe-palette-empty {
+  font-size: 12px;
+  color: var(--text-dim);
+  padding: 8px 0;
+}
+
+/* ── Canvas ───────────────────────────────────────── */
+.fe-canvas-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.fe-canvas-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-surface);
+}
+
+.fe-feature-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.fe-dirty-indicator {
+  font-size: 11px;
+  color: #fbbf24;
+  font-weight: 600;
+}
+
+.fe-toolbar-spacer {
+  flex: 1;
+}
+
+.fe-canvas {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.fe-canvas svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: grab;
+}
+
+.fe-canvas svg.dragging { cursor: grabbing; }
+.fe-canvas svg.dragging-node { cursor: grabbing; }
+
+.fe-canvas .diagram-controls {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fe-canvas .diagram-controls button {
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  color: var(--text);
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.fe-canvas .diagram-controls button:hover { background: var(--bg-hover); }
+
+.fe-empty-state {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+  font-size: 15px;
+}
+
+/* ── Panel (right) ────────────────────────────────── */
+.fe-panel {
+  width: 260px;
+  min-width: 260px;
+  background: var(--bg-surface);
+  border-left: 1px solid var(--border);
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.fe-panel-empty {
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.fe-panel-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  margin-bottom: 14px;
+}
+
+.fe-panel-field {
+  margin-bottom: 10px;
+}
+
+.fe-panel-field label {
+  display: block;
+  font-size: 10px;
+  color: var(--text-dim);
+  margin-bottom: 3px;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  font-weight: 600;
+}
+
+.fe-panel-value {
+  font-size: 12px;
+  color: var(--text);
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.fe-panel-section {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  color: var(--text-dim);
+  margin: 14px 0 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.fe-panel-rel {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 3px 0;
+}
+
+.fe-panel-prop {
+  font-size: 12px;
+  padding: 2px 0;
+  color: var(--text-muted);
+  font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+}
+
+/* ── Connector port hover effect ──────────────────── */
+.fe-port:hover {
+  opacity: 1 !important;
+  r: 7;
+}
+
+/* ── Property editing in panel ────────────────────── */
+.fe-panel-prop-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 0;
+}
+
+.fe-panel-prop-text {
+  flex: 1;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fe-panel-prop-empty {
+  font-size: 12px;
+  color: var(--text-dim);
+  font-style: italic;
+  padding: 2px 0;
+}
+
+.fe-add-prop-row {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+  align-items: center;
+}
+
+.fe-input-sm {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 6px;
+  font-size: 11px;
+}
+
+.fe-btn-icon {
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  flex-shrink: 0;
+  transition: all .15s;
+  font-family: inherit;
+}
+
+.fe-btn-icon:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.fe-btn-add {
+  color: #4ee8ad;
+  border-color: #36a87a;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.fe-btn-add:hover {
+  background: rgba(78, 232, 173, .15);
+}

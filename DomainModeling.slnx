@@ -1,0 +1,8 @@
+<Solution>
+  <Project Path="DomainModeling.AspNetCore/DomainModeling.AspNetCore.csproj" />
+  <Project Path="DomainModeling.Example/DomainModeling.Example.csproj" />
+  <Project Path="DomainModeling.Tests/DomainModeling.Tests.csproj" />
+  <Project Path="DomainModeling/DomainModeling.csproj" />
+  <Project Path="DomainModeling.Example.Shared/DomainModeling.Example.Shared.csproj" />
+  <Project Path="DomainModeling.Example.Shipping/DomainModeling.Example.Shipping.csproj" />
+</Solution>

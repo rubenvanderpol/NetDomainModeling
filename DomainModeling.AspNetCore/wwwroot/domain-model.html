@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Domain Model Explorer</title>
+<link rel="stylesheet" href="{{ASSETS_URL}}/css/explorer.css" />
+<link rel="stylesheet" href="{{ASSETS_URL}}/css/diagram.css" />
+<link rel="stylesheet" href="{{ASSETS_URL}}/css/feature-editor.css" />
+<link rel="stylesheet" href="{{ASSETS_URL}}/css/testing.css" />
+</head>
+<body>
+
+<div class="layout">
+  <!-- Sidebar -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <h1>Domain Model Explorer</h1>
+      <p id="contextName">Loading…</p>
+    </div>
+    <nav class="sidebar-nav" id="sidebarNav"></nav>
+  </aside>
+  <button class="sidebar-toggle" id="sidebarToggle" title="Collapse sidebar">❮</button>
+
+  <!-- Main content -->
+  <main class="main" id="mainContent">
+    <div class="loading" id="loadingState">Loading domain model…</div>
+  </main>
+</div>
+
+<script>window.__config = { apiUrl: '{{API_URL}}', developerMode: {{DEVELOPER_MODE}}, testingMode: {{TESTING_MODE}}, featureEditorMode: {{FEATURE_EDITOR_MODE}} };</script>
+<script type="module" src="{{ASSETS_URL}}/js/main.js"></script>
+
+</body>
+</html>

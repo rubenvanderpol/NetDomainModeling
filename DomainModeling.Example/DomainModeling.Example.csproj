@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DomainModeling\DomainModeling.csproj" />
+    <ProjectReference Include="..\DomainModeling.AspNetCore\DomainModeling.AspNetCore.csproj" />
+    <ProjectReference Include="..\DomainModeling.Example.Shared\DomainModeling.Example.Shared.csproj" />
+    <ProjectReference Include="..\DomainModeling.Example.Shipping\DomainModeling.Example.Shipping.csproj" />
+  </ItemGroup>
+
+</Project>

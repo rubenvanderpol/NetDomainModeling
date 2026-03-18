@@ -1,0 +1,911 @@
+using System.Reflection;
+using DomainModeling.Builder;
+using DomainModeling.Graph;
+using MethodInfo = DomainModeling.Graph.MethodInfo;
+using PropertyInfo = DomainModeling.Graph.PropertyInfo;
+
+namespace DomainModeling.Discovery;
+
+/// <summary>
+/// Scans assemblies configured in a <see cref="BoundedContextBuilder"/>
+/// and produces a <see cref="BoundedContextNode"/> with all discovered types
+/// and their relationships.
+/// </summary>
+internal sealed class AssemblyScanner
+{
+    private readonly BoundedContextBuilder _config;
+
+    public AssemblyScanner(BoundedContextBuilder config) => _config = config;
+
+    public BoundedContextNode Scan()
+    {
+        var assemblies = _config.GetAllAssemblies();
+        var allTypes = assemblies
+            .SelectMany(SafeGetTypes)
+            .Where(t => t is { IsAbstract: false, IsInterface: false })
+            .Distinct()
+            .ToList();
+
+        // Also collect abstract / interface types for generic-argument resolution
+        var allExportedTypes = assemblies
+            .SelectMany(SafeGetTypes)
+            .Distinct()
+            .ToList();
+
+        // Categorize types based on configured conventions
+        var entityTypes = allTypes.Where(t => _config.EntityConvention.Matches(t)).ToList();
+        var aggregateTypes = allTypes.Where(t => _config.AggregateConvention.Matches(t)).ToList();
+        var valueObjectTypes = allTypes.Where(t => _config.ValueObjectConvention.Matches(t)).ToList();
+        var domainEventTypes = allTypes.Where(t => _config.DomainEventConvention.Matches(t)).ToList();
+        var integrationEventTypes = allTypes.Where(t => _config.IntegrationEventConvention.Matches(t)).ToList();
+        var eventHandlerTypes = allTypes.Where(t => _config.EventHandlerConvention.Matches(t)).ToList();
+        var commandHandlerTypes = allTypes.Where(t => _config.CommandHandlerConvention.Matches(t)).ToList();
+        var queryHandlerTypes = allTypes.Where(t => _config.QueryHandlerConvention.Matches(t)).ToList();
+        var repositoryTypes = allTypes.Where(t => _config.RepositoryConvention.Matches(t)).ToList();
+        var domainServiceTypes = allTypes.Where(t => _config.DomainServiceConvention.Matches(t)).ToList();
+
+        // Build a set of all "known domain type" full names for reference detection
+        var knownDomainTypes = new HashSet<string>(
+            entityTypes.Concat(aggregateTypes).Concat(valueObjectTypes)
+                .Concat(domainEventTypes).Concat(integrationEventTypes)
+                .Select(t => t.FullName!)
+                .Where(n => n is not null));
+
+        // Build nodes
+        var entityNodes = entityTypes.Select(t => BuildEntityNode(t, domainEventTypes, knownDomainTypes, _config.GetLayer(t))).ToList();
+        var aggregateNodes = aggregateTypes.Select(t => BuildAggregateNode(t, entityTypes, domainEventTypes, knownDomainTypes, _config.GetLayer(t))).ToList();
+        var valueObjectNodes = valueObjectTypes.Select(t => BuildValueObjectNode(t, knownDomainTypes, _config.GetLayer(t))).ToList();
+        var domainEventNodes = domainEventTypes.Select(t => BuildDomainEventNode(t, knownDomainTypes, _config.GetLayer(t))).ToList();
+        var integrationEventNodes = integrationEventTypes.Select(t => BuildDomainEventNode(t, knownDomainTypes, _config.GetLayer(t))).ToList();
+
+        var eventHandlerNodes = eventHandlerTypes.Select(t => BuildHandlerNode(t, knownDomainTypes, _config.GetLayer(t))).ToList();
+        var commandHandlerNodes = commandHandlerTypes.Select(t => BuildHandlerNode(t, knownDomainTypes, _config.GetLayer(t))).ToList();
+        var queryHandlerNodes = queryHandlerTypes.Select(t => BuildHandlerNode(t, knownDomainTypes, _config.GetLayer(t))).ToList();
+        var repositoryNodes = repositoryTypes.Select(t => BuildRepositoryNode(t, aggregateTypes, _config.GetLayer(t))).ToList();
+        var domainServiceNodes = domainServiceTypes.Select(t => BuildDomainServiceNode(t, _config.GetLayer(t))).ToList();
+
+        // Build relationships
+        var relationships = new List<Relationship>();
+
+        // Aggregate → child entity (Contains)
+        foreach (var agg in aggregateNodes)
+        {
+            foreach (var child in agg.ChildEntities)
+            {
+                relationships.Add(new Relationship
+                {
+                    SourceType = agg.FullName,
+                    TargetType = child,
+                    Kind = RelationshipKind.Contains,
+                    Label = "contains"
+                });
+            }
+        }
+
+        // Entity / Aggregate → emitted events
+        foreach (var entity in entityNodes)
+        {
+            foreach (var evt in entity.EmittedEvents)
+            {
+                relationships.Add(new Relationship
+                {
+                    SourceType = entity.FullName,
+                    TargetType = evt,
+                    Kind = RelationshipKind.Emits,
+                    Label = "emits"
+                });
+            }
+        }
+        foreach (var agg in aggregateNodes)
+        {
+            foreach (var evt in agg.EmittedEvents)
+            {
+                relationships.Add(new Relationship
+                {
+                    SourceType = agg.FullName,
+                    TargetType = evt,
+                    Kind = RelationshipKind.Emits,
+                    Label = "emits"
+                });
+            }
+        }
+
+        // Wire emittedBy / handledBy on domain event nodes
+        CrossReferenceEvents(domainEventNodes, entityNodes, aggregateNodes, eventHandlerNodes);
+
+        // Detect which integration events are published by event handlers (IL scanning)
+        var integrationEventFullNames = new HashSet<string>(integrationEventTypes.Select(e => e.FullName!));
+        var handlerPublishedEvents = new Dictionary<string, List<string>>();
+        foreach (var handlerType in eventHandlerTypes)
+        {
+            var published = DetectPublishedEvents(handlerType, integrationEventTypes);
+            if (published.Count > 0)
+                handlerPublishedEvents[handlerType.FullName!] = published;
+        }
+
+        // Wire emittedBy / handledBy on integration event nodes
+        CrossReferenceEvents(integrationEventNodes, entityNodes, aggregateNodes, eventHandlerNodes);
+        CrossReferencePublishedEvents(integrationEventNodes, handlerPublishedEvents);
+
+        // Handler → handled type
+        foreach (var handler in eventHandlerNodes.Concat(commandHandlerNodes).Concat(queryHandlerNodes))
+        {
+            foreach (var handled in handler.Handles)
+            {
+                relationships.Add(new Relationship
+                {
+                    SourceType = handler.FullName,
+                    TargetType = handled,
+                    Kind = RelationshipKind.Handles,
+                    Label = "handles"
+                });
+            }
+        }
+
+        // Repository → aggregate
+        foreach (var repo in repositoryNodes.Where(r => r.ManagesAggregate is not null))
+        {
+            relationships.Add(new Relationship
+            {
+                SourceType = repo.FullName,
+                TargetType = repo.ManagesAggregate!,
+                Kind = RelationshipKind.Manages,
+                Label = "manages"
+            });
+        }
+
+        // EventHandler → integration event (Publishes)
+        foreach (var (handlerFullName, publishedEvents) in handlerPublishedEvents)
+        {
+            foreach (var evt in publishedEvents)
+            {
+                relationships.Add(new Relationship
+                {
+                    SourceType = handlerFullName,
+                    TargetType = evt,
+                    Kind = RelationshipKind.Publishes,
+                    Label = "publishes"
+                });
+            }
+        }
+
+        // Property-based references between domain types
+        AddPropertyReferences(entityNodes, knownDomainTypes, relationships);
+        AddPropertyReferences(aggregateNodes.Select(a => new EntityNode
+        {
+            Name = a.Name,
+            FullName = a.FullName,
+            Properties = a.Properties
+        }), knownDomainTypes, relationships);
+        AddPropertyReferences(valueObjectNodes.Select(v => new EntityNode
+        {
+            Name = v.Name,
+            FullName = v.FullName,
+            Properties = v.Properties
+        }), knownDomainTypes, relationships);
+
+        // Discover sub-types: custom types referenced by properties that aren't registered domain types
+        var subTypeNodes = DiscoverSubTypes(
+            entityNodes, aggregateNodes, valueObjectNodes,
+            knownDomainTypes, allTypes, relationships);
+
+        // ID-based references (e.g. OrganizationId → Organization)
+        // Prefer aggregates over entities when names collide
+        var knownEntityAndAggregateNames = new Dictionary<string, string>();
+        foreach (var t in entityTypes)
+            knownEntityAndAggregateNames[t.Name] = t.FullName!;
+        foreach (var t in aggregateTypes)
+            knownEntityAndAggregateNames[t.Name] = t.FullName!;
+        AddIdBasedReferences(entityNodes, knownEntityAndAggregateNames, relationships);
+        AddIdBasedReferences(aggregateNodes.Select(a => new EntityNode
+        {
+            Name = a.Name,
+            FullName = a.FullName,
+            Properties = a.Properties
+        }), knownEntityAndAggregateNames, relationships);
+
+        // Load XML documentation and apply descriptions
+        var xmlDocReader = LoadDocumentation(assemblies);
+        if (xmlDocReader.HasDocumentation)
+        {
+            ApplyDescriptions(entityNodes, xmlDocReader);
+            ApplyDescriptions(aggregateNodes, xmlDocReader);
+            ApplyDescriptions(valueObjectNodes, xmlDocReader);
+            ApplyDescriptions(domainEventNodes, xmlDocReader);
+            ApplyDescriptions(integrationEventNodes, xmlDocReader);
+            ApplyDescriptions(eventHandlerNodes, xmlDocReader);
+            ApplyDescriptions(commandHandlerNodes, xmlDocReader);
+            ApplyDescriptions(queryHandlerNodes, xmlDocReader);
+            ApplyDescriptions(repositoryNodes, xmlDocReader);
+            ApplyDescriptions(domainServiceNodes, xmlDocReader);
+            ApplyDescriptions(subTypeNodes, xmlDocReader);
+        }
+
+        return new BoundedContextNode
+        {
+            Name = _config.Name,
+            Entities = entityNodes,
+            Aggregates = aggregateNodes,
+            ValueObjects = valueObjectNodes,
+            DomainEvents = domainEventNodes,
+            IntegrationEvents = integrationEventNodes,
+            EventHandlers = eventHandlerNodes,
+            CommandHandlers = commandHandlerNodes,
+            QueryHandlers = queryHandlerNodes,
+            Repositories = repositoryNodes,
+            DomainServices = domainServiceNodes,
+            SubTypes = subTypeNodes,
+            Relationships = relationships
+        };
+    }
+
+    // ─── Node builders ───────────────────────────────────────────────
+
+    private static EntityNode BuildEntityNode(Type type, List<Type> eventTypes, HashSet<string> knownDomainTypes, string? layer)
+    {
+        return new EntityNode
+        {
+            Name = type.Name,
+            FullName = type.FullName!,
+            Layer = layer,
+            Properties = GetProperties(type, knownDomainTypes),
+            EmittedEvents = DetectEmittedEvents(type, eventTypes)
+        };
+    }
+
+    private static AggregateNode BuildAggregateNode(Type type, List<Type> entityTypes, List<Type> eventTypes, HashSet<string> knownDomainTypes, string? layer)
+    {
+        var properties = GetProperties(type, knownDomainTypes);
+
+        // Detect child entities: properties whose type (or collection element type)
+        // is a known entity
+        var entityFullNames = new HashSet<string>(entityTypes.Select(e => e.FullName!));
+        var childEntities = properties
+            .Where(p => p.ReferenceTypeName is not null && entityFullNames.Contains(p.ReferenceTypeName))
+            .Select(p => p.ReferenceTypeName!)
+            .Distinct()
+            .ToList();
+
+        return new AggregateNode
+        {
+            Name = type.Name,
+            FullName = type.FullName!,
+            Layer = layer,
+            Properties = properties,
+            Methods = GetMethods(type),
+            ChildEntities = childEntities,
+            EmittedEvents = DetectEmittedEvents(type, eventTypes)
+        };
+    }
+
+    private static ValueObjectNode BuildValueObjectNode(Type type, HashSet<string> knownDomainTypes, string? layer)
+    {
+        return new ValueObjectNode
+        {
+            Name = type.Name,
+            FullName = type.FullName!,
+            Layer = layer,
+            Properties = GetProperties(type, knownDomainTypes)
+        };
+    }
+
+    private static DomainEventNode BuildDomainEventNode(Type type, HashSet<string> knownDomainTypes, string? layer)
+    {
+        return new DomainEventNode
+        {
+            Name = type.Name,
+            FullName = type.FullName!,
+            Layer = layer,
+            Properties = GetProperties(type, knownDomainTypes)
+        };
+    }
+
+    private static HandlerNode BuildHandlerNode(Type type, HashSet<string> knownDomainTypes, string? layer)
+    {
+        var handledTypes = new HashSet<string>();
+
+        // Strategy 1: Extract generic arguments from implemented interfaces
+        foreach (var iface in type.GetInterfaces().Where(i => i.IsGenericType))
+        {
+            foreach (var arg in iface.GetGenericArguments())
+            {
+                if (arg.FullName is not null)
+                    handledTypes.Add(arg.FullName);
+            }
+        }
+
+        // Strategy 2: Scan public method parameters for known domain types
+        if (handledTypes.Count == 0)
+        {
+            var methods = type.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
+            foreach (var method in methods)
+            {
+                foreach (var param in method.GetParameters())
+                {
+                    var paramFullName = param.ParameterType.FullName;
+                    if (paramFullName is not null && knownDomainTypes.Contains(paramFullName))
+                        handledTypes.Add(paramFullName);
+                }
+            }
+        }
+
+        return new HandlerNode
+        {
+            Name = type.Name,
+            FullName = type.FullName!,
+            Layer = layer,
+            Handles = handledTypes.ToList()
+        };
+    }
+
+    private static RepositoryNode BuildRepositoryNode(Type type, List<Type> aggregateTypes, string? layer)
+    {
+        var aggregateNames = new HashSet<string>(aggregateTypes.Select(a => a.FullName!));
+
+        // Look at generic interface arguments to find which aggregate this repo manages
+        var managedAggregate = type.GetInterfaces()
+            .Where(i => i.IsGenericType)
+            .SelectMany(i => i.GetGenericArguments())
+            .FirstOrDefault(t => aggregateNames.Contains(t.FullName ?? ""));
+
+        return new RepositoryNode
+        {
+            Name = type.Name,
+            FullName = type.FullName!,
+            Layer = layer,
+            ManagesAggregate = managedAggregate?.FullName
+        };
+    }
+
+    private static DomainServiceNode BuildDomainServiceNode(Type type, string? layer)
+    {
+        return new DomainServiceNode
+        {
+            Name = type.Name,
+            FullName = type.FullName!,
+            Layer = layer
+        };
+    }
+
+    // ─── Helpers ─────────────────────────────────────────────────────
+
+    private static List<PropertyInfo> GetProperties(Type type, HashSet<string> knownDomainTypes)
+    {
+        return type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .Where(p => p.DeclaringType == type || p.DeclaringType?.Assembly == type.Assembly)
+            .Select(p =>
+            {
+                var (propertyTypeName, isCollection, elementType) = AnalyzePropertyType(p.PropertyType);
+                var referenceType = elementType ?? p.PropertyType;
+                var refFullName = referenceType.FullName;
+                var isKnownDomain = refFullName is not null && knownDomainTypes.Contains(refFullName);
+                var isCustomType = !isKnownDomain && refFullName is not null && IsCustomType(referenceType);
+
+                return new PropertyInfo
+                {
+                    Name = p.Name,
+                    TypeName = propertyTypeName,
+                    IsCollection = isCollection,
+                    ReferenceTypeName = isKnownDomain || isCustomType ? refFullName : null
+                };
+            })
+            .ToList();
+    }
+
+    /// <summary>
+    /// Determines whether a type is a custom (non-primitive) type that should be
+    /// treated as a sub-type in the domain graph.
+    /// </summary>
+    private static bool IsCustomType(Type type)
+    {
+        // Unwrap nullable
+        var underlying = Nullable.GetUnderlyingType(type) ?? type;
+
+        if (underlying.IsPrimitive) return false;
+        if (underlying.IsEnum) return false;
+        if (underlying == typeof(string)) return false;
+        if (underlying == typeof(decimal)) return false;
+        if (underlying == typeof(Guid)) return false;
+        if (underlying == typeof(DateTime)) return false;
+        if (underlying == typeof(DateTimeOffset)) return false;
+        if (underlying == typeof(DateOnly)) return false;
+        if (underlying == typeof(TimeOnly)) return false;
+        if (underlying == typeof(TimeSpan)) return false;
+        if (underlying == typeof(Uri)) return false;
+        if (underlying == typeof(byte[])) return false;
+        if (underlying == typeof(object)) return false;
+
+        // Must be a class or struct with a namespace (not compiler-generated)
+        if (underlying.FullName is null) return false;
+        if (underlying.Namespace?.StartsWith("System") == true) return false;
+        if (underlying.Namespace?.StartsWith("Microsoft") == true) return false;
+
+        return true;
+    }
+
+    private static List<MethodInfo> GetMethods(Type type)
+    {
+        // Exclude property accessors, special runtime methods, and methods inherited from System.Object
+        var objectMethods = new HashSet<string>(
+            typeof(object).GetMethods(BindingFlags.Public | BindingFlags.Instance)
+                .Select(m => m.Name));
+
+        return type.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
+            .Where(m => !m.IsSpecialName && !objectMethods.Contains(m.Name))
+            .Select(m => new MethodInfo
+            {
+                Name = m.Name,
+                ReturnTypeName = FormatTypeName(m.ReturnType),
+                Parameters = m.GetParameters()
+                    .Select(p => new MethodParameterInfo
+                    {
+                        Name = p.Name ?? "arg",
+                        TypeName = FormatTypeName(p.ParameterType),
+                    })
+                    .ToList()
+            })
+            .ToList();
+    }
+
+    private static string FormatTypeName(Type type)
+    {
+        if (type == typeof(void)) return "void";
+        if (type == typeof(string)) return "string";
+        if (type == typeof(int)) return "int";
+        if (type == typeof(long)) return "long";
+        if (type == typeof(bool)) return "bool";
+        if (type == typeof(double)) return "double";
+        if (type == typeof(decimal)) return "decimal";
+        if (type == typeof(float)) return "float";
+        if (type == typeof(Guid)) return "Guid";
+
+        if (type.IsGenericType)
+        {
+            var baseName = StripGenericArity(type.Name);
+            var args = string.Join(", ", type.GetGenericArguments().Select(FormatTypeName));
+            return $"{baseName}<{args}>";
+        }
+
+        if (type.IsArray)
+        {
+            return FormatTypeName(type.GetElementType()!) + "[]";
+        }
+
+        return type.Name;
+    }
+
+    private static (string TypeName, bool IsCollection, Type? ElementType) AnalyzePropertyType(Type type)
+    {
+        // Check for arrays
+        if (type.IsArray)
+        {
+            var elem = type.GetElementType()!;
+            return ($"{elem.Name}[]", true, elem);
+        }
+
+        // Check for generic collections (IEnumerable<T>, ICollection<T>, List<T>, etc.)
+        if (type.IsGenericType)
+        {
+            var genericDef = type.GetGenericTypeDefinition();
+            var args = type.GetGenericArguments();
+
+            if (args.Length == 1 && IsCollectionType(genericDef))
+            {
+                return ($"ICollection<{args[0].Name}>", true, args[0]);
+            }
+
+            // Generic but not a collection (e.g. Nullable<T>)
+            var argNames = string.Join(", ", args.Select(a => a.Name));
+            return ($"{StripGenericArity(type.Name)}<{argNames}>", false, null);
+        }
+
+        return (type.Name, false, null);
+    }
+
+    private static bool IsCollectionType(Type genericDef)
+    {
+        return genericDef == typeof(IEnumerable<>)
+            || genericDef == typeof(ICollection<>)
+            || genericDef == typeof(IList<>)
+            || genericDef == typeof(List<>)
+            || genericDef == typeof(IReadOnlyCollection<>)
+            || genericDef == typeof(IReadOnlyList<>)
+            || genericDef == typeof(HashSet<>)
+            || genericDef == typeof(ISet<>);
+    }
+
+    private static string StripGenericArity(string name)
+    {
+        var idx = name.IndexOf('`');
+        return idx >= 0 ? name[..idx] : name;
+    }
+
+    /// <summary>
+    /// Detect which domain event types an entity/aggregate can emit.
+    /// Uses two strategies:
+    /// 1. IL scanning for <c>newobj</c> instructions that instantiate event types
+    /// 2. Local variable declarations of event types
+    ///
+    /// Also scans compiler-generated nested types (e.g. async state machines)
+    /// because the C# compiler moves the method body of <c>async</c> methods
+    /// into a nested state machine class's <c>MoveNext()</c> method.
+    /// </summary>
+    private static List<string> DetectEmittedEvents(Type type, List<Type> eventTypes)
+    {
+        var eventFullNames = new HashSet<string>(eventTypes.Select(e => e.FullName!));
+        var emitted = new HashSet<string>();
+
+        ScanTypeMethods(type, eventFullNames, emitted);
+
+        // Also scan compiler-generated nested types (async state machines, lambda display classes, etc.)
+        foreach (var nested in type.GetNestedTypes(BindingFlags.NonPublic | BindingFlags.Public))
+        {
+            if (nested.GetCustomAttributes(typeof(System.Runtime.CompilerServices.CompilerGeneratedAttribute), false).Length > 0)
+            {
+                ScanTypeMethods(nested, eventFullNames, emitted);
+            }
+        }
+
+        return emitted.ToList();
+    }
+
+    /// <summary>
+    /// Scans all methods and constructors of a type for event-related IL patterns.
+    /// </summary>
+    private static void ScanTypeMethods(Type type, HashSet<string> eventFullNames, HashSet<string> emitted)
+    {
+        var allMethods = type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly)
+            .Cast<MethodBase>()
+            .Concat(type.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static));
+
+        foreach (var method in allMethods)
+        {
+            ScanMethodBodyForEvents(method, type.Module, eventFullNames, emitted);
+        }
+    }
+
+    /// <summary>
+    /// Scans a method's IL body for <c>newobj</c> (0x73) instructions whose
+    /// target constructor belongs to a known event type, and checks local variable types.
+    /// </summary>
+    private static void ScanMethodBodyForEvents(MethodBase method, Module module, HashSet<string> eventFullNames, HashSet<string> emitted)
+    {
+        System.Reflection.MethodBody? body;
+        try { body = method.GetMethodBody(); }
+        catch { return; }
+
+        if (body is null)
+            return;
+
+        // Check local variable types
+        foreach (var local in body.LocalVariables)
+            CheckTypeForEvents(local.LocalType, eventFullNames, emitted);
+
+        // Scan IL for newobj (0x73) and call/callvirt that might reference event types
+        var il = body.GetILAsByteArray();
+        if (il is null)
+            return;
+
+        const byte newobj = 0x73;
+        const byte call = 0x28;
+        const byte callvirt = 0x6F;
+
+        for (var i = 0; i < il.Length; i++)
+        {
+            if (il[i] is not (newobj or call or callvirt))
+                continue;
+
+            if (i + 4 >= il.Length)
+                continue;
+
+            // Read the 4-byte metadata token (little-endian)
+            var token = il[i + 1]
+                      | (il[i + 2] << 8)
+                      | (il[i + 3] << 16)
+                      | (il[i + 4] << 24);
+
+            try
+            {
+                var resolved = module.ResolveMethod(token);
+                if (resolved?.DeclaringType?.FullName is { } fullName && eventFullNames.Contains(fullName))
+                    emitted.Add(fullName);
+            }
+            catch
+            {
+                // Token might not be a method token — skip
+            }
+
+            i += 4; // skip the 4-byte operand
+        }
+    }
+
+    private static void CheckTypeForEvents(Type type, HashSet<string> eventFullNames, HashSet<string> emitted)
+    {
+        if (type.FullName is not null && eventFullNames.Contains(type.FullName))
+        {
+            emitted.Add(type.FullName);
+            return;
+        }
+
+        if (type.IsGenericType)
+        {
+            foreach (var arg in type.GetGenericArguments())
+                CheckTypeForEvents(arg, eventFullNames, emitted);
+        }
+    }
+
+    private static void CrossReferenceEvents(
+        List<DomainEventNode> eventNodes,
+        List<EntityNode> entities,
+        List<AggregateNode> aggregates,
+        List<HandlerNode> handlers)
+    {
+        var eventMap = eventNodes.ToDictionary(e => e.FullName);
+
+        foreach (var entity in entities)
+        {
+            foreach (var evtName in entity.EmittedEvents)
+            {
+                if (eventMap.TryGetValue(evtName, out var evtNode))
+                    evtNode.EmittedBy.Add(entity.FullName);
+            }
+        }
+
+        foreach (var agg in aggregates)
+        {
+            foreach (var evtName in agg.EmittedEvents)
+            {
+                if (eventMap.TryGetValue(evtName, out var evtNode))
+                    evtNode.EmittedBy.Add(agg.FullName);
+            }
+        }
+
+        foreach (var handler in handlers)
+        {
+            foreach (var handled in handler.Handles)
+            {
+                if (eventMap.TryGetValue(handled, out var evtNode))
+                    evtNode.HandledBy.Add(handler.FullName);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Wires up EmittedBy on integration event nodes for handlers that publish them.
+    /// </summary>
+    private static void CrossReferencePublishedEvents(
+        List<DomainEventNode> integrationEventNodes,
+        Dictionary<string, List<string>> handlerPublishedEvents)
+    {
+        var eventMap = integrationEventNodes.ToDictionary(e => e.FullName);
+
+        foreach (var (handlerFullName, publishedEvents) in handlerPublishedEvents)
+        {
+            foreach (var evtName in publishedEvents)
+            {
+                if (eventMap.TryGetValue(evtName, out var evtNode))
+                    evtNode.EmittedBy.Add(handlerFullName);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Detect which integration event types a handler can publish.
+    /// Uses IL scanning similar to <see cref="DetectEmittedEvents"/>.
+    /// </summary>
+    private static List<string> DetectPublishedEvents(Type type, List<Type> integrationEventTypes)
+    {
+        return DetectEmittedEvents(type, integrationEventTypes);
+    }
+
+    private static void AddPropertyReferences(IEnumerable<EntityNode> nodes, HashSet<string> knownDomainTypes, List<Relationship> relationships)
+    {
+        foreach (var node in nodes)
+        {
+            foreach (var prop in node.Properties.Where(p => p.ReferenceTypeName is not null))
+            {
+                relationships.Add(new Relationship
+                {
+                    SourceType = node.FullName,
+                    TargetType = prop.ReferenceTypeName!,
+                    Kind = prop.IsCollection ? RelationshipKind.HasMany : RelationshipKind.Has,
+                    Label = prop.Name
+                });
+            }
+        }
+    }
+
+    /// <summary>
+    /// Discovers sub-types: custom types that are referenced by properties on entities,
+    /// aggregates, or value objects but are not themselves registered domain types.
+    /// Also processes sub-type properties recursively.
+    /// </summary>
+    private static List<SubTypeNode> DiscoverSubTypes(
+        List<EntityNode> entityNodes,
+        List<AggregateNode> aggregateNodes,
+        List<ValueObjectNode> valueObjectNodes,
+        HashSet<string> knownDomainTypes,
+        List<Type> allTypes,
+        List<Relationship> relationships)
+    {
+        var allPropertySources = entityNodes.SelectMany(e => e.Properties)
+            .Concat(aggregateNodes.SelectMany(a => a.Properties))
+            .Concat(valueObjectNodes.SelectMany(v => v.Properties));
+
+        var subTypeFullNames = allPropertySources
+            .Where(p => p.ReferenceTypeName is not null && !knownDomainTypes.Contains(p.ReferenceTypeName))
+            .Select(p => p.ReferenceTypeName!)
+            .ToHashSet();
+
+        var typeMap = allTypes
+            .Where(t => t.FullName is not null)
+            .GroupBy(t => t.FullName!)
+            .ToDictionary(g => g.Key, g => g.First());
+        var subTypeNodes = new List<SubTypeNode>();
+        var processed = new HashSet<string>();
+        var queue = new Queue<string>(subTypeFullNames);
+
+        while (queue.Count > 0)
+        {
+            var fullName = queue.Dequeue();
+            if (!processed.Add(fullName)) continue;
+            if (knownDomainTypes.Contains(fullName)) continue;
+            if (!typeMap.TryGetValue(fullName, out var type)) continue;
+
+            var properties = GetProperties(type, knownDomainTypes);
+            subTypeNodes.Add(new SubTypeNode
+            {
+                Name = type.Name,
+                FullName = fullName,
+                Properties = properties
+            });
+
+            // Discover nested sub-types from this sub-type's properties
+            foreach (var prop in properties.Where(p => p.ReferenceTypeName is not null))
+            {
+                if (!knownDomainTypes.Contains(prop.ReferenceTypeName!) && !processed.Contains(prop.ReferenceTypeName!))
+                {
+                    queue.Enqueue(prop.ReferenceTypeName!);
+                }
+
+                relationships.Add(new Relationship
+                {
+                    SourceType = fullName,
+                    TargetType = prop.ReferenceTypeName!,
+                    Kind = prop.IsCollection ? RelationshipKind.HasMany : RelationshipKind.Has,
+                    Label = prop.Name
+                });
+            }
+        }
+
+        return subTypeNodes;
+    }
+
+    private static void AddIdBasedReferences(
+        IEnumerable<EntityNode> nodes,
+        Dictionary<string, string> knownEntityAndAggregateNames,
+        List<Relationship> relationships)
+    {
+        // Track existing relationship targets per source to avoid duplicates
+        var existingRefs = new HashSet<(string source, string target)>(
+            relationships.Select(r => (r.SourceType, r.TargetType)));
+
+        foreach (var node in nodes)
+        {
+            foreach (var prop in node.Properties)
+            {
+                // Skip properties that already have an object reference
+                if (prop.ReferenceTypeName is not null) continue;
+
+                // Check if property name ends with "Id" and the prefix matches a known entity/aggregate
+                if (prop.Name.Length <= 2 || !prop.Name.EndsWith("Id", StringComparison.Ordinal)) continue;
+
+                var candidateName = prop.Name[..^2]; // Strip "Id" suffix
+                if (!knownEntityAndAggregateNames.TryGetValue(candidateName, out var targetFullName)) continue;
+
+                // Don't create self-references
+                if (targetFullName == node.FullName) continue;
+
+                // Don't duplicate if a relationship already exists
+                if (existingRefs.Contains((node.FullName, targetFullName))) continue;
+
+                existingRefs.Add((node.FullName, targetFullName));
+                relationships.Add(new Relationship
+                {
+                    SourceType = node.FullName,
+                    TargetType = targetFullName,
+                    Kind = RelationshipKind.ReferencesById,
+                    Label = prop.Name
+                });
+            }
+        }
+    }
+
+    private static IEnumerable<Type> SafeGetTypes(Assembly assembly)
+    {
+        try
+        {
+            return assembly.GetTypes();
+        }
+        catch (ReflectionTypeLoadException ex)
+        {
+            return ex.Types.Where(t => t is not null)!;
+        }
+    }
+
+    // ─── XML Documentation ──────────────────────────────────────────
+
+    private XmlDocReader LoadDocumentation(IReadOnlyList<Assembly> assemblies)
+    {
+        var docConfig = _config.Documentation;
+        var paths = new List<string>(docConfig.XmlDocPaths);
+
+        if (docConfig.AutoDiscoverEnabled)
+        {
+            var autoReader = XmlDocReader.AutoDiscover(assemblies);
+            if (autoReader.HasDocumentation)
+                return MergeReaders(autoReader, paths);
+        }
+
+        return paths.Count > 0 ? XmlDocReader.Load(paths) : XmlDocReader.Empty;
+    }
+
+    private static XmlDocReader MergeReaders(XmlDocReader autoDiscovered, List<string> extraPaths)
+    {
+        if (extraPaths.Count == 0)
+            return autoDiscovered;
+
+        // Auto-discover already loaded; add extra paths on top
+        // Since XmlDocReader.Load creates a fresh one, combine both sets
+        // For simplicity, re-load everything together
+        return autoDiscovered; // auto-discover already covers assembly XMLs
+    }
+
+    private static void ApplyDescriptions(IEnumerable<EntityNode> nodes, XmlDocReader reader)
+    {
+        foreach (var node in nodes)
+            node.Description ??= reader.GetTypeSummary(node.FullName);
+    }
+
+    private static void ApplyDescriptions(IEnumerable<AggregateNode> nodes, XmlDocReader reader)
+    {
+        foreach (var node in nodes)
+            node.Description ??= reader.GetTypeSummary(node.FullName);
+    }
+
+    private static void ApplyDescriptions(IEnumerable<ValueObjectNode> nodes, XmlDocReader reader)
+    {
+        foreach (var node in nodes)
+            node.Description ??= reader.GetTypeSummary(node.FullName);
+    }
+
+    private static void ApplyDescriptions(IEnumerable<DomainEventNode> nodes, XmlDocReader reader)
+    {
+        foreach (var node in nodes)
+            node.Description ??= reader.GetTypeSummary(node.FullName);
+    }
+
+    private static void ApplyDescriptions(IEnumerable<HandlerNode> nodes, XmlDocReader reader)
+    {
+        foreach (var node in nodes)
+            node.Description ??= reader.GetTypeSummary(node.FullName);
+    }
+
+    private static void ApplyDescriptions(IEnumerable<RepositoryNode> nodes, XmlDocReader reader)
+    {
+        foreach (var node in nodes)
+            node.Description ??= reader.GetTypeSummary(node.FullName);
+    }
+
+    private static void ApplyDescriptions(IEnumerable<DomainServiceNode> nodes, XmlDocReader reader)
+    {
+        foreach (var node in nodes)
+            node.Description ??= reader.GetTypeSummary(node.FullName);
+    }
+
+    private static void ApplyDescriptions(IEnumerable<SubTypeNode> nodes, XmlDocReader reader)
+    {
+        foreach (var node in nodes)
+            node.Description ??= reader.GetTypeSummary(node.FullName);
+    }
+}

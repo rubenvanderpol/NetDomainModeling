@@ -1,0 +1,58 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>DomainModeling.Tests</name>
+    </assembly>
+    <members>
+        <member name="T:DomainModeling.Tests.SampleDomain.Order">
+            <summary>
+            Represents a customer order in the sales domain.
+            </summary>
+        </member>
+        <member name="T:DomainModeling.Tests.SampleDomain.Customer">
+            <summary>
+            A customer who can place orders.
+            </summary>
+        </member>
+        <member name="T:DomainModeling.Tests.SampleDomain.OrderLine">
+            <summary>
+            A single line item within an order.
+            </summary>
+        </member>
+        <member name="T:DomainModeling.Tests.SampleDomain.Address">
+            <summary>
+            A physical mailing address.
+            </summary>
+        </member>
+        <member name="T:DomainModeling.Tests.SampleDomain.Money">
+            <summary>
+            Represents a monetary amount with currency.
+            </summary>
+        </member>
+        <member name="T:DomainModeling.Tests.SampleDomain.OrderPlacedEvent">
+            <summary>
+            Raised when an order is placed by a customer.
+            </summary>
+        </member>
+        <member name="T:DomainModeling.Tests.SampleDomain.OrderShippedEvent">
+            <summary>
+            Raised when an order has shipped.
+            </summary>
+        </member>
+        <member name="T:DomainModeling.Tests.SampleDomain.CustomerCreatedEvent">
+            <summary>
+            Raised when a new customer registers.
+            </summary>
+        </member>
+        <member name="T:DomainModeling.Tests.SampleDomain.OrderPlacedHandler">
+            <summary>
+            Processes order-placed events for downstream fulfillment.
+            </summary>
+        </member>
+        <member name="T:DomainModeling.Tests.SampleDomain.OrderRepository">
+            <summary>
+            Persists and retrieves orders.
+            </summary>
+        </member>
+    </members>
+</doc>
