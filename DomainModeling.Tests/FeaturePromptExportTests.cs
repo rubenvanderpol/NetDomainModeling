@@ -45,7 +45,7 @@ public class FeaturePromptExportTests
                         {
                             SourceType = "Product",
                             TargetType = "ProductVariant",
-                            Kind = RelationshipKind.Composition,
+                            Kind = RelationshipKind.Contains,
                             Label = "contains"
                         }
                     ]
@@ -65,7 +65,7 @@ public class FeaturePromptExportTests
         prompt.Should().Contain("### Command Handlers");
         prompt.Should().Contain("- Command Handler: CreateProductHandler");
         prompt.Should().Contain("### Relationships");
-        prompt.Should().Contain("- Product --[Composition: contains]--> ProductVariant");
+        prompt.Should().Contain("- Product --[Contains: contains]--> ProductVariant");
     }
 
     private static FeatureExportReflectionView GetSingleFeatureExportRegistration(DomainModelOptions options)
