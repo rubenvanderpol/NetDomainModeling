@@ -110,6 +110,9 @@ app.MapDomainModel(domainGraph, configure: opts =>
         }
         return string.Join(Environment.NewLine, lines);
     });
+
+    opts.AddFeaturePromptExport(additionalInstructions:
+        "Return implementation as production-ready C# code with tests.");
 });
 
 app.MapGet("/", () => Results.Redirect("/domain-model"));

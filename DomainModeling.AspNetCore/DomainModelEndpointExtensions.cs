@@ -101,6 +101,98 @@ public sealed class DomainModelOptions
         FeatureExports.Add(new FeatureExportRegistration(name, fileExtension.TrimStart('.'), builder));
         return this;
     }
+
+    /// <summary>
+    /// Registers a built-in feature export that generates an AI-ready implementation prompt.
+    /// <para>
+    /// This is a convenience wrapper around <see cref="AddFeatureExport(string,string,Func{FeatureGraph,string})"/>.
+    /// </para>
+    /// </summary>
+    /// <param name="name">Display name shown in the UI. Defaults to <c>Prompt</c>.</param>
+    /// <param name="fileExtension">File extension for the download (without leading dot). Defaults to <c>md</c>.</param>
+    /// <param name="additionalInstructions">Optional extra instructions appended near the top of the generated prompt.</param>
+    public DomainModelOptions AddFeaturePromptExport(
+        string name = "Prompt",
+        string fileExtension = "md",
+        string? additionalInstructions = null)
+    {
+        return AddFeatureExport(
+            name,
+            fileExtension,
+            graph => BuildFeaturePrompt(graph, additionalInstructions));
+    }
+
+    private static string BuildFeaturePrompt(FeatureGraph graph, string? additionalInstructions)
+    {
+        var lines = new List<string>
+        {
+            "You are an experienced software engineer working in a Domain-Driven Design (DDD) codebase.",
+            "Implement the feature described below and keep the implementation aligned with the existing domain model.",
+            "",
+            "## Feature Goal",
+            "Create or update code so the feature behavior matches the model details from this export.",
+        };
+
+        if (!string.IsNullOrWhiteSpace(additionalInstructions))
+        {
+            lines.Add("");
+            lines.Add("## Additional Instructions");
+            lines.Add(additionalInstructions.Trim());
+        }
+
+        foreach (var context in graph.BoundedContexts)
+        {
+            lines.Add("");
+            lines.Add($"## Bounded Context: {context.Name}");
+            AppendTypeLines(lines, "Aggregates", context.Aggregates.Select(a =>
+                BuildTypeLine("Aggregate", a.Name, a.Alias, a.Description, a.IsCustom)));
+            AppendTypeLines(lines, "Entities", context.Entities.Select(e =>
+                BuildTypeLine("Entity", e.Name, e.Alias, e.Description, e.IsCustom)));
+            AppendTypeLines(lines, "Value Objects", context.ValueObjects.Select(v =>
+                BuildTypeLine("Value Object", v.Name, v.Alias, v.Description, v.IsCustom)));
+            AppendTypeLines(lines, "Domain Events", context.DomainEvents.Select(ev =>
+                BuildTypeLine("Domain Event", ev.Name, ev.Alias, ev.Description, ev.IsCustom)));
+            AppendTypeLines(lines, "Integration Events", context.IntegrationEvents.Select(ev =>
+                BuildTypeLine("Integration Event", ev.Name, ev.Alias, ev.Description, ev.IsCustom)));
+            AppendTypeLines(lines, "Command Handlers", context.CommandHandlers.Select(h =>
+                BuildTypeLine("Command Handler", h.Name, h.Alias, h.Description, h.IsCustom)));
+            AppendTypeLines(lines, "Event Handlers", context.EventHandlers.Select(h =>
+                BuildTypeLine("Event Handler", h.Name, h.Alias, h.Description, h.IsCustom)));
+            AppendTypeLines(lines, "Domain Services", context.DomainServices.Select(s =>
+                BuildTypeLine("Domain Service", s.Name, s.Alias, s.Description, s.IsCustom)));
+            AppendTypeLines(lines, "Repositories", context.Repositories.Select(r =>
+                BuildTypeLine("Repository", r.Name, r.Alias, r.Description, r.IsCustom)));
+            AppendTypeLines(lines, "Relationships", context.Relationships.Select(r =>
+                $"- {r.SourceType} --[{r.Kind}{(string.IsNullOrWhiteSpace(r.Label) ? "" : $": {r.Label}")}]--> {r.TargetType}"));
+        }
+
+        lines.Add("");
+        lines.Add("## Implementation Notes");
+        lines.Add("- Prefer existing naming, layering, and architectural patterns in the repository.");
+        lines.Add("- Keep aggregate invariants and event flows consistent with the model.");
+        lines.Add("- If a type is marked `[custom]`, treat it as feature-specific and include it in the implementation.");
+
+        return string.Join(Environment.NewLine, lines);
+    }
+
+    private static void AppendTypeLines(List<string> lines, string title, IEnumerable<string> entries)
+    {
+        var items = entries.Where(e => !string.IsNullOrWhiteSpace(e)).ToArray();
+        if (items.Length == 0)
+            return;
+
+        lines.Add("");
+        lines.Add($"### {title}");
+        lines.AddRange(items);
+    }
+
+    private static string BuildTypeLine(string kind, string name, string? alias, string? description, bool isCustom)
+    {
+        var aliasPart = string.IsNullOrWhiteSpace(alias) ? "" : $" (alias: {alias})";
+        var customPart = isCustom ? " [custom]" : "";
+        var descriptionPart = string.IsNullOrWhiteSpace(description) ? "" : $" — {description}";
+        return $"- {kind}: {name}{aliasPart}{customPart}{descriptionPart}";
+    }
 }
 
 /// <summary>
