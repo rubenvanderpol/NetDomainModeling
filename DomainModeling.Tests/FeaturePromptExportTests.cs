@@ -2,6 +2,7 @@ using System.Reflection;
 using DomainModeling.AspNetCore;
 using DomainModeling.Graph;
 using FluentAssertions;
+using Xunit;
 
 namespace DomainModeling.Tests;
 
