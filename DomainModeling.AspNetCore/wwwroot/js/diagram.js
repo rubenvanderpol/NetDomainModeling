@@ -388,14 +388,24 @@ function renderDiagramKindFilters() {
 
 function refreshDiagramKindFilters() {
   const el = document.getElementById('diagramKindFilterWrap');
-  const wasVisible = !!document.getElementById('diagramKindFilterMenu')?.classList.contains('visible');
+  const prevMenu = document.getElementById('diagramKindFilterMenu');
+  const prevTrigger = document.getElementById('diagramKindFilterTrigger');
+  const wasVisible = !!prevMenu?.classList.contains('visible');
+  const wasOpen = !!prevTrigger?.classList.contains('open');
   // #region agent log
-  writeDiagramDebugLog('B', 'diagram.js:refreshDiagramKindFilters', 'about to rerender kind filter wrapper', { hasWrapper: !!el, wasVisible });
+  writeDiagramDebugLog('B', 'diagram.js:refreshDiagramKindFilters', 'about to rerender kind filter wrapper', { hasWrapper: !!el, wasVisible, wasOpen });
   // #endregion
   if (el) el.innerHTML = renderDiagramKindFilters();
+  if (wasVisible || wasOpen) {
+    const nextMenu = document.getElementById('diagramKindFilterMenu');
+    const nextTrigger = document.getElementById('diagramKindFilterTrigger');
+    if (nextMenu) nextMenu.classList.add('visible');
+    if (nextTrigger) nextTrigger.classList.add('open');
+  }
   const isVisible = !!document.getElementById('diagramKindFilterMenu')?.classList.contains('visible');
+  const isOpen = !!document.getElementById('diagramKindFilterTrigger')?.classList.contains('open');
   // #region agent log
-  writeDiagramDebugLog('B', 'diagram.js:refreshDiagramKindFilters', 'finished rerender kind filter wrapper', { hasWrapper: !!el, isVisible });
+  writeDiagramDebugLog('B', 'diagram.js:refreshDiagramKindFilters', 'finished rerender kind filter wrapper', { hasWrapper: !!el, isVisible, isOpen });
   // #endregion
   refreshDiagramEdgeFilter();
 }
