@@ -62,6 +62,9 @@ public sealed class EntityNode
     public required string Name { get; init; }
     public required string FullName { get; init; }
 
+    /// <summary>Display name override (alias) set in the feature editor.</summary>
+    public string? Alias { get; set; }
+
     /// <summary>Friendly description from XML documentation comments.</summary>
     public string? Description { get; set; }
 
@@ -84,6 +87,9 @@ public sealed class AggregateNode
 {
     public required string Name { get; init; }
     public required string FullName { get; init; }
+
+    /// <summary>Display name override (alias) set in the feature editor.</summary>
+    public string? Alias { get; set; }
 
     /// <summary>Friendly description from XML documentation comments.</summary>
     public string? Description { get; set; }
@@ -108,6 +114,9 @@ public sealed class ValueObjectNode
     public required string Name { get; init; }
     public required string FullName { get; init; }
 
+    /// <summary>Display name override (alias) set in the feature editor.</summary>
+    public string? Alias { get; set; }
+
     /// <summary>Friendly description from XML documentation comments.</summary>
     public string? Description { get; set; }
 
@@ -127,6 +136,9 @@ public sealed class DomainEventNode
 {
     public required string Name { get; init; }
     public required string FullName { get; init; }
+
+    /// <summary>Display name override (alias) set in the feature editor.</summary>
+    public string? Alias { get; set; }
 
     /// <summary>Friendly description from XML documentation comments.</summary>
     public string? Description { get; set; }
@@ -154,6 +166,9 @@ public sealed class HandlerNode
     public required string Name { get; init; }
     public required string FullName { get; init; }
 
+    /// <summary>Display name override (alias) set in the feature editor.</summary>
+    public string? Alias { get; set; }
+
     /// <summary>Friendly description from XML documentation comments.</summary>
     public string? Description { get; set; }
 
@@ -174,6 +189,9 @@ public sealed class RepositoryNode
 {
     public required string Name { get; init; }
     public required string FullName { get; init; }
+
+    /// <summary>Display name override (alias) set in the feature editor.</summary>
+    public string? Alias { get; set; }
 
     /// <summary>Friendly description from XML documentation comments.</summary>
     public string? Description { get; set; }
@@ -196,6 +214,9 @@ public sealed class DomainServiceNode
     public required string Name { get; init; }
     public required string FullName { get; init; }
 
+    /// <summary>Display name override (alias) set in the feature editor.</summary>
+    public string? Alias { get; set; }
+
     /// <summary>Friendly description from XML documentation comments.</summary>
     public string? Description { get; set; }
 
@@ -214,6 +235,9 @@ public sealed class SubTypeNode
 {
     public required string Name { get; init; }
     public required string FullName { get; init; }
+
+    /// <summary>Display name override (alias) set in the feature editor.</summary>
+    public string? Alias { get; set; }
 
     /// <summary>Friendly description from XML documentation comments.</summary>
     public string? Description { get; set; }

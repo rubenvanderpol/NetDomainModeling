@@ -62,6 +62,7 @@ public sealed class FeatureEntity
 {
     public string Name { get; init; } = "";
     public string FullName { get; init; } = "";
+    public string? Alias { get; init; }
     public string? Description { get; init; }
     public string? Layer { get; init; }
     public bool IsCustom { get; init; }
@@ -72,6 +73,7 @@ public sealed class FeatureEntity
     {
         Name = n.Name,
         FullName = n.FullName,
+        Alias = n.Alias,
         Description = n.Description,
         Layer = n.Layer,
         IsCustom = n.IsCustom,
@@ -84,6 +86,7 @@ public sealed class FeatureAggregate
 {
     public string Name { get; init; } = "";
     public string FullName { get; init; } = "";
+    public string? Alias { get; init; }
     public string? Description { get; init; }
     public string? Layer { get; init; }
     public bool IsCustom { get; init; }
@@ -96,6 +99,7 @@ public sealed class FeatureAggregate
     {
         Name = n.Name,
         FullName = n.FullName,
+        Alias = n.Alias,
         Description = n.Description,
         Layer = n.Layer,
         IsCustom = n.IsCustom,
@@ -110,6 +114,7 @@ public sealed class FeatureValueObject
 {
     public string Name { get; init; } = "";
     public string FullName { get; init; } = "";
+    public string? Alias { get; init; }
     public string? Description { get; init; }
     public string? Layer { get; init; }
     public bool IsCustom { get; init; }
@@ -119,6 +124,7 @@ public sealed class FeatureValueObject
     {
         Name = n.Name,
         FullName = n.FullName,
+        Alias = n.Alias,
         Description = n.Description,
         Layer = n.Layer,
         IsCustom = n.IsCustom,
@@ -130,6 +136,7 @@ public sealed class FeatureDomainEvent
 {
     public string Name { get; init; } = "";
     public string FullName { get; init; } = "";
+    public string? Alias { get; init; }
     public string? Description { get; init; }
     public string? Layer { get; init; }
     public bool IsCustom { get; init; }
@@ -141,6 +148,7 @@ public sealed class FeatureDomainEvent
     {
         Name = n.Name,
         FullName = n.FullName,
+        Alias = n.Alias,
         Description = n.Description,
         Layer = n.Layer,
         IsCustom = n.IsCustom,
@@ -154,6 +162,7 @@ public sealed class FeatureHandler
 {
     public string Name { get; init; } = "";
     public string FullName { get; init; } = "";
+    public string? Alias { get; init; }
     public string? Description { get; init; }
     public string? Layer { get; init; }
     public bool IsCustom { get; init; }
@@ -163,6 +172,7 @@ public sealed class FeatureHandler
     {
         Name = n.Name,
         FullName = n.FullName,
+        Alias = n.Alias,
         Description = n.Description,
         Layer = n.Layer,
         IsCustom = n.IsCustom,
@@ -174,6 +184,7 @@ public sealed class FeatureRepository
 {
     public string Name { get; init; } = "";
     public string FullName { get; init; } = "";
+    public string? Alias { get; init; }
     public string? Description { get; init; }
     public string? Layer { get; init; }
     public bool IsCustom { get; init; }
@@ -183,6 +194,7 @@ public sealed class FeatureRepository
     {
         Name = n.Name,
         FullName = n.FullName,
+        Alias = n.Alias,
         Description = n.Description,
         Layer = n.Layer,
         IsCustom = n.IsCustom,
@@ -194,6 +206,7 @@ public sealed class FeatureDomainService
 {
     public string Name { get; init; } = "";
     public string FullName { get; init; } = "";
+    public string? Alias { get; init; }
     public string? Description { get; init; }
     public string? Layer { get; init; }
     public bool IsCustom { get; init; }
@@ -202,6 +215,7 @@ public sealed class FeatureDomainService
     {
         Name = n.Name,
         FullName = n.FullName,
+        Alias = n.Alias,
         Description = n.Description,
         Layer = n.Layer,
         IsCustom = n.IsCustom,
@@ -212,6 +226,7 @@ public sealed class FeatureSubType
 {
     public string Name { get; init; } = "";
     public string FullName { get; init; } = "";
+    public string? Alias { get; init; }
     public string? Description { get; init; }
     public string? Layer { get; init; }
     public List<FeatureProperty> Properties { get; init; } = [];
@@ -220,6 +235,7 @@ public sealed class FeatureSubType
     {
         Name = n.Name,
         FullName = n.FullName,
+        Alias = n.Alias,
         Description = n.Description,
         Layer = n.Layer,
         Properties = n.Properties.Select(FeatureProperty.FromGraphProperty).ToList(),

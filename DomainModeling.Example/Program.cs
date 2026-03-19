@@ -71,17 +71,41 @@ app.MapDomainModel(domainGraph, configure: opts =>
         {
             lines.Add($"# {ctx.Name}");
             foreach (var a in ctx.Aggregates)
-                lines.Add($"- **Aggregate**: {a.Name}{(a.IsCustom ? " *(new)*" : "")}");
+            {
+                var displayName = !string.IsNullOrWhiteSpace(a.Alias) ? a.Alias : a.Name;
+                var desc = !string.IsNullOrWhiteSpace(a.Description) ? $" — {a.Description}" : "";
+                lines.Add($"- **Aggregate**: {displayName}{desc}{(a.IsCustom ? " *(new)*" : "")}");
+            }
             foreach (var e in ctx.Entities)
-                lines.Add($"- **Entity**: {e.Name}{(e.IsCustom ? " *(new)*" : "")}");
+            {
+                var displayName = !string.IsNullOrWhiteSpace(e.Alias) ? e.Alias : e.Name;
+                var desc = !string.IsNullOrWhiteSpace(e.Description) ? $" — {e.Description}" : "";
+                lines.Add($"- **Entity**: {displayName}{desc}{(e.IsCustom ? " *(new)*" : "")}");
+            }
             foreach (var v in ctx.ValueObjects)
-                lines.Add($"- **Value Object**: {v.Name}{(v.IsCustom ? " *(new)*" : "")}");
+            {
+                var displayName = !string.IsNullOrWhiteSpace(v.Alias) ? v.Alias : v.Name;
+                var desc = !string.IsNullOrWhiteSpace(v.Description) ? $" — {v.Description}" : "";
+                lines.Add($"- **Value Object**: {displayName}{desc}{(v.IsCustom ? " *(new)*" : "")}");
+            }
             foreach (var ev in ctx.DomainEvents)
-                lines.Add($"- **Event**: {ev.Name}{(ev.IsCustom ? " *(new)*" : "")}");
+            {
+                var displayName = !string.IsNullOrWhiteSpace(ev.Alias) ? ev.Alias : ev.Name;
+                var desc = !string.IsNullOrWhiteSpace(ev.Description) ? $" — {ev.Description}" : "";
+                lines.Add($"- **Event**: {displayName}{desc}{(ev.IsCustom ? " *(new)*" : "")}");
+            }
             foreach (var h in ctx.EventHandlers)
-                lines.Add($"- **Handler**: {h.Name}{(h.IsCustom ? " *(new)*" : "")}");
+            {
+                var displayName = !string.IsNullOrWhiteSpace(h.Alias) ? h.Alias : h.Name;
+                var desc = !string.IsNullOrWhiteSpace(h.Description) ? $" — {h.Description}" : "";
+                lines.Add($"- **Handler**: {displayName}{desc}{(h.IsCustom ? " *(new)*" : "")}");
+            }
             foreach (var h in ctx.CommandHandlers)
-                lines.Add($"- **Handler**: {h.Name}{(h.IsCustom ? " *(new)*" : "")}");
+            {
+                var displayName = !string.IsNullOrWhiteSpace(h.Alias) ? h.Alias : h.Name;
+                var desc = !string.IsNullOrWhiteSpace(h.Description) ? $" — {h.Description}" : "";
+                lines.Add($"- **Handler**: {displayName}{desc}{(h.IsCustom ? " *(new)*" : "")}");
+            }
             lines.Add("");
         }
         return string.Join(Environment.NewLine, lines);

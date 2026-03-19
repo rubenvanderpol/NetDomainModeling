@@ -97,3 +97,7 @@ node_modules/
 # dotenv environment variables file
 .env
 .env.*
+
+# Domain model explorer / feature editor persisted files (example app working directory)
+DomainModeling.Example/metadata/
+DomainModeling.Example/features/
