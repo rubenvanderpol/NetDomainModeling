@@ -295,7 +295,7 @@ public class DDDBuilderTests
         json.Should().Contain("\"boundedContexts\"");
         json.Should().Contain("\"aggregates\"");
         json.Should().Contain("\"relationships\"");
-        json.Should().Contain("\"emits\"");
+        json.Should().Contain("\"kind\": \"Emits\"");
     }
 
     [Fact]
