@@ -68,6 +68,7 @@ public sealed class FeatureEntity
     public bool IsCustom { get; init; }
     public List<FeatureProperty> Properties { get; init; } = [];
     public List<string> EmittedEvents { get; init; } = [];
+    public List<FeatureEventEmission> EventEmissions { get; init; } = [];
 
     internal static FeatureEntity FromEntityNode(EntityNode n) => new()
     {
@@ -79,6 +80,7 @@ public sealed class FeatureEntity
         IsCustom = n.IsCustom,
         Properties = n.Properties.Select(FeatureProperty.FromGraphProperty).ToList(),
         EmittedEvents = [..n.EmittedEvents],
+        EventEmissions = n.EventEmissions.Select(FeatureEventEmission.FromGraphEmission).ToList(),
     };
 }
 
@@ -94,6 +96,7 @@ public sealed class FeatureAggregate
     public List<FeatureMethod> Methods { get; init; } = [];
     public List<string> ChildEntities { get; init; } = [];
     public List<string> EmittedEvents { get; init; } = [];
+    public List<FeatureEventEmission> EventEmissions { get; init; } = [];
 
     internal static FeatureAggregate FromAggregateNode(AggregateNode n) => new()
     {
@@ -107,6 +110,19 @@ public sealed class FeatureAggregate
         Methods = n.Methods.Select(FeatureMethod.FromGraphMethod).ToList(),
         ChildEntities = [..n.ChildEntities],
         EmittedEvents = [..n.EmittedEvents],
+        EventEmissions = n.EventEmissions.Select(FeatureEventEmission.FromGraphEmission).ToList(),
+    };
+}
+
+public sealed class FeatureEventEmission
+{
+    public string EventType { get; init; } = "";
+    public string MethodName { get; init; } = "";
+
+    internal static FeatureEventEmission FromGraphEmission(EventEmissionInfo e) => new()
+    {
+        EventType = e.EventType,
+        MethodName = e.MethodName,
     };
 }
 
