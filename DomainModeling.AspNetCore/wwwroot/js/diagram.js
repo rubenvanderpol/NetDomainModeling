@@ -385,6 +385,31 @@ function refreshDiagramKindFilters() {
   refreshDiagramEdgeFilter();
 }
 
+function syncDiagramKindFilterUi() {
+  if (!dgState) return;
+  const trigger = document.getElementById('diagramKindFilterTrigger');
+  const menu = document.getElementById('diagramKindFilterMenu');
+  if (!trigger || !menu) {
+    refreshDiagramKindFilters();
+    return;
+  }
+
+  const presentKinds = new Set(dgState.allNodes.map(n => n.kind));
+  const visibleKinds = [...presentKinds].filter(kind => !dgState.hiddenKinds.has(kind)).length;
+  const badge = trigger.querySelector('.rel-hidden-count');
+  if (badge) badge.textContent = `${visibleKinds}/${presentKinds.size}`;
+
+  const rows = menu.querySelectorAll('[data-node-kind]');
+  for (const row of rows) {
+    const kind = row.getAttribute('data-node-kind');
+    if (!kind) continue;
+    const visible = !dgState.hiddenKinds.has(kind);
+    row.classList.toggle('checked', visible);
+    const check = row.querySelector('.rel-check');
+    if (check) check.textContent = visible ? '✓' : '';
+  }
+}
+
 // ── Edge-kind filter dropdown ────────────────────────
 function renderDiagramEdgeFilter() {
   if (!dgState) return '';
@@ -833,7 +858,7 @@ export function diagramToggleKind(kind) {
   saveHiddenKinds(dgState.contextName, dgState.hiddenKinds);
   applyDiagramVisibility();
   renderSvg();
-  refreshDiagramKindFilters();
+  syncDiagramKindFilterUi();
 }
 
 function setAllKindVisibility(visible) {
@@ -849,7 +874,7 @@ function setAllKindVisibility(visible) {
   saveHiddenKinds(dgState.contextName, dgState.hiddenKinds);
   applyDiagramVisibility();
   renderSvg();
-  refreshDiagramKindFilters();
+  syncDiagramKindFilterUi();
 }
 
 export function diagramShowAllKinds() {
