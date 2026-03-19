@@ -140,14 +140,6 @@ let dgState = null;
 let showAliases = false;
 let showLayers = false;
 
-function pushDiagramDebugLog(hypothesisId, location, message, data) {
-  try {
-    const evt = { hypothesisId, location, message, data, timestamp: Date.now() };
-    window.__diagramDebugEvents = window.__diagramDebugEvents || [];
-    window.__diagramDebugEvents.push(evt);
-  } catch { /* ignore */ }
-}
-
 // ── Node sizing constants ────────────────────────────
 const NODE_W = 200;
 const PROP_H = 17;
@@ -393,9 +385,6 @@ function refreshDiagramKindFilters() {
   const prevTrigger = document.getElementById('diagramKindFilterTrigger');
   const wasVisible = !!prevMenu?.classList.contains('visible');
   const wasOpen = !!prevTrigger?.classList.contains('open');
-  // #region agent log
-  pushDiagramDebugLog('B', 'diagram.js:refreshDiagramKindFilters', 'refresh kind filters entry', { wasVisible, wasOpen, hasWrap: !!el });
-  // #endregion
   if (el) el.innerHTML = renderDiagramKindFilters();
   if (wasVisible || wasOpen) {
     const nextMenu = document.getElementById('diagramKindFilterMenu');
@@ -403,12 +392,6 @@ function refreshDiagramKindFilters() {
     if (nextMenu) nextMenu.classList.add('visible');
     if (nextTrigger) nextTrigger.classList.add('open');
   }
-  // #region agent log
-  pushDiagramDebugLog('B', 'diagram.js:refreshDiagramKindFilters', 'refresh kind filters exit', {
-    isVisible: !!document.getElementById('diagramKindFilterMenu')?.classList.contains('visible'),
-    isOpen: !!document.getElementById('diagramKindFilterTrigger')?.classList.contains('open')
-  });
-  // #endregion
   refreshDiagramEdgeFilter();
 }
 
@@ -416,14 +399,6 @@ function syncDiagramKindFilterUi() {
   if (!dgState) return;
   const trigger = document.getElementById('diagramKindFilterTrigger');
   const menu = document.getElementById('diagramKindFilterMenu');
-  // #region agent log
-  pushDiagramDebugLog('B', 'diagram.js:syncDiagramKindFilterUi', 'sync kind ui entry', {
-    hasTrigger: !!trigger,
-    hasMenu: !!menu,
-    menuVisible: !!menu?.classList.contains('visible'),
-    triggerOpen: !!trigger?.classList.contains('open')
-  });
-  // #endregion
   if (!trigger || !menu) {
     refreshDiagramKindFilters();
     return;
@@ -892,14 +867,6 @@ export function diagramToggleKind(eventOrKind, maybeKind) {
   }
   if (!dgState) return;
   if (typeof kind !== 'string') return;
-  // #region agent log
-  pushDiagramDebugLog('C', 'diagram.js:diagramToggleKind', 'toggle kind entry', {
-    kind,
-    hiddenBefore: dgState.hiddenKinds.has(kind),
-    menuVisibleBefore: !!document.getElementById('diagramKindFilterMenu')?.classList.contains('visible'),
-    triggerOpenBefore: !!document.getElementById('diagramKindFilterTrigger')?.classList.contains('open')
-  });
-  // #endregion
   if (dgState.hiddenKinds.has(kind)) {
     dgState.hiddenKinds.delete(kind);
   } else {
@@ -909,14 +876,6 @@ export function diagramToggleKind(eventOrKind, maybeKind) {
   applyDiagramVisibility();
   renderSvg();
   syncDiagramKindFilterUi();
-  // #region agent log
-  pushDiagramDebugLog('C', 'diagram.js:diagramToggleKind', 'toggle kind exit', {
-    kind,
-    hiddenAfter: dgState.hiddenKinds.has(kind),
-    menuVisibleAfter: !!document.getElementById('diagramKindFilterMenu')?.classList.contains('visible'),
-    triggerOpenAfter: !!document.getElementById('diagramKindFilterTrigger')?.classList.contains('open')
-  });
-  // #endregion
 }
 
 function setAllKindVisibility(visible) {
@@ -978,39 +937,13 @@ function toggleDropdown(menuId, triggerId) {
   const menu = document.getElementById(menuId);
   const trigger = document.getElementById(triggerId);
   if (!menu) return;
-  // #region agent log
-  pushDiagramDebugLog('A', 'diagram.js:toggleDropdown', 'toggle dropdown entry', {
-    menuId,
-    menuVisibleBefore: menu.classList.contains('visible'),
-    triggerOpenBefore: !!trigger?.classList.contains('open')
-  });
-  // #endregion
   const open = menu.classList.toggle('visible');
   if (trigger) trigger.classList.toggle('open', open);
-  // #region agent log
-  pushDiagramDebugLog('A', 'diagram.js:toggleDropdown', 'toggle dropdown toggled', {
-    menuId,
-    open,
-    menuVisibleAfterToggle: menu.classList.contains('visible'),
-    triggerOpenAfterToggle: !!trigger?.classList.contains('open')
-  });
-  // #endregion
   if (!open) return;
 
   const close = (ev) => {
     const clickedTrigger = trigger && (ev.target === trigger || trigger.contains(ev.target));
     const containsTarget = menu.contains(ev.target);
-    // #region agent log
-    pushDiagramDebugLog('A', 'diagram.js:toggleDropdown.close', 'toggle dropdown close handler', {
-      menuId,
-      containsTarget,
-      clickedTrigger: !!clickedTrigger,
-      targetTag: ev.target && ev.target.tagName ? ev.target.tagName : null,
-      targetClass: ev.target && ev.target.className ? ev.target.className : null,
-      menuVisibleAtHandler: menu.classList.contains('visible'),
-      triggerOpenAtHandler: !!trigger?.classList.contains('open')
-    });
-    // #endregion
     if (!containsTarget && !clickedTrigger) {
       menu.classList.remove('visible');
       if (trigger) trigger.classList.remove('open');
