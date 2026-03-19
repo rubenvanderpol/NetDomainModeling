@@ -3,7 +3,7 @@
  */
 import { esc, escAttr, shortName, ALL_SECTIONS, SECTION_META } from './helpers.js';
 import { renderDetailView } from './views.js';
-import { renderDiagramView, initDiagram, diagramZoom, diagramFit, diagramResetLayout, diagramToggleKind, diagramShowAll, diagramDownloadSvg, diagramToggleAliases, diagramToggleLayers, diagramToggleEdgeKind, diagramToggleEdgeFilter } from './diagram.js';
+import { renderDiagramView, initDiagram, diagramZoom, diagramFit, diagramResetLayout, diagramToggleKind, diagramShowAll, diagramDownloadSvg, diagramToggleAliases, diagramToggleLayers, diagramToggleEdgeKind, diagramToggleEdgeFilter, diagramToggleKindFilter, diagramShowAllKinds, diagramHideAllKinds } from './diagram.js';
 
 const API_URL = window.__config?.apiUrl || '/domain-model/json';
 const BASE_URL = API_URL.replace(/\/json$/, '');
@@ -397,6 +397,9 @@ window.__diagram = {
   toggleLayers: diagramToggleLayers,
   toggleEdgeKind: diagramToggleEdgeKind,
   toggleEdgeFilter: diagramToggleEdgeFilter,
+  toggleKindFilter: diagramToggleKindFilter,
+  showAllKinds: diagramShowAllKinds,
+  hideAllKinds: diagramHideAllKinds,
 };
 window.__metadata = metadata;
 
