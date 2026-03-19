@@ -184,6 +184,59 @@ function nodeHeight(n) {
   return h + PAD;
 }
 
+function parseEmitsMethodFromLabel(label) {
+  if (!label || typeof label !== 'string') return null;
+  const m = label.match(/^emits via ([^(]+)\(\)$/i);
+  return m && m[1] ? m[1].trim() : null;
+}
+
+function methodNameFromSignature(signature) {
+  if (!signature || typeof signature !== 'string') return '';
+  const idx = signature.indexOf('(');
+  return (idx >= 0 ? signature.slice(0, idx) : signature).trim();
+}
+
+function methodTextY(node, methodName) {
+  if (!node || !Array.isArray(node.methods) || node.methods.length === 0) return null;
+  if (!methodName) return null;
+
+  let ty = 20;
+  ty += NAME_PAD;
+  ty += wrapName(diagramDisplayName(node)).length * NAME_LINE_H;
+
+  if (node.props.length > 0) {
+    ty += 8;
+    ty += 4;
+    ty += node.props.length * PROP_H;
+  }
+
+  ty += 8;
+  ty += 4;
+
+  for (const m of node.methods) {
+    ty += PROP_H;
+    if (methodNameFromSignature(m) === methodName) {
+      return ty;
+    }
+  }
+
+  return null;
+}
+
+function sourceAnchorForEdge(src, tgt, edge) {
+  if (!src || !tgt || !edge) return null;
+  if (edge.kind !== 'Emits') return null;
+  const methodName = parseEmitsMethodFromLabel(edge.label || '');
+  if (!methodName) return null;
+  const methodYLocal = methodTextY(src, methodName);
+  if (methodYLocal == null) return null;
+
+  const anchorCy = src.y + methodYLocal;
+  const tgtCx = tgt.x + tgt.w / 2;
+  const tgtCy = tgt.y + tgt.h / 2;
+  return rectEdge(src.x + src.w / 2, anchorCy, src.w + 8, src.h + 8, tgtCx, tgtCy);
+}
+
 try {
   showLayers = localStorage.getItem(SHOW_LAYERS_KEY) === 'true';
 } catch { /* ignore */ }
@@ -582,7 +635,7 @@ function renderSvg() {
     if (!src || !tgt) continue;
     const srcCx = src.x + src.w / 2, srcCy = src.y + src.h / 2;
     const tgtCx = tgt.x + tgt.w / 2, tgtCy = tgt.y + tgt.h / 2;
-    const p1 = rectEdge(srcCx, srcCy, src.w + 8, src.h + 8, tgtCx, tgtCy);
+    const p1 = sourceAnchorForEdge(src, tgt, e) || rectEdge(srcCx, srcCy, src.w + 8, src.h + 8, tgtCx, tgtCy);
     const p2 = rectEdge(tgtCx, tgtCy, tgt.w + 8, tgt.h + 8, srcCx, srcCy);
     const color = edgeColors[e.kind] || '#5c6070';
     const dashed = (e.kind === 'Emits' || e.kind === 'Handles' || e.kind === 'Publishes' || e.kind === 'References' || e.kind === 'ReferencesById') ? ' stroke-dasharray="6,4"' : '';
