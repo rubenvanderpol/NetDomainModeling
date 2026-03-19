@@ -75,6 +75,11 @@ public sealed class EntityNode
 
     /// <summary>Domain events this entity can raise (detected via methods / fields).</summary>
     public List<string> EmittedEvents { get; init; } = [];
+
+    /// <summary>
+    /// Domain event emissions including which method fired the event.
+    /// </summary>
+    public List<EventEmissionInfo> EventEmissions { get; init; } = [];
 }
 
 /// <summary>
@@ -98,6 +103,16 @@ public sealed class AggregateNode
     public List<MethodInfo> Methods { get; init; } = [];
     public List<string> ChildEntities { get; init; } = [];
     public List<string> EmittedEvents { get; init; } = [];
+    public List<EventEmissionInfo> EventEmissions { get; init; } = [];
+}
+
+/// <summary>
+/// Represents an emitted event and the method that emitted it.
+/// </summary>
+public sealed class EventEmissionInfo
+{
+    public required string EventType { get; init; }
+    public required string MethodName { get; init; }
 }
 
 /// <summary>

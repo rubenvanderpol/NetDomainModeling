@@ -85,27 +85,27 @@ internal sealed class AssemblyScanner
         // Entity / Aggregate → emitted events
         foreach (var entity in entityNodes)
         {
-            foreach (var evt in entity.EmittedEvents)
+            foreach (var emission in entity.EventEmissions)
             {
                 relationships.Add(new Relationship
                 {
                     SourceType = entity.FullName,
-                    TargetType = evt,
+                    TargetType = emission.EventType,
                     Kind = RelationshipKind.Emits,
-                    Label = "emits"
+                    Label = $"emits via {emission.MethodName}()"
                 });
             }
         }
         foreach (var agg in aggregateNodes)
         {
-            foreach (var evt in agg.EmittedEvents)
+            foreach (var emission in agg.EventEmissions)
             {
                 relationships.Add(new Relationship
                 {
                     SourceType = agg.FullName,
-                    TargetType = evt,
+                    TargetType = emission.EventType,
                     Kind = RelationshipKind.Emits,
-                    Label = "emits"
+                    Label = $"emits via {emission.MethodName}()"
                 });
             }
         }
@@ -243,19 +243,22 @@ internal sealed class AssemblyScanner
 
     private static EntityNode BuildEntityNode(Type type, List<Type> eventTypes, HashSet<string> knownDomainTypes, string? layer)
     {
+        var emissions = DetectEventEmissions(type, eventTypes);
         return new EntityNode
         {
             Name = type.Name,
             FullName = type.FullName!,
             Layer = layer,
             Properties = GetProperties(type, knownDomainTypes),
-            EmittedEvents = DetectEmittedEvents(type, eventTypes)
+            EmittedEvents = emissions.Select(e => e.EventType).Distinct().ToList(),
+            EventEmissions = emissions
         };
     }
 
     private static AggregateNode BuildAggregateNode(Type type, List<Type> entityTypes, List<Type> eventTypes, HashSet<string> knownDomainTypes, string? layer)
     {
         var properties = GetProperties(type, knownDomainTypes);
+        var emissions = DetectEventEmissions(type, eventTypes);
 
         // Detect child entities: properties whose type (or collection element type)
         // is a known entity
@@ -274,7 +277,8 @@ internal sealed class AssemblyScanner
             Properties = properties,
             Methods = GetMethods(type),
             ChildEntities = childEntities,
-            EmittedEvents = DetectEmittedEvents(type, eventTypes)
+            EmittedEvents = emissions.Select(e => e.EventType).Distinct().ToList(),
+            EventEmissions = emissions
         };
     }
 
@@ -521,38 +525,47 @@ internal sealed class AssemblyScanner
     }
 
     /// <summary>
-    /// Detect which domain event types an entity/aggregate can emit.
-    /// Uses two strategies:
-    /// 1. IL scanning for <c>newobj</c> instructions that instantiate event types
-    /// 2. Local variable declarations of event types
-    ///
-    /// Also scans compiler-generated nested types (e.g. async state machines)
-    /// because the C# compiler moves the method body of <c>async</c> methods
-    /// into a nested state machine class's <c>MoveNext()</c> method.
+    /// Detects emitted domain events and tracks the method that emitted each one.
     /// </summary>
-    private static List<string> DetectEmittedEvents(Type type, List<Type> eventTypes)
+    private static List<EventEmissionInfo> DetectEventEmissions(Type type, List<Type> eventTypes)
     {
         var eventFullNames = new HashSet<string>(eventTypes.Select(e => e.FullName!));
-        var emitted = new HashSet<string>();
+        var emittedByMethod = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
 
-        ScanTypeMethods(type, eventFullNames, emitted);
+        ScanTypeMethods(type, eventFullNames, emittedByMethod);
 
         // Also scan compiler-generated nested types (async state machines, lambda display classes, etc.)
         foreach (var nested in type.GetNestedTypes(BindingFlags.NonPublic | BindingFlags.Public))
         {
             if (nested.GetCustomAttributes(typeof(System.Runtime.CompilerServices.CompilerGeneratedAttribute), false).Length > 0)
             {
-                ScanTypeMethods(nested, eventFullNames, emitted);
+                ScanTypeMethods(
+                    nested,
+                    eventFullNames,
+                    emittedByMethod,
+                    fallbackMethodName: TryExtractCompilerGeneratedMethodName(nested.Name));
             }
         }
 
-        return emitted.ToList();
+        return emittedByMethod
+            .SelectMany(kvp => kvp.Value.Select(method => new EventEmissionInfo
+            {
+                EventType = kvp.Key,
+                MethodName = method
+            }))
+            .OrderBy(e => e.EventType)
+            .ThenBy(e => e.MethodName)
+            .ToList();
     }
 
     /// <summary>
     /// Scans all methods and constructors of a type for event-related IL patterns.
     /// </summary>
-    private static void ScanTypeMethods(Type type, HashSet<string> eventFullNames, HashSet<string> emitted)
+    private static void ScanTypeMethods(
+        Type type,
+        HashSet<string> eventFullNames,
+        Dictionary<string, HashSet<string>> emittedByMethod,
+        string? fallbackMethodName = null)
     {
         var allMethods = type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly)
             .Cast<MethodBase>()
@@ -560,7 +573,8 @@ internal sealed class AssemblyScanner
 
         foreach (var method in allMethods)
         {
-            ScanMethodBodyForEvents(method, type.Module, eventFullNames, emitted);
+            var sourceMethodName = NormalizeMethodName(method, fallbackMethodName);
+            ScanMethodBodyForEvents(method, type.Module, eventFullNames, emittedByMethod, sourceMethodName);
         }
     }
 
@@ -568,7 +582,12 @@ internal sealed class AssemblyScanner
     /// Scans a method's IL body for <c>newobj</c> (0x73) instructions whose
     /// target constructor belongs to a known event type, and checks local variable types.
     /// </summary>
-    private static void ScanMethodBodyForEvents(MethodBase method, Module module, HashSet<string> eventFullNames, HashSet<string> emitted)
+    private static void ScanMethodBodyForEvents(
+        MethodBase method,
+        Module module,
+        HashSet<string> eventFullNames,
+        Dictionary<string, HashSet<string>> emittedByMethod,
+        string sourceMethodName)
     {
         System.Reflection.MethodBody? body;
         try { body = method.GetMethodBody(); }
@@ -579,7 +598,7 @@ internal sealed class AssemblyScanner
 
         // Check local variable types
         foreach (var local in body.LocalVariables)
-            CheckTypeForEvents(local.LocalType, eventFullNames, emitted);
+            CheckTypeForEvents(local.LocalType, eventFullNames, emittedByMethod, sourceMethodName);
 
         // Scan IL for newobj (0x73) and call/callvirt that might reference event types
         var il = body.GetILAsByteArray();
@@ -608,7 +627,7 @@ internal sealed class AssemblyScanner
             {
                 var resolved = module.ResolveMethod(token);
                 if (resolved?.DeclaringType?.FullName is { } fullName && eventFullNames.Contains(fullName))
-                    emitted.Add(fullName);
+                    AddEventEmission(emittedByMethod, fullName, sourceMethodName);
             }
             catch
             {
@@ -619,19 +638,60 @@ internal sealed class AssemblyScanner
         }
     }
 
-    private static void CheckTypeForEvents(Type type, HashSet<string> eventFullNames, HashSet<string> emitted)
+    private static void CheckTypeForEvents(
+        Type type,
+        HashSet<string> eventFullNames,
+        Dictionary<string, HashSet<string>> emittedByMethod,
+        string sourceMethodName)
     {
         if (type.FullName is not null && eventFullNames.Contains(type.FullName))
         {
-            emitted.Add(type.FullName);
+            AddEventEmission(emittedByMethod, type.FullName, sourceMethodName);
             return;
         }
 
         if (type.IsGenericType)
         {
             foreach (var arg in type.GetGenericArguments())
-                CheckTypeForEvents(arg, eventFullNames, emitted);
+                CheckTypeForEvents(arg, eventFullNames, emittedByMethod, sourceMethodName);
         }
+    }
+
+    private static void AddEventEmission(
+        Dictionary<string, HashSet<string>> emittedByMethod,
+        string eventType,
+        string methodName)
+    {
+        if (!emittedByMethod.TryGetValue(eventType, out var methods))
+        {
+            methods = new HashSet<string>(StringComparer.Ordinal);
+            emittedByMethod[eventType] = methods;
+        }
+
+        methods.Add(methodName);
+    }
+
+    private static string NormalizeMethodName(MethodBase method, string? fallbackMethodName)
+    {
+        var methodName = method.Name;
+        if (methodName == ".ctor")
+            return "ctor";
+        if (methodName == ".cctor")
+            return "cctor";
+        if (methodName == "MoveNext" && !string.IsNullOrWhiteSpace(fallbackMethodName))
+            return fallbackMethodName!;
+        return methodName;
+    }
+
+    private static string? TryExtractCompilerGeneratedMethodName(string generatedTypeName)
+    {
+        var open = generatedTypeName.IndexOf('<');
+        var close = generatedTypeName.IndexOf('>');
+        if (open < 0 || close <= open + 1)
+            return null;
+
+        var methodName = generatedTypeName[(open + 1)..close];
+        return string.IsNullOrWhiteSpace(methodName) ? null : methodName;
     }
 
     private static void CrossReferenceEvents(
@@ -691,11 +751,14 @@ internal sealed class AssemblyScanner
 
     /// <summary>
     /// Detect which integration event types a handler can publish.
-    /// Uses IL scanning similar to <see cref="DetectEmittedEvents"/>.
+    /// Uses IL scanning similar to <see cref="DetectEventEmissions(Type, List{Type})"/>.
     /// </summary>
     private static List<string> DetectPublishedEvents(Type type, List<Type> integrationEventTypes)
     {
-        return DetectEmittedEvents(type, integrationEventTypes);
+        return DetectEventEmissions(type, integrationEventTypes)
+            .Select(e => e.EventType)
+            .Distinct()
+            .ToList();
     }
 
     private static void AddPropertyReferences(IEnumerable<EntityNode> nodes, HashSet<string> knownDomainTypes, List<Relationship> relationships)

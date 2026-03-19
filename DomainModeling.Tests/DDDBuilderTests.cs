@@ -121,6 +121,45 @@ public class DDDBuilderTests
     }
 
     [Fact]
+    public void Build_DetectsEventEmissionMethods()
+    {
+        var graph = BuildSampleGraph();
+        var ctx = graph.BoundedContexts.Single();
+
+        var order = ctx.Aggregates.Single(a => a.Name == "Order");
+        order.EventEmissions.Should().Contain(e =>
+            e.EventType.Contains("OrderPlacedEvent") &&
+            e.MethodName == "Place");
+        order.EventEmissions.Should().Contain(e =>
+            e.EventType.Contains("OrderShippedEvent") &&
+            e.MethodName == "Ship");
+
+        var invoice = ctx.Aggregates.Single(a => a.Name == "Invoice");
+        invoice.EventEmissions.Should().Contain(e =>
+            e.EventType.Contains("InvoiceCreatedEvent") &&
+            e.MethodName == "Create");
+    }
+
+    [Fact]
+    public void Build_EmitsRelationships_IncludeMethodNameInLabel()
+    {
+        var graph = BuildSampleGraph();
+        var ctx = graph.BoundedContexts.Single();
+
+        ctx.Relationships.Should().Contain(r =>
+            r.Kind == RelationshipKind.Emits &&
+            r.SourceType.EndsWith(".Order") &&
+            r.TargetType.EndsWith(".OrderPlacedEvent") &&
+            r.Label == "emits via Place()");
+
+        ctx.Relationships.Should().Contain(r =>
+            r.Kind == RelationshipKind.Emits &&
+            r.SourceType.EndsWith(".Order") &&
+            r.TargetType.EndsWith(".OrderShippedEvent") &&
+            r.Label == "emits via Ship()");
+    }
+
+    [Fact]
     public void Build_CreatesRelationships()
     {
         var graph = BuildSampleGraph();
