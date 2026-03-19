@@ -376,7 +376,7 @@ function renderDiagramKindFilters() {
     if (!presentKinds.has(kind)) continue;
     const visible = !dgState.hiddenKinds.has(kind);
     const count = dgState.allNodes.filter(n => n.kind === kind).length;
-    html += `<div class="rel-dropdown-item${visible ? ' checked' : ''}" onclick="window.__diagram.toggleKind('${kind}')" data-node-kind="${kind}">`;
+    html += `<div class="rel-dropdown-item${visible ? ' checked' : ''}" onclick="window.__diagram.toggleKind(event, '${kind}')" data-node-kind="${kind}">`;
     html += `<span class="rel-check">${visible ? '✓' : ''}</span>`;
     html += `<span class="diagram-kind-dot" style="background:${cfg.color}"></span>`;
     html += `<span class="rel-kind-label">${esc(cfg.label)}</span>`;
@@ -463,7 +463,7 @@ function renderDiagramEdgeFilter() {
   for (const [kind, cfg] of Object.entries(EDGE_CFG)) {
     if (!presentEdgeKinds.has(kind)) continue;
     const visible = !dgState.hiddenEdgeKinds.has(kind);
-    h += `<div class="rel-dropdown-item${visible ? ' checked' : ''}" onclick="window.__diagram.toggleEdgeKind('${kind}')" data-edge-kind="${kind}">`;
+    h += `<div class="rel-dropdown-item${visible ? ' checked' : ''}" onclick="window.__diagram.toggleEdgeKind(event, '${kind}')" data-edge-kind="${kind}">`;
     h += `<span class="rel-check">${visible ? '✓' : ''}</span>`;
     h += `<span class="rel-line-sample${cfg.dashed ? ' dashed' : ''}" style="color:${cfg.color}"></span>`;
     h += `<span class="rel-kind-label">${esc(cfg.label)}</span>`;
@@ -883,8 +883,15 @@ export function diagramResetLayout(ctx) {
   saveViewport(ctx.name, dgState.zoom, dgState.panX, dgState.panY);
 }
 
-export function diagramToggleKind(kind) {
+export function diagramToggleKind(eventOrKind, maybeKind) {
+  const hasEventArg = typeof eventOrKind === 'object' && eventOrKind !== null;
+  const kind = hasEventArg ? maybeKind : eventOrKind;
+  if (hasEventArg) {
+    eventOrKind.stopPropagation();
+    eventOrKind.preventDefault();
+  }
   if (!dgState) return;
+  if (typeof kind !== 'string') return;
   // #region agent log
   pushDiagramDebugLog('C', 'diagram.js:diagramToggleKind', 'toggle kind entry', {
     kind,
@@ -947,8 +954,15 @@ export function diagramShowAll() {
   refreshDiagramKindFilters();
 }
 
-export function diagramToggleEdgeKind(kind) {
+export function diagramToggleEdgeKind(eventOrKind, maybeKind) {
+  const hasEventArg = typeof eventOrKind === 'object' && eventOrKind !== null;
+  const kind = hasEventArg ? maybeKind : eventOrKind;
+  if (hasEventArg) {
+    eventOrKind.stopPropagation();
+    eventOrKind.preventDefault();
+  }
   if (!dgState) return;
+  if (typeof kind !== 'string') return;
   if (dgState.hiddenEdgeKinds.has(kind)) {
     dgState.hiddenEdgeKinds.delete(kind);
   } else {
