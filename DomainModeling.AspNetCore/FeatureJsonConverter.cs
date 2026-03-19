@@ -34,6 +34,8 @@ internal static class FeatureJsonConverter
                 var name = node.GetProperty("name").GetString() ?? "";
                 var kind = node.GetProperty("kind").GetString() ?? "";
                 var isCustom = node.TryGetProperty("isCustom", out var ic) && ic.GetBoolean();
+                var alias = GetOptString(node, "alias");
+                var description = GetOptString(node, "description");
                 var properties = ParseProperties(node);
 
                 switch (kind)
@@ -43,6 +45,8 @@ internal static class FeatureJsonConverter
                         {
                             Name = name,
                             FullName = id,
+                            Alias = alias,
+                            Description = description,
                             IsCustom = isCustom,
                             Properties = properties,
                             Methods = ParseMethods(node),
@@ -53,6 +57,8 @@ internal static class FeatureJsonConverter
                         {
                             Name = name,
                             FullName = id,
+                            Alias = alias,
+                            Description = description,
                             IsCustom = isCustom,
                             Properties = properties,
                         });
@@ -62,6 +68,8 @@ internal static class FeatureJsonConverter
                         {
                             Name = name,
                             FullName = id,
+                            Alias = alias,
+                            Description = description,
                             IsCustom = isCustom,
                             Properties = properties,
                         });
@@ -71,6 +79,8 @@ internal static class FeatureJsonConverter
                         {
                             Name = name,
                             FullName = id,
+                            Alias = alias,
+                            Description = description,
                             IsCustom = isCustom,
                             Properties = properties,
                         });
@@ -80,6 +90,8 @@ internal static class FeatureJsonConverter
                         {
                             Name = name,
                             FullName = id,
+                            Alias = alias,
+                            Description = description,
                             IsCustom = isCustom,
                             Properties = properties,
                         });
@@ -89,6 +101,8 @@ internal static class FeatureJsonConverter
                         {
                             Name = name,
                             FullName = id,
+                            Alias = alias,
+                            Description = description,
                             IsCustom = isCustom,
                         });
                         break;
@@ -97,6 +111,8 @@ internal static class FeatureJsonConverter
                         {
                             Name = name,
                             FullName = id,
+                            Alias = alias,
+                            Description = description,
                             IsCustom = isCustom,
                         });
                         break;
@@ -105,6 +121,8 @@ internal static class FeatureJsonConverter
                         {
                             Name = name,
                             FullName = id,
+                            Alias = alias,
+                            Description = description,
                             IsCustom = isCustom,
                         });
                         break;
@@ -113,6 +131,8 @@ internal static class FeatureJsonConverter
                         {
                             Name = name,
                             FullName = id,
+                            Alias = alias,
+                            Description = description,
                             IsCustom = isCustom,
                         });
                         break;
@@ -121,6 +141,8 @@ internal static class FeatureJsonConverter
                         {
                             Name = name,
                             FullName = id,
+                            Alias = alias,
+                            Description = description,
                             IsCustom = isCustom,
                         });
                         break;
@@ -129,6 +151,8 @@ internal static class FeatureJsonConverter
                         {
                             Name = name,
                             FullName = id,
+                            Alias = alias,
+                            Description = description,
                             Properties = properties,
                         });
                         break;
@@ -178,6 +202,13 @@ internal static class FeatureJsonConverter
         }
 
         return new DomainGraph(ctx);
+    }
+
+    private static string? GetOptString(JsonElement node, string propName)
+    {
+        if (!node.TryGetProperty(propName, out var el)) return null;
+        var s = el.GetString();
+        return string.IsNullOrWhiteSpace(s) ? null : s.Trim();
     }
 
     private static List<Graph.PropertyInfo> ParseProperties(JsonElement node)

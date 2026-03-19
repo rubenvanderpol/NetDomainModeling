@@ -235,6 +235,16 @@ function renderPropertiesPanel() {
     h += `<div class="fe-panel-field"><label>Name</label><div class="fe-panel-value">${esc(n.name)}</div></div>`;
     h += `<div class="fe-panel-field"><label>Full Name</label><div class="fe-panel-value">${esc(n.id)}</div></div>`;
 
+    // Alias (editable)
+    h += `<div class="fe-panel-field"><label>Alias</label>`;
+    h += `<input type="text" class="fe-input" value="${escAttr(n.alias || '')}" placeholder="Display name override…" `;
+    h += `onchange="window.__featureEditor.changeAlias('${escAttr(n.id)}', this.value)" /></div>`;
+
+    // Description (editable)
+    h += `<div class="fe-panel-field"><label>Description</label>`;
+    h += `<textarea class="fe-input" rows="3" placeholder="Custom description…" `;
+    h += `onchange="window.__featureEditor.changeDescription('${escAttr(n.id)}', this.value)">${esc(n.description || '')}</textarea></div>`;
+
     // Bounded Context
     h += `<div class="fe-panel-field"><label>Bounded Context</label>`;
     h += renderBoundedContextDropdown(n);
@@ -482,6 +492,7 @@ function serializeFeature() {
   return {
     nodes: st.nodes.map(n => ({
       id: n.id, name: n.name, kind: n.kind, isCustom: n.isCustom || false,
+      alias: n.alias || null, description: n.description || null,
       boundedContext: n.boundedContext || '', layer: n.layer || '',
       props: n.props, structuredProps: n.structuredProps || [],
       methods: n.methods, events: n.events,
@@ -509,6 +520,8 @@ function loadFeatureState(feature) {
       name: saved.name,
       kind: saved.kind,
       isCustom: saved.isCustom || false,
+      alias: saved.alias || null,
+      description: saved.description || null,
       boundedContext: saved.boundedContext || '',
       layer: saved.layer || '',
       cfg,
@@ -547,19 +560,32 @@ function loadFeatureState(feature) {
 
 // ── Adding types ─────────────────────────────────────
 
+/** Alias / description saved in the main explorer (GET /domain-model/metadata), not per-feature. */
+function getGlobalTypeMetadata(fullName) {
+  const meta = (typeof window !== 'undefined' && window.__metadata) ? window.__metadata[fullName] : null;
+  if (!meta) return { alias: null, description: null };
+  const alias = meta.alias && String(meta.alias).trim() ? String(meta.alias).trim() : null;
+  const description = meta.description && String(meta.description).trim() ? String(meta.description).trim() : null;
+  return { alias, description };
+}
+
 export function addExistingType(fullName, kind) {
   if (!st) return;
   if (st.nMap[fullName]) return; // already added
 
   // Find the item in domain data to get properties etc.
   const item = findDomainItem(fullName, kind);
+  const globalMeta = getGlobalTypeMetadata(fullName);
 
-  const cfg = KIND_CFG[kind];
+    const cfg = KIND_CFG[kind];
   const n = {
     id: fullName,
     name: item ? item.name : shortName(fullName),
     kind,
     isCustom: false,
+    alias: globalMeta.alias,
+    // Custom description from explorer metadata wins over XML doc from discovery
+    description: globalMeta.description || (item && item.description) || null,
     boundedContext: findDomainContext(fullName) || '',
     layer: (item && item.layer) || '',
     cfg,
@@ -605,6 +631,8 @@ export function addNewType() {
     name,
     kind,
     isCustom: true,
+    alias: null,
+    description: null,
     boundedContext: '',
     layer: '',
     cfg,
@@ -779,6 +807,25 @@ function renderBoundedContextDropdown(node) {
   }
   h += '</div></div>';
   return h;
+}
+
+export function changeAlias(nodeId, value) {
+  if (!st) return;
+  const n = st.nMap[nodeId];
+  if (!n) return;
+  n.alias = (value && value.trim()) ? value.trim() : null;
+  markDirty();
+  renderSvg();
+  refreshPanel();
+}
+
+export function changeDescription(nodeId, value) {
+  if (!st) return;
+  const n = st.nMap[nodeId];
+  if (!n) return;
+  n.description = (value && value.trim()) ? value.trim() : null;
+  markDirty();
+  refreshPanel();
 }
 
 export function changeBoundedContext(nodeId, ctxName) {
@@ -1139,7 +1186,8 @@ function renderSvg() {
     let ty = 20;
     s += `<text x="${n.w / 2}" y="${ty}" text-anchor="middle" fill="${c.color}" font-size="10" font-family="-apple-system,sans-serif" opacity="0.85">${c.stereotype}</text>`;
     ty += 22;
-    s += `<text class="fe-name" x="${n.w / 2}" y="${ty}" text-anchor="middle" fill="#f0f2f7" font-size="14" font-weight="600" font-family="-apple-system,sans-serif">${esc(n.name)}</text>`;
+    const displayName = (n.alias && n.alias.trim()) ? n.alias.trim() : n.name;
+    s += `<text class="fe-name" x="${n.w / 2}" y="${ty}" text-anchor="middle" fill="#f0f2f7" font-size="14" font-weight="600" font-family="-apple-system,sans-serif">${esc(displayName)}</text>`;
     if (n.props.length > 0) {
       ty += 8;
       s += `<line x1="12" y1="${ty}" x2="${n.w - 12}" y2="${ty}" stroke="${c.border}" stroke-width="0.5" />`;

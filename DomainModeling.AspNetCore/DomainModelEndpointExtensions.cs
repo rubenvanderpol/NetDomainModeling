@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using System.Reflection;
 using System.Text.Json;
+using System.Text;
 
 namespace DomainModeling.AspNetCore;
 
@@ -40,6 +41,12 @@ public sealed class DomainModelOptions
     /// Defaults to <c>./features</c> relative to the application root.
     /// </summary>
     public string FeatureStoragePath { get; set; } = "./features";
+
+    /// <summary>
+    /// Directory path where domain type alias/description metadata is stored.
+    /// Defaults to <c>./metadata</c> relative to the application root.
+    /// </summary>
+    public string MetadataStoragePath { get; set; } = "./metadata";
 
     /// <summary>
     /// Configuration for the aggregate testing feature.
@@ -147,8 +154,31 @@ public static class DomainModelEndpointExtensions
         // Cache the JSON — mutable so it can be updated when developer view saves
         var json = graph.ToJson();
 
-        // Custom metadata store (alias / description per type)
+        // Custom metadata store (alias / description per type) persisted as JSON files on disk
+        var metadataDir = Path.GetFullPath(options.MetadataStoragePath);
         var metadata = new System.Collections.Concurrent.ConcurrentDictionary<string, TypeMetadata>();
+        if (Directory.Exists(metadataDir))
+        {
+            foreach (var file in Directory.GetFiles(metadataDir, "*.json"))
+            {
+                var fileName = Path.GetFileNameWithoutExtension(file);
+                if (!TryDecodeMetadataFileName(fileName, out var fullName))
+                    continue;
+
+                var content = File.ReadAllText(file);
+                var entry = JsonSerializer.Deserialize<TypeMetadata>(content, new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true,
+                });
+                if (entry is null)
+                    continue;
+
+                if (string.IsNullOrWhiteSpace(entry.Alias) && string.IsNullOrWhiteSpace(entry.Description))
+                    continue;
+
+                metadata[fullName] = entry;
+            }
+        }
 
         var assetsPrefix = $"{routePrefix}/assets";
 
@@ -206,10 +236,27 @@ public static class DomainModelEndpointExtensions
             if (entry is null)
                 return Results.BadRequest("Invalid metadata");
 
+            var safeFileName = EncodeMetadataFileName(fullName);
+            var path = Path.Combine(metadataDir, safeFileName + ".json");
+
             if (string.IsNullOrWhiteSpace(entry.Alias) && string.IsNullOrWhiteSpace(entry.Description))
+            {
                 metadata.TryRemove(fullName, out _);
+                if (File.Exists(path)) File.Delete(path);
+            }
             else
+            {
                 metadata[fullName] = entry;
+                Directory.CreateDirectory(metadataDir);
+
+                var toWrite = JsonSerializer.Serialize(entry, new JsonSerializerOptions
+                {
+                    WriteIndented = true,
+                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                    DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+                });
+                await File.WriteAllTextAsync(path, toWrite);
+            }
 
             return Results.Ok(new { saved = true });
         })
@@ -351,14 +398,15 @@ public static class DomainModelEndpointExtensions
         {
             var featureDir = Path.GetFullPath(options.FeatureStoragePath);
 
-            // GET /domain-model/features — list all saved features
+            // GET /domain-model/features — list all saved features (folder per feature)
             endpoints.MapGet($"{routePrefix}/features", () =>
             {
                 if (!Directory.Exists(featureDir))
                     return Results.Json(Array.Empty<object>());
 
-                var features = Directory.GetFiles(featureDir, "*.json")
-                    .Select(f => Path.GetFileNameWithoutExtension(f))
+                var features = Directory.GetDirectories(featureDir)
+                    .Select(d => Path.GetFileName(d))
+                    .Where(n => SanitizeFileName(n) == n && File.Exists(Path.Combine(featureDir, n, "feature.json")))
                     .OrderBy(n => n)
                     .ToArray();
                 return Results.Json(features);
@@ -371,7 +419,7 @@ public static class DomainModelEndpointExtensions
             {
                 var safeName = SanitizeFileName(name);
                 if (safeName is null) return Results.BadRequest("Invalid feature name");
-                var path = Path.Combine(featureDir, safeName + ".json");
+                var path = Path.Combine(featureDir, safeName, "feature.json");
                 if (!File.Exists(path))
                     return Results.NotFound();
                 var content = File.ReadAllText(path);
@@ -393,8 +441,9 @@ public static class DomainModelEndpointExtensions
                 try { using var doc = JsonDocument.Parse(body); }
                 catch (JsonException) { return Results.BadRequest("Invalid JSON"); }
 
-                Directory.CreateDirectory(featureDir);
-                var path = Path.Combine(featureDir, safeName + ".json");
+                var featureFolder = Path.Combine(featureDir, safeName);
+                Directory.CreateDirectory(featureFolder);
+                var path = Path.Combine(featureFolder, "feature.json");
                 await File.WriteAllTextAsync(path, body);
                 return Results.Ok(new { saved = true });
             })
@@ -406,10 +455,10 @@ public static class DomainModelEndpointExtensions
             {
                 var safeName = SanitizeFileName(name);
                 if (safeName is null) return Results.BadRequest("Invalid feature name");
-                var path = Path.Combine(featureDir, safeName + ".json");
-                if (!File.Exists(path))
+                var featureFolder = Path.Combine(featureDir, safeName);
+                if (!Directory.Exists(featureFolder))
                     return Results.NotFound();
-                File.Delete(path);
+                Directory.Delete(featureFolder, recursive: true);
                 return Results.Ok(new { deleted = true });
             })
             .ExcludeFromDescription()
@@ -435,7 +484,7 @@ public static class DomainModelEndpointExtensions
                     if (export is null)
                         return Results.NotFound();
 
-                    var path = Path.Combine(featureDir, safeName + ".json");
+                    var path = Path.Combine(featureDir, safeName, "feature.json");
                     if (!File.Exists(path))
                         return Results.NotFound();
 
@@ -554,5 +603,33 @@ public static class DomainModelEndpointExtensions
         if (sanitized.Contains("..") || sanitized.Contains('/') || sanitized.Contains('\\'))
             return null;
         return sanitized;
+    }
+
+    private static string EncodeMetadataFileName(string fullName)
+    {
+        // Human-readable but reversible. This keeps most namespace characters (including '.')
+        // and percent-encodes characters that are invalid in file names (e.g. '<', '>', spaces).
+        return Uri.EscapeDataString(fullName);
+    }
+
+    private static bool TryDecodeMetadataFileName(string fileName, out string fullName)
+    {
+        fullName = string.Empty;
+        try
+        {
+            var unescaped = Uri.UnescapeDataString(fileName);
+
+            // Guard against false positives: ensure round-trip matches the input.
+            var escapedCheck = Uri.EscapeDataString(unescaped);
+            if (!string.Equals(escapedCheck, fileName, StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            fullName = unescaped;
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 }

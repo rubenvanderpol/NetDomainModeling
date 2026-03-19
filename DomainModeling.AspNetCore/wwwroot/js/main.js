@@ -17,6 +17,7 @@ let featureEditorModule = null; // lazy-loaded when feature editor mode is on
 let metadata = {};
 
 const STORAGE_KEY = 'domainModelSelectedContexts';
+// Legacy browser persistence key (migration-only).
 const METADATA_STORAGE_KEY = 'domainModelMetadata';
 
 let data = null;
@@ -45,19 +46,42 @@ async function init() {
     const res = await fetch(API_URL);
     data = await res.json();
 
-    // Load custom metadata: localStorage first, then merge from server
+    // One-time migration: browser localStorage -> server disk folder.
+    // We only migrate entries that don't yet exist on the server to avoid overwriting.
+    let legacyMetadata = {};
     try {
       const stored = localStorage.getItem(METADATA_STORAGE_KEY);
-      if (stored) metadata = JSON.parse(stored);
+      if (stored) legacyMetadata = JSON.parse(stored);
     } catch { /* ignore corrupt data */ }
+
     try {
       const metaRes = await fetch(`${BASE_URL}/metadata`);
+      let serverMeta = {};
       if (metaRes.ok) {
-        const serverMeta = await metaRes.json();
-        metadata = { ...metadata, ...serverMeta };
-        localStorage.setItem(METADATA_STORAGE_KEY, JSON.stringify(metadata));
+        serverMeta = await metaRes.json();
       }
-    } catch { /* metadata endpoint optional */ }
+
+      metadata = { ...legacyMetadata, ...serverMeta };
+
+      const keysToMigrate = Object.keys(legacyMetadata || {})
+        .filter((k) => !serverMeta || !serverMeta[k]);
+
+      if (keysToMigrate.length > 0) {
+        await Promise.allSettled(keysToMigrate.map(async (fullName) => {
+          const entry = legacyMetadata[fullName];
+          return fetch(`${BASE_URL}/metadata/${encodeURIComponent(fullName)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(entry),
+          });
+        }));
+
+        try { localStorage.removeItem(METADATA_STORAGE_KEY); } catch { /* ignore */ }
+      }
+    } catch { /* metadata endpoint optional */ 
+      // If the server metadata endpoint is unreachable, fall back to legacy localStorage for display.
+      metadata = legacyMetadata;
+    }
     window.__metadata = metadata;
 
     // Load available exports
@@ -287,20 +311,17 @@ function renderMain() {
 async function saveMetadata(fullName, alias, description) {
   const entry = { alias: alias || null, description: description || null };
 
-  // Always update local state and localStorage
+  // Always update local state (server persistence is handled via PUT)
   if ((!alias || !alias.trim()) && (!description || !description.trim())) {
     delete metadata[fullName];
   } else {
     metadata[fullName] = entry;
   }
   window.__metadata = metadata;
-  try {
-    localStorage.setItem(METADATA_STORAGE_KEY, JSON.stringify(metadata));
-  } catch { /* quota exceeded or private mode */ }
 
   // Best-effort sync to server
   try {
-    await fetch(`${BASE_URL}/metadata/${fullName}`, {
+    await fetch(`${BASE_URL}/metadata/${encodeURIComponent(fullName)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(entry),
@@ -417,6 +438,8 @@ function wireFeatureEditorGlobals() {
     removeProperty: featureEditorModule.removeProperty,
     downloadExport: featureEditorModule.downloadExport,
     toggleRelDropdown: featureEditorModule.toggleRelDropdown,
+    changeAlias: featureEditorModule.changeAlias,
+    changeDescription: featureEditorModule.changeDescription,
     changeBoundedContext: featureEditorModule.changeBoundedContext,
     toggleBcDropdown: featureEditorModule.toggleBcDropdown,
     changeLayer: featureEditorModule.changeLayer,

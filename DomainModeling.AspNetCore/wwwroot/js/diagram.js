@@ -8,6 +8,7 @@ const STORAGE_KEY = 'domain-model-diagram-positions';
 const HIDDEN_KINDS_KEY = 'domain-model-diagram-hidden-kinds';
 const HIDDEN_EDGE_KINDS_KEY = 'domain-model-diagram-hidden-edge-kinds';
 const VIEWPORT_KEY = 'domain-model-diagram-viewport';
+const SHOW_ALIASES_KEY = 'domain-model-diagram-show-aliases';
 const SHOW_LAYERS_KEY = 'domain-model-diagram-show-layers';
 
 const EDGE_CFG = {
@@ -183,6 +184,10 @@ function nodeHeight(n) {
   if (n.events.length > 0) h += DIVIDER_H + n.events.length * PROP_H;
   return h + PAD;
 }
+
+try {
+  showAliases = localStorage.getItem(SHOW_ALIASES_KEY) === 'true';
+} catch { /* ignore */ }
 
 try {
   showLayers = localStorage.getItem(SHOW_LAYERS_KEY) === 'true';
@@ -876,6 +881,7 @@ export function diagramDownloadSvg() {
 
 export function diagramToggleAliases() {
   showAliases = !showAliases;
+  try { localStorage.setItem(SHOW_ALIASES_KEY, showAliases ? 'true' : 'false'); } catch { /* ignore */ }
   const btn = document.getElementById('diagramAliasToggle');
   if (btn) btn.style.background = showAliases ? 'var(--bg-hover)' : '';
   if (dgState) {
