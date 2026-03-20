@@ -262,7 +262,7 @@ export function renderDiagramView() {
   html += '<span class="diagram-toolbar-sep"></span>';
   html += `<button id="diagramLayerToggle" onclick="window.__diagram.toggleLayers()" title="Show architectural layers (Domain, Application, Infrastructure)" style="${showLayers ? 'background:var(--bg-hover)' : ''}">⊞ Layers</button>`;
   html += '<span class="diagram-toolbar-sep"></span>';
-  html += '<div class="diagram-kind-filters" id="diagramKindFilters"></div>';
+  html += '<div class="rel-dropdown" id="diagramKindFilterWrap"></div>';
   html += '<span class="diagram-toolbar-sep"></span>';
   html += '<div class="rel-dropdown" id="diagramEdgeFilterWrap"></div>';
   html += '</div>';
@@ -401,25 +401,76 @@ export function initDiagram(ctx, boundedContexts) {
 function renderDiagramKindFilters() {
   if (!dgState) return '';
   const presentKinds = new Set(dgState.allNodes.map(n => n.kind));
-  let html = '';
+  if (presentKinds.size === 0) return '';
+
+  const visibleKinds = [...presentKinds].filter(kind => !dgState.hiddenKinds.has(kind)).length;
+  let html = `<button class="rel-dropdown-trigger" id="diagramKindFilterTrigger" onclick="window.__diagram.toggleKindFilter()" title="Filter node types">`;
+  html += '<span style="font-size:10px;opacity:.7">◈</span>';
+  html += '<span>Node Types</span>';
+  html += `<span class="rel-hidden-count">${visibleKinds}/${presentKinds.size}</span>`;
+  html += '<span class="rel-chevron">▾</span>';
+  html += '</button>';
+
+  html += '<div class="rel-dropdown-menu" id="diagramKindFilterMenu">';
+  html += '<div class="rel-dropdown-actions">';
+  html += '<button type="button" onclick="window.__diagram.showAllKinds()">Show all</button>';
+  html += '<button type="button" onclick="window.__diagram.hideAllKinds()">Hide all</button>';
+  html += '</div>';
+
   for (const [kind, cfg] of Object.entries(KIND_CFG)) {
     if (!presentKinds.has(kind)) continue;
-    const hidden = dgState.hiddenKinds.has(kind);
+    const visible = !dgState.hiddenKinds.has(kind);
     const count = dgState.allNodes.filter(n => n.kind === kind).length;
-    html += `<button class="diagram-kind-pill${hidden ? ' hidden-kind' : ''}" onclick="window.__diagram.toggleKind('${kind}')" title="${hidden ? 'Show' : 'Hide'} ${cfg.label}">`;
-    html += `<span class="dot" style="background:${cfg.color}${hidden ? ';opacity:.35' : ''}"></span>`;
-    html += `<span>${cfg.label}</span>`;
+    html += `<div class="rel-dropdown-item${visible ? ' checked' : ''}" onclick="window.__diagram.toggleKind(event, '${kind}')" data-node-kind="${kind}">`;
+    html += `<span class="rel-check">${visible ? '✓' : ''}</span>`;
+    html += `<span class="diagram-kind-dot" style="background:${cfg.color}"></span>`;
+    html += `<span class="rel-kind-label">${esc(cfg.label)}</span>`;
     html += `<span class="diagram-kind-count">${count}</span>`;
-    if (hidden) html += '<span class="diagram-kind-hidden-icon">⊘</span>';
-    html += '</button>';
+    html += '</div>';
   }
+  html += '</div>';
   return html;
 }
 
 function refreshDiagramKindFilters() {
-  const el = document.getElementById('diagramKindFilters');
+  const el = document.getElementById('diagramKindFilterWrap');
+  const prevMenu = document.getElementById('diagramKindFilterMenu');
+  const prevTrigger = document.getElementById('diagramKindFilterTrigger');
+  const wasVisible = !!prevMenu?.classList.contains('visible');
+  const wasOpen = !!prevTrigger?.classList.contains('open');
   if (el) el.innerHTML = renderDiagramKindFilters();
+  if (wasVisible || wasOpen) {
+    const nextMenu = document.getElementById('diagramKindFilterMenu');
+    const nextTrigger = document.getElementById('diagramKindFilterTrigger');
+    if (nextMenu) nextMenu.classList.add('visible');
+    if (nextTrigger) nextTrigger.classList.add('open');
+  }
   refreshDiagramEdgeFilter();
+}
+
+function syncDiagramKindFilterUi() {
+  if (!dgState) return;
+  const trigger = document.getElementById('diagramKindFilterTrigger');
+  const menu = document.getElementById('diagramKindFilterMenu');
+  if (!trigger || !menu) {
+    refreshDiagramKindFilters();
+    return;
+  }
+
+  const presentKinds = new Set(dgState.allNodes.map(n => n.kind));
+  const visibleKinds = [...presentKinds].filter(kind => !dgState.hiddenKinds.has(kind)).length;
+  const badge = trigger.querySelector('.rel-hidden-count');
+  if (badge) badge.textContent = `${visibleKinds}/${presentKinds.size}`;
+
+  const rows = menu.querySelectorAll('[data-node-kind]');
+  for (const row of rows) {
+    const kind = row.getAttribute('data-node-kind');
+    if (!kind) continue;
+    const visible = !dgState.hiddenKinds.has(kind);
+    row.classList.toggle('checked', visible);
+    const check = row.querySelector('.rel-check');
+    if (check) check.textContent = visible ? '✓' : '';
+  }
 }
 
 // ── Edge-kind filter dropdown ────────────────────────
@@ -440,7 +491,7 @@ function renderDiagramEdgeFilter() {
   for (const [kind, cfg] of Object.entries(EDGE_CFG)) {
     if (!presentEdgeKinds.has(kind)) continue;
     const visible = !dgState.hiddenEdgeKinds.has(kind);
-    h += `<div class="rel-dropdown-item${visible ? ' checked' : ''}" onclick="window.__diagram.toggleEdgeKind('${kind}')" data-edge-kind="${kind}">`;
+    h += `<div class="rel-dropdown-item${visible ? ' checked' : ''}" onclick="window.__diagram.toggleEdgeKind(event, '${kind}')" data-edge-kind="${kind}">`;
     h += `<span class="rel-check">${visible ? '✓' : ''}</span>`;
     h += `<span class="rel-line-sample${cfg.dashed ? ' dashed' : ''}" style="color:${cfg.color}"></span>`;
     h += `<span class="rel-kind-label">${esc(cfg.label)}</span>`;
@@ -860,8 +911,15 @@ export function diagramResetLayout(ctx) {
   saveViewport(ctx.name, dgState.zoom, dgState.panX, dgState.panY);
 }
 
-export function diagramToggleKind(kind) {
+export function diagramToggleKind(eventOrKind, maybeKind) {
+  const hasEventArg = typeof eventOrKind === 'object' && eventOrKind !== null;
+  const kind = hasEventArg ? maybeKind : eventOrKind;
+  if (hasEventArg) {
+    eventOrKind.stopPropagation();
+    eventOrKind.preventDefault();
+  }
   if (!dgState) return;
+  if (typeof kind !== 'string') return;
   if (dgState.hiddenKinds.has(kind)) {
     dgState.hiddenKinds.delete(kind);
   } else {
@@ -870,7 +928,31 @@ export function diagramToggleKind(kind) {
   saveHiddenKinds(dgState.contextName, dgState.hiddenKinds);
   applyDiagramVisibility();
   renderSvg();
-  refreshDiagramKindFilters();
+  syncDiagramKindFilterUi();
+}
+
+function setAllKindVisibility(visible) {
+  if (!dgState) return;
+  const presentKinds = new Set(dgState.allNodes.map(n => n.kind));
+  if (visible) {
+    dgState.hiddenKinds.clear();
+  } else {
+    for (const kind of presentKinds) {
+      dgState.hiddenKinds.add(kind);
+    }
+  }
+  saveHiddenKinds(dgState.contextName, dgState.hiddenKinds);
+  applyDiagramVisibility();
+  renderSvg();
+  syncDiagramKindFilterUi();
+}
+
+export function diagramShowAllKinds() {
+  setAllKindVisibility(true);
+}
+
+export function diagramHideAllKinds() {
+  setAllKindVisibility(false);
 }
 
 export function diagramShowAll() {
@@ -884,8 +966,15 @@ export function diagramShowAll() {
   refreshDiagramKindFilters();
 }
 
-export function diagramToggleEdgeKind(kind) {
+export function diagramToggleEdgeKind(eventOrKind, maybeKind) {
+  const hasEventArg = typeof eventOrKind === 'object' && eventOrKind !== null;
+  const kind = hasEventArg ? maybeKind : eventOrKind;
+  if (hasEventArg) {
+    eventOrKind.stopPropagation();
+    eventOrKind.preventDefault();
+  }
   if (!dgState) return;
+  if (typeof kind !== 'string') return;
   if (dgState.hiddenEdgeKinds.has(kind)) {
     dgState.hiddenEdgeKinds.delete(kind);
   } else {
@@ -897,22 +986,32 @@ export function diagramToggleEdgeKind(kind) {
   refreshDiagramEdgeFilter();
 }
 
-export function diagramToggleEdgeFilter() {
-  const menu = document.getElementById('diagramEdgeFilterMenu');
-  const trigger = document.getElementById('diagramEdgeFilterTrigger');
+function toggleDropdown(menuId, triggerId) {
+  const menu = document.getElementById(menuId);
+  const trigger = document.getElementById(triggerId);
   if (!menu) return;
   const open = menu.classList.toggle('visible');
   if (trigger) trigger.classList.toggle('open', open);
-  if (open) {
-    const close = (ev) => {
-      if (!menu.contains(ev.target) && ev.target !== trigger && !trigger.contains(ev.target)) {
-        menu.classList.remove('visible');
-        if (trigger) trigger.classList.remove('open');
-        document.removeEventListener('click', close);
-      }
-    };
-    setTimeout(() => document.addEventListener('click', close), 0);
-  }
+  if (!open) return;
+
+  const close = (ev) => {
+    const clickedTrigger = trigger && (ev.target === trigger || trigger.contains(ev.target));
+    const containsTarget = menu.contains(ev.target);
+    if (!containsTarget && !clickedTrigger) {
+      menu.classList.remove('visible');
+      if (trigger) trigger.classList.remove('open');
+      document.removeEventListener('click', close);
+    }
+  };
+  setTimeout(() => document.addEventListener('click', close), 0);
+}
+
+export function diagramToggleKindFilter() {
+  toggleDropdown('diagramKindFilterMenu', 'diagramKindFilterTrigger');
+}
+
+export function diagramToggleEdgeFilter() {
+  toggleDropdown('diagramEdgeFilterMenu', 'diagramEdgeFilterTrigger');
 }
 
 export function diagramDownloadSvg() {
