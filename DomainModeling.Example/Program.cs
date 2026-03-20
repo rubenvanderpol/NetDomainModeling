@@ -22,6 +22,7 @@ var domainGraph = DDDBuilder.Create(ctx => ctx
             .Implements(typeof(IEventHandler<>))
             .Implements(typeof(IIntegrationEventHandler<>)))
         .CommandHandlers(h => h.Implements(typeof(ICommandHandler<>)))
+        .Commands(c => c.NameEndsWith("Command"))
         .Repositories(r => r.Implements(typeof(IRepository<>)))
     )
     .WithSharedAssembly(SharedExampleAssembly(typeof(Product).Assembly))

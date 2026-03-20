@@ -27,6 +27,7 @@ public class DDDBuilderTests
                     .Implements(typeof(IEventHandler<>))
                     .Implements(typeof(IIntegrationEventHandler<>)))
                 .CommandHandlers(h => h.Implements(typeof(ICommandHandler<>)))
+                .Commands(c => c.NameEndsWith("Command"))
                 .QueryHandlers(h => h.Implements(typeof(IQueryHandler<,>)))
                 .Repositories(r => r.Implements(typeof(IRepository<>)))
             )
@@ -99,6 +100,17 @@ public class DDDBuilderTests
             r.Kind == RelationshipKind.Handles &&
             r.SourceType.Contains("PlaceOrderCommandHandler") &&
             r.TargetType.Contains("PlaceOrderCommand"));
+    }
+
+    [Fact]
+    public void Build_CommandsConvention_SurfacesCommandTypesWithoutHandlers()
+    {
+        var graph = BuildSampleGraph();
+        var ctx = graph.BoundedContexts.Single();
+
+        ctx.CommandHandlerTargets.Should().Contain(t => t.Name == "UnassignedCommand");
+        ctx.CommandHandlerTargets.Single(t => t.Name == "UnassignedCommand")
+            .HandledBy.Should().BeEmpty();
     }
 
     [Fact]

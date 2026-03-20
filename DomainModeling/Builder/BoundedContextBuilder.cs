@@ -22,6 +22,7 @@ public sealed class BoundedContextBuilder
     internal TypeConventionBuilder IntegrationEventConvention { get; } = new();
     internal TypeConventionBuilder EventHandlerConvention { get; } = new();
     internal TypeConventionBuilder CommandHandlerConvention { get; } = new();
+    internal TypeConventionBuilder CommandConvention { get; } = new();
     internal TypeConventionBuilder QueryHandlerConvention { get; } = new();
     internal TypeConventionBuilder RepositoryConvention { get; } = new();
     internal TypeConventionBuilder DomainServiceConvention { get; } = new();
@@ -127,6 +128,17 @@ public sealed class BoundedContextBuilder
     public BoundedContextBuilder CommandHandlers(Action<TypeConventionBuilder> configure)
     {
         configure(CommandHandlerConvention);
+        return this;
+    }
+
+    /// <summary>
+    /// Define how command message types (DTOs) are identified, e.g.
+    /// <c>Commands(c => c.NameEndsWith("Command"))</c>.
+    /// Matched types are surfaced as command-handler targets in the graph even when no handler references them yet.
+    /// </summary>
+    public BoundedContextBuilder Commands(Action<TypeConventionBuilder> configure)
+    {
+        configure(CommandConvention);
         return this;
     }
 
