@@ -104,6 +104,11 @@ export function renderFeatureEditorView() {
     html += `<span class="fe-dirty-indicator" id="feDirtyIndicator" style="display:${dirty ? 'inline' : 'none'}">● unsaved</span>`;
     html += '<span class="fe-toolbar-spacer"></span>';
     html += '<button class="fe-btn" onclick="window.__featureEditor.fit()" title="Fit to view">⊡ Fit</button>';
+    if (featureExports.length > 0) {
+      html += '<label class="fe-export-opt" title="Append command-handler DI scaffold (ICommandHandler&lt;T&gt;) to text exports">';
+      html += '<input type="checkbox" id="feRegisterCommands" /> Register commands';
+      html += '</label>';
+    }
     for (const exp of featureExports) {
       html += `<button class="fe-btn" onclick="window.__featureEditor.downloadExport('${escAttr(exp.name)}')" title="Download ${esc(exp.name)}">⬇ ${esc(exp.name)}</button>`;
     }
@@ -461,7 +466,11 @@ export async function deleteFeature() {
 export async function downloadExport(exportName) {
   if (!currentFeatureName) return;
   try {
-    const url = `${baseUrl}/features/${encodeURIComponent(currentFeatureName)}/exports/${encodeURIComponent(exportName)}`;
+    let url = `${baseUrl}/features/${encodeURIComponent(currentFeatureName)}/exports/${encodeURIComponent(exportName)}`;
+    const regCmd = document.getElementById('feRegisterCommands');
+    if (regCmd && regCmd.checked) {
+      url += (url.includes('?') ? '&' : '?') + 'registerCommands=true';
+    }
     const res = await fetch(url);
     if (!res.ok) { alert('Export failed: ' + res.statusText); return; }
     const blob = await res.blob();

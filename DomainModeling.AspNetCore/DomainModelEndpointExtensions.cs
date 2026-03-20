@@ -93,6 +93,10 @@ public sealed class DomainModelOptions
     /// <param name="name">Display name shown in the UI.</param>
     /// <param name="fileExtension">File extension for the download (without leading dot).</param>
     /// <param name="builder">Function that receives a <see cref="FeatureGraph"/> and returns the export content.</param>
+    /// <remarks>
+    /// Download requests may include <c>?registerCommands=true</c> to append a Markdown section with
+    /// C# DI registration scaffolds for command handlers (see <see cref="FeatureCommandRegistrationScaffold"/>).
+    /// </remarks>
     public DomainModelOptions AddFeatureExport(string name, string fileExtension, Func<FeatureGraph, string> builder)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
@@ -474,7 +478,7 @@ public static class DomainModelEndpointExtensions
                     .WithName("FeatureExportsList");
 
                 // GET /domain-model/features/{name}/exports/{exportName} — download a feature export
-                endpoints.MapGet($"{routePrefix}/features/{{name}}/exports/{{exportName}}", (string name, string exportName) =>
+                endpoints.MapGet($"{routePrefix}/features/{{name}}/exports/{{exportName}}", (HttpContext http, string name, string exportName) =>
                 {
                     var safeName = SanitizeFileName(name);
                     if (safeName is null) return Results.BadRequest("Invalid feature name");
@@ -493,6 +497,17 @@ public static class DomainModelEndpointExtensions
                         FeatureJsonConverter.ToDomainGraph(featureJson, safeName));
 
                     var content = export.Builder(featureGraph);
+                    if (http.Request.Query.TryGetValue("registerCommands", out var rc) && rc.Count > 0)
+                    {
+                        var v = rc[0];
+                        if (string.Equals(v, "true", StringComparison.OrdinalIgnoreCase) || v == "1")
+                        {
+                            var appendix = FeatureCommandRegistrationScaffold.BuildMarkdownAppendix(featureGraph);
+                            if (!string.IsNullOrWhiteSpace(appendix))
+                                content = content.TrimEnd() + Environment.NewLine + Environment.NewLine + appendix;
+                        }
+                    }
+
                     var fileName = $"{safeName}-{export.Name.ToLowerInvariant().Replace(' ', '-')}.{export.FileExtension}";
                     return Results.File(
                         System.Text.Encoding.UTF8.GetBytes(content),

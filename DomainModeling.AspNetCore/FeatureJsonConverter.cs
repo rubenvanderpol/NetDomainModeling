@@ -214,7 +214,48 @@ internal static class FeatureJsonConverter
                 ent.EmittedEvents.AddRange(events);
         }
 
+        CrossReferenceCommandHandlersFromFeatureEdges(ctx);
+
         return new DomainGraph(ctx);
+    }
+
+    /// <summary>
+    /// Populates <see cref="HandlerNode.Handles"/> and <see cref="CommandHandlerTargetNode.HandledBy"/>
+    /// from <see cref="RelationshipKind.Handles"/> edges drawn in the feature editor (command handler ↔ command DTO).
+    /// </summary>
+    private static void CrossReferenceCommandHandlersFromFeatureEdges(BoundedContextNode ctx)
+    {
+        var handlersByName = ctx.CommandHandlers.ToDictionary(h => h.FullName, StringComparer.Ordinal);
+        var targetsByName = ctx.CommandHandlerTargets.ToDictionary(t => t.FullName, StringComparer.Ordinal);
+
+        foreach (var rel in ctx.Relationships)
+        {
+            if (rel.Kind != RelationshipKind.Handles) continue;
+
+            handlersByName.TryGetValue(rel.SourceType, out var handlerFromSource);
+            targetsByName.TryGetValue(rel.TargetType, out var targetFromTarget);
+            if (handlerFromSource is not null && targetFromTarget is not null)
+            {
+                AddUnique(handlerFromSource.Handles, targetFromTarget.FullName);
+                AddUnique(targetFromTarget.HandledBy, handlerFromSource.FullName);
+                continue;
+            }
+
+            // Edge may have been drawn command → handler
+            targetsByName.TryGetValue(rel.SourceType, out var targetFromSource);
+            handlersByName.TryGetValue(rel.TargetType, out var handlerFromTarget);
+            if (handlerFromTarget is not null && targetFromSource is not null)
+            {
+                AddUnique(handlerFromTarget.Handles, targetFromSource.FullName);
+                AddUnique(targetFromSource.HandledBy, handlerFromTarget.FullName);
+            }
+        }
+    }
+
+    private static void AddUnique(List<string> list, string value)
+    {
+        if (!list.Contains(value, StringComparer.Ordinal))
+            list.Add(value);
     }
 
     private static string? GetOptString(JsonElement node, string propName)
