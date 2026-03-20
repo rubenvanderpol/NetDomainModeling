@@ -33,6 +33,7 @@ public sealed class FeatureBoundedContext
     public List<FeatureDomainEvent> DomainEvents { get; init; } = [];
     public List<FeatureDomainEvent> IntegrationEvents { get; init; } = [];
     public List<FeatureHandler> EventHandlers { get; init; } = [];
+    public List<FeatureCommandHandlerTarget> CommandHandlerTargets { get; init; } = [];
     public List<FeatureHandler> CommandHandlers { get; init; } = [];
     public List<FeatureHandler> QueryHandlers { get; init; } = [];
     public List<FeatureRepository> Repositories { get; init; } = [];
@@ -49,6 +50,7 @@ public sealed class FeatureBoundedContext
         DomainEvents = n.DomainEvents.Select(FeatureDomainEvent.FromDomainEventNode).ToList(),
         IntegrationEvents = n.IntegrationEvents.Select(FeatureDomainEvent.FromDomainEventNode).ToList(),
         EventHandlers = n.EventHandlers.Select(FeatureHandler.FromHandlerNode).ToList(),
+        CommandHandlerTargets = n.CommandHandlerTargets.Select(FeatureCommandHandlerTarget.FromNode).ToList(),
         CommandHandlers = n.CommandHandlers.Select(FeatureHandler.FromHandlerNode).ToList(),
         QueryHandlers = n.QueryHandlers.Select(FeatureHandler.FromHandlerNode).ToList(),
         Repositories = n.Repositories.Select(FeatureRepository.FromRepositoryNode).ToList(),
@@ -145,6 +147,30 @@ public sealed class FeatureValueObject
         Layer = n.Layer,
         IsCustom = n.IsCustom,
         Properties = n.Properties.Select(FeatureProperty.FromGraphProperty).ToList(),
+    };
+}
+
+public sealed class FeatureCommandHandlerTarget
+{
+    public string Name { get; init; } = "";
+    public string FullName { get; init; } = "";
+    public string? Alias { get; init; }
+    public string? Description { get; init; }
+    public string? Layer { get; init; }
+    public bool IsCustom { get; init; }
+    public List<FeatureProperty> Properties { get; init; } = [];
+    public List<string> HandledBy { get; init; } = [];
+
+    internal static FeatureCommandHandlerTarget FromNode(CommandHandlerTargetNode n) => new()
+    {
+        Name = n.Name,
+        FullName = n.FullName,
+        Alias = n.Alias,
+        Description = n.Description,
+        Layer = n.Layer,
+        IsCustom = n.IsCustom,
+        Properties = n.Properties.Select(FeatureProperty.FromGraphProperty).ToList(),
+        HandledBy = [..n.HandledBy],
     };
 }
 

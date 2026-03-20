@@ -25,6 +25,7 @@ const KIND_CFG = {
   subType:          { stereotype: '«Sub Type»',         color: '#a0b4c8', bg: '#1a1e24', border: '#6880a0' },
   event:            { stereotype: '«Domain Event»',     color: '#fdd04e', bg: '#2a2418', border: '#b89530' },
   integrationEvent: { stereotype: '«Integration Event»', color: '#48e8d8', bg: '#14282a', border: '#30a89e' },
+  commandHandlerTarget: { stereotype: '«Handles target»', color: '#f0a050', bg: '#2a2218', border: '#c07830' },
   eventHandler:     { stereotype: '«Event Handler»',    color: '#ff8ac8', bg: '#2a1824', border: '#b85888' },
   commandHandler:   { stereotype: '«Command Handler»',  color: '#ff8ac8', bg: '#2a1824', border: '#b85888' },
   queryHandler:     { stereotype: '«Query Handler»',    color: '#ff8ac8', bg: '#2a1824', border: '#b85888' },
@@ -43,7 +44,8 @@ const RELATION_KINDS = ['Contains', 'References', 'ReferencesById', 'Has', 'HasM
 const KIND_TO_SECTION = {
   aggregate: 'aggregates', entity: 'entities', valueObject: 'valueObjects',
   subType: 'subTypes',
-  event: 'domainEvents', integrationEvent: 'integrationEvents', eventHandler: 'eventHandlers',
+  event: 'domainEvents', integrationEvent: 'integrationEvents',
+  commandHandlerTarget: 'commandHandlerTargets', eventHandler: 'eventHandlers',
   commandHandler: 'commandHandlers', queryHandler: 'queryHandlers',
   repository: 'repositories', service: 'domainServices',
 };
@@ -53,7 +55,8 @@ for (const [k, v] of Object.entries(KIND_TO_SECTION)) SECTION_TO_KIND[v] = k;
 
 const KIND_LABELS = {
   aggregate: 'Aggregate', entity: 'Entity', valueObject: 'Value Object',
-  event: 'Domain Event', integrationEvent: 'Integration Event', eventHandler: 'Event Handler',
+  event: 'Domain Event', integrationEvent: 'Integration Event',
+  commandHandlerTarget: 'Cmd handler target', eventHandler: 'Event Handler',
   commandHandler: 'Command Handler', queryHandler: 'Query Handler',
   repository: 'Repository', service: 'Domain Service',
 };
@@ -1001,7 +1004,7 @@ function refreshPalette() {
 function applyAutoLayout(nodes, edges, nMap) {
   const kindRow = {
     aggregate: 0, entity: 1, valueObject: 1, event: 2, integrationEvent: 2,
-    eventHandler: 3, commandHandler: 3, queryHandler: 3, repository: 4, service: 4,
+    eventHandler: 3, commandHandlerTarget: 2, commandHandler: 3, queryHandler: 3, repository: 4, service: 4,
   };
   const rowBuckets = {};
   for (const n of nodes) {

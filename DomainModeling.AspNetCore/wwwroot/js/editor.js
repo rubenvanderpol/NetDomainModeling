@@ -29,6 +29,7 @@ const KIND_CFG = {
   valueObject:    { stereotype: '«Value Object»',    color: '#4ee8ad', bg: '#142820', border: '#36a87a' },
   event:          { stereotype: '«Domain Event»',       color: '#fdd04e', bg: '#2a2418', border: '#b89530' },
   integrationEvent: { stereotype: '«Integration Event»', color: '#48e8d8', bg: '#14282a', border: '#30a89e' },
+  commandHandlerTarget: { stereotype: '«Handles target»', color: '#f0a050', bg: '#2a2218', border: '#c07830' },
   eventHandler:   { stereotype: '«Event Handler»',       color: '#ff8ac8', bg: '#2a1824', border: '#b85888' },
   commandHandler: { stereotype: '«Command Handler»', color: '#ff8ac8', bg: '#2a1824', border: '#b85888' },
   queryHandler:   { stereotype: '«Query Handler»',   color: '#ff8ac8', bg: '#2a1824', border: '#b85888' },
@@ -41,7 +42,7 @@ const EDGE_COLORS = { Contains: '#60a5fa', References: '#34d399', ReferencesById
 /** Maps diagram kind → context section key */
 const KIND_TO_SECTION = {
   aggregate: 'aggregates', entity: 'entities', valueObject: 'valueObjects',
-  event: 'domainEvents', integrationEvent: 'integrationEvents', eventHandler: 'eventHandlers',
+  event: 'domainEvents', integrationEvent: 'integrationEvents', commandHandlerTarget: 'commandHandlerTargets', eventHandler: 'eventHandlers',
   commandHandler: 'commandHandlers', queryHandler: 'queryHandlers',
   repository: 'repositories', service: 'domainServices',
 };
@@ -49,7 +50,7 @@ const KIND_TO_SECTION = {
 /** Label used in the type-filter UI */
 const KIND_LABEL = {
   aggregate: 'Aggregates', entity: 'Entities', valueObject: 'Value Objects',
-  event: 'Domain Events', integrationEvent: 'Integration Events', eventHandler: 'Event Handlers',
+  event: 'Domain Events', integrationEvent: 'Integration Events', commandHandlerTarget: 'Cmd handler targets', eventHandler: 'Event Handlers',
   commandHandler: 'Cmd Handlers', queryHandler: 'Query Handlers',
   repository: 'Repositories', service: 'Services',
 };
@@ -254,6 +255,7 @@ function buildGraph() {
   (ctx.valueObjects || []).forEach(v => addNode(v, 'valueObject'));
   (ctx.domainEvents || []).forEach(e => addNode(e, 'event'));
   (ctx.integrationEvents || []).forEach(e => addNode(e, 'integrationEvent'));
+  (ctx.commandHandlerTargets || []).forEach(c => addNode(c, 'commandHandlerTarget'));
   (ctx.eventHandlers || []).forEach(h => addNode(h, 'eventHandler'));
   (ctx.commandHandlers || []).forEach(h => addNode(h, 'commandHandler'));
   (ctx.queryHandlers || []).forEach(h => addNode(h, 'queryHandler'));
@@ -303,7 +305,7 @@ function applyVisibility() {
 
 // ── Auto-layout ──────────────────────────────────────
 function applyAutoLayout(nodes, edges, nMap) {
-  const kindRow = { aggregate: 0, entity: 1, valueObject: 1, event: 2, integrationEvent: 2, eventHandler: 3, commandHandler: 3, queryHandler: 3, repository: 4, service: 4 };
+  const kindRow = { aggregate: 0, entity: 1, valueObject: 1, event: 2, integrationEvent: 2, commandHandlerTarget: 2, eventHandler: 3, commandHandler: 3, queryHandler: 3, repository: 4, service: 4 };
   const rowBuckets = {};
   for (const n of nodes) { const r = kindRow[n.kind] || 0; (rowBuckets[r] = rowBuckets[r] || []).push(n); }
   for (const [row, rNodes] of Object.entries(rowBuckets)) {
@@ -713,6 +715,7 @@ export function downloadJson() {
       valueObjects: filterList(ctx.valueObjects),
       domainEvents: filterList(ctx.domainEvents),
       integrationEvents: filterList(ctx.integrationEvents),
+      commandHandlerTargets: filterList(ctx.commandHandlerTargets),
       eventHandlers: filterList(ctx.eventHandlers),
       commandHandlers: filterList(ctx.commandHandlers),
       queryHandlers: filterList(ctx.queryHandlers),

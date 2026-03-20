@@ -64,6 +64,21 @@ internal sealed class AssemblyScanner
         var repositoryNodes = repositoryTypes.Select(t => BuildRepositoryNode(t, aggregateTypes, _config.GetLayer(t))).ToList();
         var domainServiceNodes = domainServiceTypes.Select(t => BuildDomainServiceNode(t, _config.GetLayer(t))).ToList();
 
+        var commandHandlerTargetNodes = DiscoverCommandHandlerTargets(
+            allTypes,
+            knownDomainTypes,
+            entityNodes,
+            aggregateNodes,
+            valueObjectNodes,
+            domainEventNodes,
+            integrationEventNodes,
+            eventHandlerNodes,
+            commandHandlerNodes,
+            queryHandlerNodes,
+            repositoryNodes,
+            domainServiceNodes);
+        CrossReferenceCommandHandlerTargets(commandHandlerTargetNodes, commandHandlerNodes);
+
         // Build relationships
         var relationships = new List<Relationship>();
 
@@ -218,6 +233,7 @@ internal sealed class AssemblyScanner
             ApplyDescriptions(queryHandlerNodes, xmlDocReader);
             ApplyDescriptions(repositoryNodes, xmlDocReader);
             ApplyDescriptions(domainServiceNodes, xmlDocReader);
+            ApplyDescriptions(commandHandlerTargetNodes, xmlDocReader);
             ApplyDescriptions(subTypeNodes, xmlDocReader);
         }
 
@@ -230,6 +246,7 @@ internal sealed class AssemblyScanner
             DomainEvents = domainEventNodes,
             IntegrationEvents = integrationEventNodes,
             EventHandlers = eventHandlerNodes,
+            CommandHandlerTargets = commandHandlerTargetNodes,
             CommandHandlers = commandHandlerNodes,
             QueryHandlers = queryHandlerNodes,
             Repositories = repositoryNodes,
@@ -369,6 +386,79 @@ internal sealed class AssemblyScanner
             FullName = type.FullName!,
             Layer = layer
         };
+    }
+
+    /// <summary>
+    /// Surfaces types that command handlers list in <see cref="HandlerNode.Handles"/> when those types
+    /// are not already modeled as another building block, so "Handles" edges have diagram endpoints (GitHub #10).
+    /// </summary>
+    private List<CommandHandlerTargetNode> DiscoverCommandHandlerTargets(
+        List<Type> allTypes,
+        HashSet<string> knownDomainTypes,
+        List<EntityNode> entityNodes,
+        List<AggregateNode> aggregateNodes,
+        List<ValueObjectNode> valueObjectNodes,
+        List<DomainEventNode> domainEventNodes,
+        List<DomainEventNode> integrationEventNodes,
+        List<HandlerNode> eventHandlerNodes,
+        List<HandlerNode> commandHandlerNodes,
+        List<HandlerNode> queryHandlerNodes,
+        List<RepositoryNode> repositoryNodes,
+        List<DomainServiceNode> domainServiceNodes)
+    {
+        var excluded = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var n in entityNodes) excluded.Add(n.FullName);
+        foreach (var n in aggregateNodes) excluded.Add(n.FullName);
+        foreach (var n in valueObjectNodes) excluded.Add(n.FullName);
+        foreach (var n in domainEventNodes) excluded.Add(n.FullName);
+        foreach (var n in integrationEventNodes) excluded.Add(n.FullName);
+        foreach (var n in eventHandlerNodes) excluded.Add(n.FullName);
+        foreach (var n in commandHandlerNodes) excluded.Add(n.FullName);
+        foreach (var n in queryHandlerNodes) excluded.Add(n.FullName);
+        foreach (var n in repositoryNodes) excluded.Add(n.FullName);
+        foreach (var n in domainServiceNodes) excluded.Add(n.FullName);
+
+        var byFullName = allTypes
+            .Where(t => t.FullName is not null)
+            .ToDictionary(t => t.FullName!, StringComparer.Ordinal);
+
+        var targetTypes = new HashSet<Type>();
+
+        foreach (var handler in commandHandlerNodes)
+        {
+            foreach (var handledFullName in handler.Handles)
+            {
+                if (excluded.Contains(handledFullName)) continue;
+                if (!byFullName.TryGetValue(handledFullName, out var t)) continue;
+                targetTypes.Add(t);
+            }
+        }
+
+        return targetTypes
+            .OrderBy(t => t.Name, StringComparer.Ordinal)
+            .Select(t => new CommandHandlerTargetNode
+            {
+                Name = t.Name,
+                FullName = t.FullName!,
+                Layer = _config.GetLayer(t),
+                Properties = GetProperties(t, knownDomainTypes)
+            })
+            .ToList();
+    }
+
+    private static void CrossReferenceCommandHandlerTargets(
+        List<CommandHandlerTargetNode> targets,
+        List<HandlerNode> commandHandlers)
+    {
+        var map = targets.ToDictionary(c => c.FullName, StringComparer.Ordinal);
+        foreach (var handler in commandHandlers)
+        {
+            foreach (var handled in handler.Handles)
+            {
+                if (map.TryGetValue(handled, out var node))
+                    node.HandledBy.Add(handler.FullName);
+            }
+        }
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────
@@ -949,6 +1039,12 @@ internal sealed class AssemblyScanner
     }
 
     private static void ApplyDescriptions(IEnumerable<HandlerNode> nodes, XmlDocReader reader)
+    {
+        foreach (var node in nodes)
+            node.Description ??= reader.GetTypeSummary(node.FullName);
+    }
+
+    private static void ApplyDescriptions(IEnumerable<CommandHandlerTargetNode> nodes, XmlDocReader reader)
     {
         foreach (var node in nodes)
             node.Description ??= reader.GetTypeSummary(node.FullName);

@@ -96,6 +96,19 @@ internal static class FeatureJsonConverter
                             Properties = properties,
                         });
                         break;
+                    case "commandHandlerTarget":
+                    case "command": // legacy feature JSON
+                        ctx.CommandHandlerTargets.Add(new CommandHandlerTargetNode
+                        {
+                            Name = name,
+                            FullName = id,
+                            Alias = alias,
+                            Description = description,
+                            Layer = GetOptString(node, "layer"),
+                            IsCustom = isCustom,
+                            Properties = properties,
+                        });
+                        break;
                     case "eventHandler":
                         ctx.EventHandlers.Add(new HandlerNode
                         {

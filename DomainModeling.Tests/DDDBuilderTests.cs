@@ -86,6 +86,22 @@ public class DDDBuilderTests
     }
 
     [Fact]
+    public void Build_SurfacesCommandHandlerTargets_ForHandlesRelationships()
+    {
+        var graph = BuildSampleGraph();
+        var ctx = graph.BoundedContexts.Single();
+
+        ctx.CommandHandlerTargets.Should().Contain(t => t.Name == "PlaceOrderCommand");
+        var target = ctx.CommandHandlerTargets.Single(t => t.Name == "PlaceOrderCommand");
+        target.HandledBy.Should().Contain(h => h.Contains("PlaceOrderCommandHandler"));
+
+        ctx.Relationships.Should().Contain(r =>
+            r.Kind == RelationshipKind.Handles &&
+            r.SourceType.Contains("PlaceOrderCommandHandler") &&
+            r.TargetType.Contains("PlaceOrderCommand"));
+    }
+
+    [Fact]
     public void Build_DiscoversRepositories()
     {
         var graph = BuildSampleGraph();

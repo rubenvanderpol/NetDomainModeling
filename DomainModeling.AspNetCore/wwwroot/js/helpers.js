@@ -25,6 +25,7 @@ export function kindMeta(kind) {
     subTypes:            { tag: 'SUB TYPE',             color: 'var(--clr-sub-type)',           bg: 'var(--clr-sub-type-bg)' },
     domainEvents:        { tag: 'DOMAIN EVENT',         color: 'var(--clr-event)',              bg: 'var(--clr-event-bg)' },
     integrationEvents:   { tag: 'INTEGRATION EVENT',    color: 'var(--clr-integration-event)',  bg: 'var(--clr-integration-event-bg)' },
+    commandHandlerTargets: { tag: 'HANDLES TARGET',       color: 'var(--clr-command)',            bg: 'var(--clr-command-bg)' },
     eventHandlers:       { tag: 'EVENT HANDLER',        color: 'var(--clr-handler)',            bg: 'var(--clr-handler-bg)' },
     commandHandlers:     { tag: 'COMMAND HANDLER',      color: 'var(--clr-handler)',            bg: 'var(--clr-handler-bg)' },
     queryHandlers:       { tag: 'QUERY HANDLER',        color: 'var(--clr-handler)',            bg: 'var(--clr-handler-bg)' },
@@ -61,7 +62,7 @@ export function syntaxHighlight(json) {
 
 /** The canonical list of browsable section keys. */
 export const ALL_SECTIONS = [
-  'aggregates', 'entities', 'valueObjects', 'subTypes', 'domainEvents', 'integrationEvents',
+  'aggregates', 'entities', 'valueObjects', 'subTypes', 'domainEvents', 'integrationEvents', 'commandHandlerTargets',
   'eventHandlers', 'commandHandlers', 'queryHandlers',
   'repositories', 'domainServices'
 ];
@@ -74,6 +75,7 @@ export const SECTION_META = [
   { key: 'subTypes',              label: 'Sub Types',            color: 'var(--clr-sub-type)',           tag: 'SUB',  bg: 'var(--clr-sub-type-bg)' },
   { key: 'domainEvents',         label: 'Domain Events',        color: 'var(--clr-event)',              tag: 'EVT',  bg: 'var(--clr-event-bg)' },
   { key: 'integrationEvents',    label: 'Integration Events',   color: 'var(--clr-integration-event)',  tag: 'INT',  bg: 'var(--clr-integration-event-bg)' },
+  { key: 'commandHandlerTargets', label: 'Cmd handler targets', color: 'var(--clr-command)',            tag: 'CHT',  bg: 'var(--clr-command-bg)' },
   { key: 'eventHandlers',        label: 'Event Handlers',       color: 'var(--clr-handler)',            tag: 'HDL',  bg: 'var(--clr-handler-bg)' },
   { key: 'commandHandlers',      label: 'Command Handlers',     color: 'var(--clr-handler)',            tag: 'CMD',  bg: 'var(--clr-handler-bg)' },
   { key: 'queryHandlers',        label: 'Query Handlers',       color: 'var(--clr-handler)',            tag: 'QRY',  bg: 'var(--clr-handler-bg)' },
