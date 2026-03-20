@@ -44,6 +44,11 @@ public sealed class BoundedContextNode
     public List<DomainEventNode> DomainEvents { get; init; } = [];
     public List<DomainEventNode> IntegrationEvents { get; init; } = [];
     public List<HandlerNode> EventHandlers { get; init; } = [];
+    /// <summary>
+    /// Types referenced by command handlers via <see cref="RelationshipKind.Handles"/> that are not
+    /// already another building block. Exposed so diagram UIs can render handler → target links (GitHub #10).
+    /// </summary>
+    public List<CommandHandlerTargetNode> CommandHandlerTargets { get; init; } = [];
     public List<HandlerNode> CommandHandlers { get; init; } = [];
     public List<HandlerNode> QueryHandlers { get; init; } = [];
     public List<RepositoryNode> Repositories { get; init; } = [];
@@ -170,6 +175,32 @@ public sealed class DomainEventNode
     public List<string> EmittedBy { get; init; } = [];
 
     /// <summary>Handlers that handle this event.</summary>
+    public List<string> HandledBy { get; init; } = [];
+}
+
+/// <summary>
+/// A type that appears as the target of a <see cref="RelationshipKind.Handles"/> edge from a command handler.
+/// </summary>
+public sealed class CommandHandlerTargetNode
+{
+    public required string Name { get; init; }
+    public required string FullName { get; init; }
+
+    /// <summary>Display name override (alias) set in the feature editor.</summary>
+    public string? Alias { get; set; }
+
+    /// <summary>Friendly description from XML documentation comments.</summary>
+    public string? Description { get; set; }
+
+    /// <summary>The architectural layer this type belongs to (Domain, Application, Infrastructure).</summary>
+    public string? Layer { get; init; }
+
+    /// <summary>When <c>true</c>, indicates this type was manually created in the feature editor rather than discovered from assemblies.</summary>
+    public bool IsCustom { get; init; }
+
+    public List<PropertyInfo> Properties { get; init; } = [];
+
+    /// <summary>Command handlers that reference this type in <see cref="HandlerNode.Handles"/>.</summary>
     public List<string> HandledBy { get; init; } = [];
 }
 

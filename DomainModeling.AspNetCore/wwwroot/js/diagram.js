@@ -30,6 +30,7 @@ const KIND_CFG = {
   subType:          { label: 'Sub Types',            color: '#a0b4c8', bg: '#1a1e24', border: '#6880a0', stereotype: '\xABSub Type\xBB' },
   event:            { label: 'Domain Events',        color: '#fdd04e', bg: '#2a2418', border: '#b89530', stereotype: '\xABDomain Event\xBB' },
   integrationEvent: { label: 'Integration Events',   color: '#48e8d8', bg: '#14282a', border: '#30a89e', stereotype: '\xABIntegration Event\xBB' },
+  commandHandlerTarget: { label: 'Cmd handler targets', color: '#f0a050', bg: '#2a2218', border: '#c07830', stereotype: '\xABHandles target\xBB' },
   eventHandler:     { label: 'Event Handlers',       color: '#ff8ac8', bg: '#2a1824', border: '#b85888', stereotype: '\xABEvent Handler\xBB' },
   commandHandler:   { label: 'Command Handlers',     color: '#ff8ac8', bg: '#2a1824', border: '#b85888', stereotype: '\xABCommand Handler\xBB' },
   queryHandler:     { label: 'Query Handlers',       color: '#ff8ac8', bg: '#2a1824', border: '#b85888', stereotype: '\xABQuery Handler\xBB' },
@@ -306,7 +307,7 @@ export function initDiagram(ctx, boundedContexts) {
   // Build a lookup: fullName → bounded context name and layer
   const nodeContextMap = {};
   const nodeLayerMap = {};
-  const allSections = ['aggregates', 'entities', 'valueObjects', 'subTypes', 'domainEvents', 'integrationEvents', 'eventHandlers', 'commandHandlers', 'queryHandlers', 'repositories', 'domainServices'];
+  const allSections = ['aggregates', 'entities', 'valueObjects', 'subTypes', 'domainEvents', 'integrationEvents', 'commandHandlerTargets', 'eventHandlers', 'commandHandlers', 'queryHandlers', 'repositories', 'domainServices'];
   if (boundedContexts && boundedContexts.length > 1) {
     for (const bc of boundedContexts) {
       for (const sec of allSections) {
@@ -347,6 +348,7 @@ export function initDiagram(ctx, boundedContexts) {
   (ctx.subTypes || []).forEach(s => addNode(s, 'subType'));
   (ctx.domainEvents || []).forEach(e => addNode(e, 'event'));
   (ctx.integrationEvents || []).forEach(e => addNode(e, 'integrationEvent'));
+  (ctx.commandHandlerTargets || []).forEach(c => addNode(c, 'commandHandlerTarget'));
   (ctx.eventHandlers || []).forEach(h => addNode(h, 'eventHandler'));
   (ctx.commandHandlers || []).forEach(h => addNode(h, 'commandHandler'));
   (ctx.queryHandlers || []).forEach(h => addNode(h, 'queryHandler'));
@@ -531,7 +533,7 @@ function applyAutoLayout(nodes, edges, nMap) {
   const ctxNames = Object.keys(ctxGroups).sort();
   const hasMultipleContexts = ctxNames.length > 1 && !ctxNames.includes('__default');
 
-  const kindRow = { aggregate: 0, entity: 1, valueObject: 1, subType: 1, event: 2, integrationEvent: 2, eventHandler: 3, commandHandler: 3, queryHandler: 3, repository: 4, service: 4 };
+  const kindRow = { aggregate: 0, entity: 1, valueObject: 1, subType: 1, event: 2, integrationEvent: 2, commandHandlerTarget: 2, eventHandler: 3, commandHandler: 3, queryHandler: 3, repository: 4, service: 4 };
 
   if (hasMultipleContexts) {
     // Layout each context as a separate group, offset horizontally

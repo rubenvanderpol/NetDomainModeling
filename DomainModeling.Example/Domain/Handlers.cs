@@ -32,10 +32,20 @@ public class WelcomeEmailHandler : IEventHandler<CustomerRegisteredEvent>
 
 public record PlaceOrderCommand(Guid CustomerId, List<string> Products);
 
-public class PlaceOrderCommandHandler : ICommandHandler<PlaceOrderCommand>
+public class PlaceOrderCommandHandler(InMemoryRepository<Order> Orders) : ICommandHandler<PlaceOrderCommand>
 {
-    public Task HandleAsync(PlaceOrderCommand command, CancellationToken ct = default)
-        => Task.CompletedTask;
+    public async Task HandleAsync(PlaceOrderCommand command, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(Orders);
+
+        var order = new Order
+        {
+            Customer = new Customer { Name = "MyCustomer" }
+        };
+
+        order.Place();
+        await Task.CompletedTask;
+    }
 }
 
 public record RegisterCustomerCommand(string Name, string Email);

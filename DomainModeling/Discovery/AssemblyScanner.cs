@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using DomainModeling.Builder;
 using DomainModeling.Graph;
 using MethodInfo = DomainModeling.Graph.MethodInfo;
@@ -20,17 +21,24 @@ internal sealed class AssemblyScanner
     public BoundedContextNode Scan()
     {
         var assemblies = _config.GetAllAssemblies();
-        var allTypes = assemblies
-            .SelectMany(SafeGetTypes)
-            .Where(t => t is { IsAbstract: false, IsInterface: false })
-            .Distinct()
-            .ToList();
+        var assemblyOrder = new Dictionary<Assembly, int>();
+        for (var i = 0; i < assemblies.Count; i++)
+        {
+            if (!assemblyOrder.ContainsKey(assemblies[i]))
+                assemblyOrder[assemblies[i]] = i;
+        }
+
+        // Multiple assemblies can expose types with the same FullName (e.g. duplicated sample types
+        // in DomainModeling.Example vs DomainModeling.Example.Shared). Type reference Distinct() does not
+        // collapse those; pick one Type per FullName following configured assembly order.
+        var allTypes = DeduplicateTypesByFullName(
+            assemblies.SelectMany(SafeGetTypes).Where(t => t is { IsAbstract: false, IsInterface: false }),
+            assemblyOrder);
 
         // Also collect abstract / interface types for generic-argument resolution
-        var allExportedTypes = assemblies
-            .SelectMany(SafeGetTypes)
-            .Distinct()
-            .ToList();
+        var allExportedTypes = DeduplicateTypesByFullName(
+            assemblies.SelectMany(SafeGetTypes),
+            assemblyOrder);
 
         // Categorize types based on configured conventions
         var entityTypes = allTypes.Where(t => _config.EntityConvention.Matches(t)).ToList();
@@ -63,6 +71,21 @@ internal sealed class AssemblyScanner
         var queryHandlerNodes = queryHandlerTypes.Select(t => BuildHandlerNode(t, knownDomainTypes, _config.GetLayer(t))).ToList();
         var repositoryNodes = repositoryTypes.Select(t => BuildRepositoryNode(t, aggregateTypes, _config.GetLayer(t))).ToList();
         var domainServiceNodes = domainServiceTypes.Select(t => BuildDomainServiceNode(t, _config.GetLayer(t))).ToList();
+
+        var commandHandlerTargetNodes = DiscoverCommandHandlerTargets(
+            allTypes,
+            knownDomainTypes,
+            entityNodes,
+            aggregateNodes,
+            valueObjectNodes,
+            domainEventNodes,
+            integrationEventNodes,
+            eventHandlerNodes,
+            commandHandlerNodes,
+            queryHandlerNodes,
+            repositoryNodes,
+            domainServiceNodes);
+        CrossReferenceCommandHandlerTargets(commandHandlerTargetNodes, commandHandlerNodes);
 
         // Build relationships
         var relationships = new List<Relationship>();
@@ -138,6 +161,22 @@ internal sealed class AssemblyScanner
                     TargetType = handled,
                     Kind = RelationshipKind.Handles,
                     Label = "handles"
+                });
+            }
+        }
+
+        // CommandHandler → aggregate (instance method calls on aggregates, e.g. order.Place())
+        var aggregateFullNames = new HashSet<string>(aggregateNodes.Select(a => a.FullName), StringComparer.Ordinal);
+        foreach (var handlerType in commandHandlerTypes)
+        {
+            foreach (var (targetFullName, methodName) in DetectInvocationsOnAggregates(handlerType, aggregateFullNames))
+            {
+                relationships.Add(new Relationship
+                {
+                    SourceType = handlerType.FullName!,
+                    TargetType = targetFullName,
+                    Kind = RelationshipKind.References,
+                    Label = $"invokes {methodName}()"
                 });
             }
         }
@@ -218,6 +257,7 @@ internal sealed class AssemblyScanner
             ApplyDescriptions(queryHandlerNodes, xmlDocReader);
             ApplyDescriptions(repositoryNodes, xmlDocReader);
             ApplyDescriptions(domainServiceNodes, xmlDocReader);
+            ApplyDescriptions(commandHandlerTargetNodes, xmlDocReader);
             ApplyDescriptions(subTypeNodes, xmlDocReader);
         }
 
@@ -230,6 +270,7 @@ internal sealed class AssemblyScanner
             DomainEvents = domainEventNodes,
             IntegrationEvents = integrationEventNodes,
             EventHandlers = eventHandlerNodes,
+            CommandHandlerTargets = commandHandlerTargetNodes,
             CommandHandlers = commandHandlerNodes,
             QueryHandlers = queryHandlerNodes,
             Repositories = repositoryNodes,
@@ -369,6 +410,80 @@ internal sealed class AssemblyScanner
             FullName = type.FullName!,
             Layer = layer
         };
+    }
+
+    /// <summary>
+    /// Surfaces types that command handlers list in <see cref="HandlerNode.Handles"/> when those types
+    /// are not already modeled as another building block, so "Handles" edges have diagram endpoints (GitHub #10).
+    /// </summary>
+    private List<CommandHandlerTargetNode> DiscoverCommandHandlerTargets(
+        List<Type> allTypes,
+        HashSet<string> knownDomainTypes,
+        List<EntityNode> entityNodes,
+        List<AggregateNode> aggregateNodes,
+        List<ValueObjectNode> valueObjectNodes,
+        List<DomainEventNode> domainEventNodes,
+        List<DomainEventNode> integrationEventNodes,
+        List<HandlerNode> eventHandlerNodes,
+        List<HandlerNode> commandHandlerNodes,
+        List<HandlerNode> queryHandlerNodes,
+        List<RepositoryNode> repositoryNodes,
+        List<DomainServiceNode> domainServiceNodes)
+    {
+        var excluded = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var n in entityNodes) excluded.Add(n.FullName);
+        foreach (var n in aggregateNodes) excluded.Add(n.FullName);
+        foreach (var n in valueObjectNodes) excluded.Add(n.FullName);
+        foreach (var n in domainEventNodes) excluded.Add(n.FullName);
+        foreach (var n in integrationEventNodes) excluded.Add(n.FullName);
+        foreach (var n in eventHandlerNodes) excluded.Add(n.FullName);
+        foreach (var n in commandHandlerNodes) excluded.Add(n.FullName);
+        foreach (var n in queryHandlerNodes) excluded.Add(n.FullName);
+        foreach (var n in repositoryNodes) excluded.Add(n.FullName);
+        foreach (var n in domainServiceNodes) excluded.Add(n.FullName);
+
+        var byFullName = allTypes
+            .Where(t => t.FullName is not null)
+            .GroupBy(t => t.FullName!, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+
+        var targetTypes = new HashSet<Type>();
+
+        foreach (var handler in commandHandlerNodes)
+        {
+            foreach (var handledFullName in handler.Handles)
+            {
+                if (excluded.Contains(handledFullName)) continue;
+                if (!byFullName.TryGetValue(handledFullName, out var t)) continue;
+                targetTypes.Add(t);
+            }
+        }
+
+        return targetTypes
+            .OrderBy(t => t.Name, StringComparer.Ordinal)
+            .Select(t => new CommandHandlerTargetNode
+            {
+                Name = t.Name,
+                FullName = t.FullName!,
+                Layer = _config.GetLayer(t),
+                Properties = GetProperties(t, knownDomainTypes)
+            })
+            .ToList();
+    }
+
+    private static void CrossReferenceCommandHandlerTargets(
+        List<CommandHandlerTargetNode> targets,
+        List<HandlerNode> commandHandlers)
+    {
+        var map = targets.ToDictionary(c => c.FullName, StringComparer.Ordinal);
+        foreach (var handler in commandHandlers)
+        {
+            foreach (var handled in handler.Handles)
+            {
+                if (map.TryGetValue(handled, out var node))
+                    node.HandledBy.Add(handler.FullName);
+            }
+        }
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────
@@ -761,6 +876,111 @@ internal sealed class AssemblyScanner
             .ToList();
     }
 
+    /// <summary>
+    /// Finds instance method calls whose declaring type is a discovered aggregate (e.g. <c>order.Place()</c>
+    /// from a command handler), including inside async state machines.
+    /// </summary>
+    private static List<(string TargetFullName, string MethodName)> DetectInvocationsOnAggregates(
+        Type handlerType,
+        HashSet<string> aggregateFullNames)
+    {
+        var results = new List<(string, string)>();
+        var seen = new HashSet<(string Target, string Method)>();
+
+        void OnCall(string targetFullName, string methodName)
+        {
+            if (seen.Add((targetFullName, methodName)))
+                results.Add((targetFullName, methodName));
+        }
+
+        ScanTypeMethodsForAggregateCalls(handlerType, aggregateFullNames, OnCall);
+
+        foreach (var nested in handlerType.GetNestedTypes(BindingFlags.NonPublic | BindingFlags.Public))
+        {
+            if (nested.GetCustomAttributes(typeof(CompilerGeneratedAttribute), false).Length == 0)
+                continue;
+
+            ScanTypeMethodsForAggregateCalls(nested, aggregateFullNames, OnCall);
+        }
+
+        return results;
+    }
+
+    private static void ScanTypeMethodsForAggregateCalls(
+        Type type,
+        HashSet<string> aggregateFullNames,
+        Action<string, string> onCall)
+    {
+        var allMethods = type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly)
+            .Cast<MethodBase>()
+            .Concat(type.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static));
+
+        foreach (var method in allMethods)
+            ScanMethodBodyForCallsOnAggregates(method, type.Module, aggregateFullNames, onCall);
+    }
+
+    private static void ScanMethodBodyForCallsOnAggregates(
+        MethodBase method,
+        Module module,
+        HashSet<string> aggregateFullNames,
+        Action<string, string> onCall)
+    {
+        System.Reflection.MethodBody? body;
+        try { body = method.GetMethodBody(); }
+        catch { return; }
+
+        if (body is null)
+            return;
+
+        var il = body.GetILAsByteArray();
+        if (il is null)
+            return;
+
+        const byte call = 0x28;
+        const byte callvirt = 0x6F;
+
+        for (var i = 0; i < il.Length; i++)
+        {
+            if (il[i] is not (call or callvirt))
+                continue;
+
+            if (i + 4 >= il.Length)
+                continue;
+
+            var token = il[i + 1]
+                      | (il[i + 2] << 8)
+                      | (il[i + 3] << 16)
+                      | (il[i + 4] << 24);
+
+            try
+            {
+                var resolved = module.ResolveMethod(token);
+                if (resolved is not System.Reflection.MethodInfo mi)
+                    continue;
+                if (mi.IsStatic)
+                    continue;
+                if (string.Equals(mi.Name, ".ctor", StringComparison.Ordinal))
+                    continue;
+                if (mi.IsSpecialName)
+                    continue;
+
+                var decl = mi.DeclaringType;
+                if (decl?.FullName is not { } declFullName)
+                    continue;
+                if (!aggregateFullNames.Contains(declFullName))
+                    continue;
+
+                onCall(declFullName, mi.Name);
+            }
+            catch
+            {
+                // Token might not be a method token
+            }
+
+            i += 4;
+        }
+    }
+
     private static void AddPropertyReferences(IEnumerable<EntityNode> nodes, HashSet<string> knownDomainTypes, List<Relationship> relationships)
     {
         foreach (var node in nodes)
@@ -884,6 +1104,27 @@ internal sealed class AssemblyScanner
         }
     }
 
+    /// <summary>
+    /// When the same CLR full name appears in more than one scanned assembly, keep a single
+    /// <see cref="Type"/> — prefer the assembly that appears earlier in <paramref name="assemblyOrder"/>.
+    /// </summary>
+    private static List<Type> DeduplicateTypesByFullName(IEnumerable<Type> types, Dictionary<Assembly, int> assemblyOrder)
+    {
+        var list = types as IList<Type> ?? types.ToList();
+        var withFullName = list.Where(t => t.FullName is not null).ToList();
+        var withoutFullName = list.Where(t => t.FullName is null).Distinct().ToList();
+
+        static int Order(Dictionary<Assembly, int> order, Assembly a) =>
+            order.TryGetValue(a, out var i) ? i : int.MaxValue;
+
+        var deduped = withFullName
+            .GroupBy(t => t.FullName!, StringComparer.Ordinal)
+            .Select(g => g.OrderBy(t => Order(assemblyOrder, t.Assembly)).First())
+            .ToList();
+
+        return deduped.Concat(withoutFullName).ToList();
+    }
+
     private static IEnumerable<Type> SafeGetTypes(Assembly assembly)
     {
         try
@@ -949,6 +1190,12 @@ internal sealed class AssemblyScanner
     }
 
     private static void ApplyDescriptions(IEnumerable<HandlerNode> nodes, XmlDocReader reader)
+    {
+        foreach (var node in nodes)
+            node.Description ??= reader.GetTypeSummary(node.FullName);
+    }
+
+    private static void ApplyDescriptions(IEnumerable<CommandHandlerTargetNode> nodes, XmlDocReader reader)
     {
         foreach (var node in nodes)
             node.Description ??= reader.GetTypeSummary(node.FullName);

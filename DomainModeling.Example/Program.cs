@@ -1,9 +1,15 @@
+using System.Reflection;
 using DomainModeling.AspNetCore;
 using DomainModeling.Builder;
 using DomainModeling.Example.Domain;
 using DomainModeling.Example.Shipping.Domain;
 
 var builder = WebApplication.CreateBuilder(args);
+
+static Assembly SharedExampleAssembly(Assembly anyDomainAssembly) =>
+    anyDomainAssembly.GetReferencedAssemblies()
+        .Select(Assembly.Load)
+        .First(a => string.Equals(a.GetName().Name, "DomainModeling.Example.Shared", StringComparison.Ordinal));
 
 // Build the domain graph describing our bounded contexts
 var domainGraph = DDDBuilder.Create(ctx => ctx
@@ -18,7 +24,7 @@ var domainGraph = DDDBuilder.Create(ctx => ctx
         .CommandHandlers(h => h.Implements(typeof(ICommandHandler<>)))
         .Repositories(r => r.Implements(typeof(IRepository<>)))
     )
-    .WithSharedAssembly(typeof(IntegrationEvent).Assembly)
+    .WithSharedAssembly(SharedExampleAssembly(typeof(Product).Assembly))
     .WithBoundedContext("Catalog", ctx => ctx
         .WithDomainAssembly(typeof(Product).Assembly)
     )

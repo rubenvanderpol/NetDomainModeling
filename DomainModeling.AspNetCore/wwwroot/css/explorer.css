@@ -22,6 +22,9 @@
   --clr-event-bg: rgba(253,208,78,.14);
   --clr-integration-event: #48e8d8;
   --clr-integration-event-bg: rgba(72,232,216,.14);
+  /* Cmd handler Handles targets (relation endpoints), not a separate “commands” taxonomy */
+  --clr-command: #f0a050;
+  --clr-command-bg: rgba(240,160,80,.14);
   --clr-handler: #ff8ac8;
   --clr-handler-bg: rgba(255,138,200,.14);
   --clr-repository: #ffab5c;
