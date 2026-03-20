@@ -65,8 +65,18 @@
 
 .fe-new-feature {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   margin-top: 6px;
+}
+
+.fe-checkbox-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-dim);
 }
 
 /* ── Inputs ───────────────────────────────────────── */

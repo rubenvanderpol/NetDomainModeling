@@ -9,7 +9,6 @@ const API_URL = window.__config?.apiUrl || '/domain-model/json';
 const BASE_URL = API_URL.replace(/\/json$/, '');
 const TESTING_MODE = window.__config?.testingMode === true;
 const FEATURE_EDITOR_MODE = window.__config?.featureEditorMode === true;
-const FEATURE_EDITOR_READ_ONLY_MODE = window.__config?.featureEditorReadOnlyMode === true;
 
 let testingModule = null; // lazy-loaded when testing mode is on
 let featureEditorModule = null; // lazy-loaded when feature editor mode is on
@@ -118,9 +117,7 @@ async function init() {
     // Lazy-load feature editor module when feature editor mode is enabled
     if (FEATURE_EDITOR_MODE) {
       featureEditorModule = await import('./feature-editor.js');
-      await featureEditorModule.initFeatureEditor(BASE_URL, data, {
-        readOnlyMode: FEATURE_EDITOR_READ_ONLY_MODE,
-      });
+      await featureEditorModule.initFeatureEditor(BASE_URL, data);
       wireFeatureEditorGlobals();
     }
 

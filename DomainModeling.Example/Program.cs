@@ -49,7 +49,6 @@ app.MapDomainModel(domainGraph, configure: opts =>
 {
     opts.EnableDeveloperView = true;
     opts.EnableFeatureEditor = true;
-    opts.EnableReadOnlyFeatureEditor = true;
     opts.Testing.RepositoryInterfaceType = typeof(IRepository<>);
     opts.Testing.Repository(repo => repo
         .Add()

@@ -70,20 +70,23 @@ let baseUrl = '';
 let domainData = null;   // full domain graph
 let featureList = [];     // list of feature names
 let currentFeatureName = null;
+let currentFeatureReadOnly = false;
 let st = null;            // current feature editor state
 let dirty = false;
 let connecting = null;    // { sourceId, mouseX, mouseY } when drawing a relation line
 let featureExports = [];  // available export registrations from server
-let readOnlyMode = false; // when true, features can only include existing graph items
 
 // ── Public API ───────────────────────────────────────
 
-export async function initFeatureEditor(apiBaseUrl, data, opts = {}) {
+export async function initFeatureEditor(apiBaseUrl, data) {
   baseUrl = apiBaseUrl;
   domainData = data;
-  readOnlyMode = opts.readOnlyMode === true;
   await loadFeatureList();
   await loadFeatureExports();
+}
+
+function isReadOnlyFeature() {
+  return currentFeatureReadOnly === true;
 }
 
 export function renderFeatureEditorView() {
@@ -104,7 +107,7 @@ export function renderFeatureEditorView() {
   } else {
     html += '<div class="fe-canvas-toolbar">';
     html += `<span class="fe-feature-name">${esc(currentFeatureName)}</span>`;
-    if (readOnlyMode) {
+    if (isReadOnlyFeature()) {
       html += '<span class="fe-mode-badge" title="Only existing domain items can be included">read-only feature mode</span>';
     }
     html += `<span class="fe-dirty-indicator" id="feDirtyIndicator" style="display:${dirty ? 'inline' : 'none'}">● unsaved</span>`;
@@ -169,6 +172,7 @@ function renderFeatureListPanel() {
   html += '</div>';
   html += '<div class="fe-new-feature">';
   html += '<input type="text" class="fe-input" id="feNewFeatureName" placeholder="New feature name…" />';
+  html += '<label class="fe-checkbox-row"><input type="checkbox" id="feNewFeatureReadOnly" /> Read-only</label>';
   html += '<button class="fe-btn primary" onclick="window.__featureEditor.createFeature()">+ Create</button>';
   html += '</div>';
   html += '</div>';
@@ -179,13 +183,13 @@ function renderFeatureListPanel() {
 
 function renderPalettePanel() {
   let html = '<div class="fe-section">';
-  html += `<div class="fe-section-header">${readOnlyMode ? 'Add Existing Types' : 'Add Types'}</div>`;
+  html += `<div class="fe-section-header">${isReadOnlyFeature() ? 'Add Existing Types' : 'Add Types'}</div>`;
   html += '<input type="text" class="fe-input fe-search" id="fePaletteSearch" placeholder="Search types…" oninput="window.__featureEditor.filterPalette()" />';
   html += '<div class="fe-palette" id="fePalette">';
   html += renderPaletteItems('');
   html += '</div>';
 
-  if (!readOnlyMode) {
+  if (!isReadOnlyFeature()) {
     // Custom type creation
     html += '<div class="fe-section-header" style="margin-top:12px">Create New Type</div>';
     html += '<input type="text" class="fe-input" id="feNewTypeName" placeholder="Type name…" />';
@@ -238,6 +242,7 @@ function renderPaletteItems(filter) {
 
 function renderPropertiesPanel() {
   if (!st) return '<div class="fe-panel-empty">No feature loaded.</div>';
+  const readOnly = isReadOnlyFeature();
 
   if (st.selectedNode) {
     const n = st.nMap[st.selectedNode];
@@ -250,17 +255,17 @@ function renderPropertiesPanel() {
 
     // Alias
     h += `<div class="fe-panel-field"><label>Alias</label>`;
-    if (readOnlyMode) {
+    if (readOnly) {
       h += `<div class="fe-panel-value">${esc(n.alias || '—')}</div>`;
     } else {
       h += `<input type="text" class="fe-input" value="${escAttr(n.alias || '')}" placeholder="Display name override…" `;
       h += `onchange="window.__featureEditor.changeAlias('${escAttr(n.id)}', this.value)" /></div>`;
     }
-    if (readOnlyMode) h += '</div>';
+    if (readOnly) h += '</div>';
 
     // Description
     h += `<div class="fe-panel-field"><label>Description</label>`;
-    if (readOnlyMode) {
+    if (readOnly) {
       h += `<div class="fe-panel-value">${esc(n.description || '—')}</div></div>`;
     } else {
       h += `<textarea class="fe-input" rows="3" placeholder="Custom description…" `;
@@ -269,14 +274,14 @@ function renderPropertiesPanel() {
 
     // Bounded Context
     h += `<div class="fe-panel-field"><label>Bounded Context</label>`;
-    h += readOnlyMode
+    h += readOnly
       ? `<div class="fe-panel-value">${esc(n.boundedContext || '—')}</div>`
       : renderBoundedContextDropdown(n);
     h += '</div>';
 
     // Layer
     h += `<div class="fe-panel-field"><label>Layer</label>`;
-    h += readOnlyMode
+    h += readOnly
       ? `<div class="fe-panel-value">${esc(n.layer || '—')}</div>`
       : renderLayerDropdown(n);
     h += '</div>';
@@ -288,7 +293,7 @@ function renderPropertiesPanel() {
         const p = n.structuredProps[i];
         h += `<div class="fe-panel-prop-row">`;
         h += `<span class="fe-panel-prop-text">${esc(p.name)}: ${esc(p.type)}</span>`;
-        if (!readOnlyMode) {
+        if (!readOnly) {
           h += `<button class="fe-btn-icon" onclick="window.__featureEditor.removeProperty('${escAttr(n.id)}', ${i})" title="Remove property">✕</button>`;
         }
         h += `</div>`;
@@ -296,7 +301,7 @@ function renderPropertiesPanel() {
     } else {
       h += '<div class="fe-panel-prop-empty">No properties</div>';
     }
-    if (!readOnlyMode) {
+    if (!readOnly) {
       h += '<div class="fe-add-prop-row">';
       h += '<input type="text" class="fe-input fe-input-sm" id="feNewPropName" placeholder="name" />';
       h += '<input type="text" class="fe-input fe-input-sm" id="feNewPropType" placeholder="type" />';
@@ -326,7 +331,7 @@ function renderPropertiesPanel() {
 
     // Actions
     h += '<div class="fe-panel-section">Actions</div>';
-    if (!readOnlyMode) {
+    if (!readOnly) {
       h += `<button class="fe-btn fe-connect-btn" onclick="window.__featureEditor.startConnect('${escAttr(n.id)}')" title="Drag to another node to create a relation">⟶ Draw Relation</button>`;
     }
     h += `<button class="fe-btn danger" onclick="window.__featureEditor.removeNode('${escAttr(n.id)}')" style="margin-top:4px">✕ Remove from Feature</button>`;
@@ -342,12 +347,12 @@ function renderPropertiesPanel() {
     h += `<div class="fe-panel-field"><label>Source</label><div class="fe-panel-value">${esc(shortName(e.source))}</div></div>`;
     h += `<div class="fe-panel-field"><label>Target</label><div class="fe-panel-value">${esc(shortName(e.target))}</div></div>`;
     h += `<div class="fe-panel-field"><label>Kind</label>`;
-    h += readOnlyMode
+    h += readOnly
       ? `<div class="fe-panel-value">${esc(e.kind)}</div>`
       : renderRelKindDropdown(e.kind, st.selectedEdge);
     h += '</div>';
     if (e.label) h += `<div class="fe-panel-field"><label>Label</label><div class="fe-panel-value">${esc(e.label)}</div></div>`;
-    if (!readOnlyMode) {
+    if (!readOnly) {
       h += '<div class="fe-panel-section">Actions</div>';
       h += `<button class="fe-btn danger" onclick="window.__featureEditor.removeEdge(${st.selectedEdge})">✕ Remove Relation</button>`;
     }
@@ -359,7 +364,7 @@ function renderPropertiesPanel() {
 
 function renderPanelInstructions() {
   let h = '<div class="fe-panel-empty">';
-  if (readOnlyMode) {
+  if (isReadOnlyFeature()) {
     h += '<p>Read-only mode: add existing types from the palette.</p>';
     h += '<p>Select a node to inspect details.</p>';
     h += '</div>';
@@ -392,7 +397,7 @@ function getEmittedEventsForNode(nodeId) {
 // ── Property management ──────────────────────────────
 
 export function addProperty(nodeId) {
-  if (readOnlyMode) return;
+  if (isReadOnlyFeature()) return;
   if (!st) return;
   const n = st.nMap[nodeId];
   if (!n) return;
@@ -414,7 +419,7 @@ export function addProperty(nodeId) {
 }
 
 export function removeProperty(nodeId, idx) {
-  if (readOnlyMode) return;
+  if (isReadOnlyFeature()) return;
   if (!st) return;
   const n = st.nMap[nodeId];
   if (!n || !n.structuredProps) return;
@@ -434,12 +439,14 @@ function rebuildDisplayProps(n) {
 
 export async function createFeature() {
   const input = document.getElementById('feNewFeatureName');
+  const readOnlyInput = document.getElementById('feNewFeatureReadOnly');
   if (!input) return;
   const name = input.value.trim();
   if (!name) return;
+  const readOnly = readOnlyInput?.checked === true;
 
   // Initialize empty feature
-  const feature = { nodes: [], edges: [], positions: {} };
+  const feature = { readOnly, nodes: [], edges: [], positions: {} };
   try {
     const res = await fetch(`${baseUrl}/features/${encodeURIComponent(name)}`, {
       method: 'PUT',
@@ -451,6 +458,7 @@ export async function createFeature() {
 
   await loadFeatureList();
   currentFeatureName = name;
+  currentFeatureReadOnly = readOnly;
   loadFeatureState(feature);
   dirty = false;
   rerender();
@@ -463,6 +471,7 @@ export async function loadFeature(name) {
     if (!res.ok) { console.error('Feature not found'); return; }
     const feature = await res.json();
     currentFeatureName = name;
+    currentFeatureReadOnly = feature?.readOnly === true;
     loadFeatureState(feature);
     dirty = false;
     rerender();
@@ -493,6 +502,7 @@ export async function deleteFeature() {
     await fetch(`${baseUrl}/features/${encodeURIComponent(currentFeatureName)}`, { method: 'DELETE' });
   } catch { /* ignore */ }
   currentFeatureName = null;
+  currentFeatureReadOnly = false;
   st = null;
   dirty = false;
   await loadFeatureList();
@@ -528,12 +538,13 @@ function rerender() {
 // ── Feature state serialization ──────────────────────
 
 function serializeFeature() {
-  if (!st) return { nodes: [], edges: [], positions: {} };
+  if (!st) return { readOnly: currentFeatureReadOnly, nodes: [], edges: [], positions: {} };
   const positions = {};
   for (const n of st.nodes) {
     positions[n.id] = { x: Math.round(n.x * 10) / 10, y: Math.round(n.y * 10) / 10 };
   }
   return {
+    readOnly: currentFeatureReadOnly,
     nodes: st.nodes.map(n => ({
       id: n.id, name: n.name, kind: n.kind, isCustom: n.isCustom || false,
       alias: n.alias || null, description: n.description || null,
@@ -549,6 +560,7 @@ function serializeFeature() {
 }
 
 function loadFeatureState(feature) {
+  currentFeatureReadOnly = feature?.readOnly === true;
   st = {
     nodes: [], edges: [], nMap: {},
     zoom: 1, panX: 0, panY: 0,
@@ -657,7 +669,7 @@ export function addExistingType(fullName, kind) {
 }
 
 export function addNewType() {
-  if (readOnlyMode) return;
+  if (isReadOnlyFeature()) return;
   if (!st) return;
   const nameInput = document.getElementById('feNewTypeName');
   const kindSelect = document.getElementById('feNewTypeKind');
@@ -724,14 +736,14 @@ export function removeNode(id) {
 // ── Relation management ──────────────────────────────
 
 export function startConnect(sourceId) {
-  if (readOnlyMode) return;
+  if (isReadOnlyFeature()) return;
   connecting = { sourceId, mouseX: 0, mouseY: 0 };
   const canvas = document.getElementById('feCanvas');
   if (canvas) canvas.style.cursor = 'crosshair';
 }
 
 function finishConnect(targetId) {
-  if (readOnlyMode) return;
+  if (isReadOnlyFeature()) return;
   if (!connecting || !st) return;
   const { sourceId } = connecting;
   connecting = null;
@@ -857,7 +869,7 @@ function renderBoundedContextDropdown(node) {
 }
 
 export function changeAlias(nodeId, value) {
-  if (readOnlyMode) return;
+  if (isReadOnlyFeature()) return;
   if (!st) return;
   const n = st.nMap[nodeId];
   if (!n) return;
@@ -868,7 +880,7 @@ export function changeAlias(nodeId, value) {
 }
 
 export function changeDescription(nodeId, value) {
-  if (readOnlyMode) return;
+  if (isReadOnlyFeature()) return;
   if (!st) return;
   const n = st.nMap[nodeId];
   if (!n) return;
@@ -878,7 +890,7 @@ export function changeDescription(nodeId, value) {
 }
 
 export function changeBoundedContext(nodeId, ctxName) {
-  if (readOnlyMode) return;
+  if (isReadOnlyFeature()) return;
   if (!st) return;
   const n = st.nMap[nodeId];
   if (!n) return;
@@ -922,7 +934,7 @@ function renderLayerDropdown(node) {
 }
 
 export function changeLayer(nodeId, layer) {
-  if (readOnlyMode) return;
+  if (isReadOnlyFeature()) return;
   if (!st) return;
   const n = st.nMap[nodeId];
   if (!n) return;
@@ -956,7 +968,7 @@ function toggleDropdownById(menuId, wrapperId) {
 }
 
 export function removeEdge(idx) {
-  if (readOnlyMode) return;
+  if (isReadOnlyFeature()) return;
   if (!st) return;
   st.edges.splice(idx, 1);
   st.selectedEdge = null;
@@ -967,7 +979,7 @@ export function removeEdge(idx) {
 }
 
 export function changeEdgeKind(idx, kind) {
-  if (readOnlyMode) return;
+  if (isReadOnlyFeature()) return;
   if (!st || !st.edges[idx]) return;
   st.edges[idx].kind = kind;
   recalcNodeHeights();
@@ -1229,7 +1241,7 @@ function renderSvg() {
     s += `<rect width="${n.w}" height="${n.h}" rx="8" fill="${c.bg}" stroke="${stroke}" stroke-width="${strokeW}" />`;
 
     // Connector port (top-right circle for drag-to-connect)
-    if (!readOnlyMode) {
+    if (!isReadOnlyFeature()) {
       s += `<circle class="fe-port" cx="${n.w - 8}" cy="12" r="5" fill="${c.color}" opacity="0.6" style="cursor:crosshair" />`;
     }
 
@@ -1330,7 +1342,7 @@ function setupInteraction() {
     const nodeEl = ev.target.closest('.fe-node');
     const edgeEl = ev.target.closest('.fe-edge');
 
-    if (!readOnlyMode && portEl && nodeEl) {
+    if (!isReadOnlyFeature() && portEl && nodeEl) {
       // Start connection from port
       ev.preventDefault();
       const id = nodeEl.dataset.id;
@@ -1344,7 +1356,7 @@ function setupInteraction() {
       return;
     }
 
-    if (!readOnlyMode && connecting && nodeEl) {
+    if (!isReadOnlyFeature() && connecting && nodeEl) {
       // Finish connection
       ev.preventDefault();
       finishConnect(nodeEl.dataset.id);
@@ -1352,7 +1364,7 @@ function setupInteraction() {
       return;
     }
 
-    if (!readOnlyMode && connecting && !nodeEl) {
+    if (!isReadOnlyFeature() && connecting && !nodeEl) {
       // Cancel connection on background click
       connecting = null;
       svg.style.cursor = '';

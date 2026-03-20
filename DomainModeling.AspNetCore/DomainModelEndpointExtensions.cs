@@ -37,15 +37,6 @@ public sealed class DomainModelOptions
     public bool EnableFeatureEditor { get; set; }
 
     /// <summary>
-    /// When <c>true</c>, the feature editor runs in read-only feature mode.
-    /// In this mode, features can only include types and relationships that already
-    /// exist in the discovered domain graph. Custom type creation and graph mutation
-    /// are rejected when saving.
-    /// Defaults to <c>false</c>.
-    /// </summary>
-    public bool EnableReadOnlyFeatureEditor { get; set; }
-
-    /// <summary>
     /// Directory path where feature editor JSON files are stored.
     /// Defaults to <c>./features</c> relative to the application root.
     /// </summary>
@@ -447,21 +438,42 @@ public static class DomainModelEndpointExtensions
                 var body = await reader.ReadToEndAsync();
 
                 // Validate JSON
-                try { using var doc = JsonDocument.Parse(body); }
+                JsonDocument featureDoc;
+                try { featureDoc = JsonDocument.Parse(body); }
                 catch (JsonException) { return Results.BadRequest("Invalid JSON"); }
 
-                if (options.EnableReadOnlyFeatureEditor)
+                using (featureDoc)
                 {
-                    var validation = ReadOnlyFeatureValidator.Validate(body, graph);
-                    if (!validation.IsValid)
-                        return Results.BadRequest(validation.ErrorMessage);
-                }
+                    var requestedReadOnly = featureDoc.RootElement.TryGetProperty("readOnly", out var ro)
+                        && ro.ValueKind == JsonValueKind.True;
 
-                var featureFolder = Path.Combine(featureDir, safeName);
-                Directory.CreateDirectory(featureFolder);
-                var path = Path.Combine(featureFolder, "feature.json");
-                await File.WriteAllTextAsync(path, body);
-                return Results.Ok(new { saved = true });
+                    var featureFolder = Path.Combine(featureDir, safeName);
+                    var path = Path.Combine(featureFolder, "feature.json");
+                    var existingReadOnly = false;
+
+                    if (File.Exists(path))
+                    {
+                        existingReadOnly = IsFeatureReadOnly(File.ReadAllText(path));
+                    }
+
+                    // Once a feature is read-only, it cannot be downgraded.
+                    if (existingReadOnly && !requestedReadOnly)
+                    {
+                        return Results.BadRequest("Read-only mode cannot be disabled once enabled for a feature.");
+                    }
+
+                    var effectiveReadOnly = existingReadOnly || requestedReadOnly;
+                    if (effectiveReadOnly)
+                    {
+                        var validation = ReadOnlyFeatureValidator.Validate(body, graph);
+                        if (!validation.IsValid)
+                            return Results.BadRequest(validation.ErrorMessage);
+                    }
+
+                    Directory.CreateDirectory(featureFolder);
+                    await File.WriteAllTextAsync(path, body);
+                    return Results.Ok(new { saved = true });
+                }
             })
             .ExcludeFromDescription()
             .WithName("FeatureEditorSave");
@@ -578,8 +590,7 @@ public static class DomainModelEndpointExtensions
             .Replace("{{ASSETS_URL}}", assetsPrefix)
             .Replace("{{DEVELOPER_MODE}}", options.EnableDeveloperView ? "true" : "false")
             .Replace("{{TESTING_MODE}}", options.EnableTestingView ? "true" : "false")
-            .Replace("{{FEATURE_EDITOR_MODE}}", options.EnableFeatureEditor ? "true" : "false")
-            .Replace("{{FEATURE_EDITOR_READ_ONLY_MODE}}", options.EnableReadOnlyFeatureEditor ? "true" : "false");
+            .Replace("{{FEATURE_EDITOR_MODE}}", options.EnableFeatureEditor ? "true" : "false");
     }
 
     private static string? GetEmbeddedAsset(string relativePath)
@@ -645,6 +656,20 @@ public static class DomainModelEndpointExtensions
             return true;
         }
         catch
+        {
+            return false;
+        }
+    }
+
+    private static bool IsFeatureReadOnly(string featureJson)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(featureJson);
+            return doc.RootElement.TryGetProperty("readOnly", out var ro)
+                   && ro.ValueKind == JsonValueKind.True;
+        }
+        catch (JsonException)
         {
             return false;
         }
