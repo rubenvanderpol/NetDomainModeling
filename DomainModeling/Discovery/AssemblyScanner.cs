@@ -20,17 +20,24 @@ internal sealed class AssemblyScanner
     public BoundedContextNode Scan()
     {
         var assemblies = _config.GetAllAssemblies();
-        var allTypes = assemblies
-            .SelectMany(SafeGetTypes)
-            .Where(t => t is { IsAbstract: false, IsInterface: false })
-            .Distinct()
-            .ToList();
+        var assemblyOrder = new Dictionary<Assembly, int>();
+        for (var i = 0; i < assemblies.Count; i++)
+        {
+            if (!assemblyOrder.ContainsKey(assemblies[i]))
+                assemblyOrder[assemblies[i]] = i;
+        }
+
+        // Multiple assemblies can expose types with the same FullName (e.g. duplicated sample types
+        // in DomainModeling.Example vs DomainModeling.Example.Shared). Type reference Distinct() does not
+        // collapse those; pick one Type per FullName following configured assembly order.
+        var allTypes = DeduplicateTypesByFullName(
+            assemblies.SelectMany(SafeGetTypes).Where(t => t is { IsAbstract: false, IsInterface: false }),
+            assemblyOrder);
 
         // Also collect abstract / interface types for generic-argument resolution
-        var allExportedTypes = assemblies
-            .SelectMany(SafeGetTypes)
-            .Distinct()
-            .ToList();
+        var allExportedTypes = DeduplicateTypesByFullName(
+            assemblies.SelectMany(SafeGetTypes),
+            assemblyOrder);
 
         // Categorize types based on configured conventions
         var entityTypes = allTypes.Where(t => _config.EntityConvention.Matches(t)).ToList();
@@ -420,7 +427,8 @@ internal sealed class AssemblyScanner
 
         var byFullName = allTypes
             .Where(t => t.FullName is not null)
-            .ToDictionary(t => t.FullName!, StringComparer.Ordinal);
+            .GroupBy(t => t.FullName!, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
 
         var targetTypes = new HashSet<Type>();
 
@@ -972,6 +980,27 @@ internal sealed class AssemblyScanner
                 });
             }
         }
+    }
+
+    /// <summary>
+    /// When the same CLR full name appears in more than one scanned assembly, keep a single
+    /// <see cref="Type"/> — prefer the assembly that appears earlier in <paramref name="assemblyOrder"/>.
+    /// </summary>
+    private static List<Type> DeduplicateTypesByFullName(IEnumerable<Type> types, Dictionary<Assembly, int> assemblyOrder)
+    {
+        var list = types as IList<Type> ?? types.ToList();
+        var withFullName = list.Where(t => t.FullName is not null).ToList();
+        var withoutFullName = list.Where(t => t.FullName is null).Distinct().ToList();
+
+        static int Order(Dictionary<Assembly, int> order, Assembly a) =>
+            order.TryGetValue(a, out var i) ? i : int.MaxValue;
+
+        var deduped = withFullName
+            .GroupBy(t => t.FullName!, StringComparer.Ordinal)
+            .Select(g => g.OrderBy(t => Order(assemblyOrder, t.Assembly)).First())
+            .ToList();
+
+        return deduped.Concat(withoutFullName).ToList();
     }
 
     private static IEnumerable<Type> SafeGetTypes(Assembly assembly)
