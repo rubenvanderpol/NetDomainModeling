@@ -37,6 +37,15 @@ public sealed class DomainModelOptions
     public bool EnableFeatureEditor { get; set; }
 
     /// <summary>
+    /// When <c>true</c>, the feature editor runs in read-only feature mode.
+    /// In this mode, features can only include types and relationships that already
+    /// exist in the discovered domain graph. Custom type creation and graph mutation
+    /// are rejected when saving.
+    /// Defaults to <c>false</c>.
+    /// </summary>
+    public bool EnableReadOnlyFeatureEditor { get; set; }
+
+    /// <summary>
     /// Directory path where feature editor JSON files are stored.
     /// Defaults to <c>./features</c> relative to the application root.
     /// </summary>
@@ -441,6 +450,13 @@ public static class DomainModelEndpointExtensions
                 try { using var doc = JsonDocument.Parse(body); }
                 catch (JsonException) { return Results.BadRequest("Invalid JSON"); }
 
+                if (options.EnableReadOnlyFeatureEditor)
+                {
+                    var validation = ReadOnlyFeatureValidator.Validate(body, graph);
+                    if (!validation.IsValid)
+                        return Results.BadRequest(validation.ErrorMessage);
+                }
+
                 var featureFolder = Path.Combine(featureDir, safeName);
                 Directory.CreateDirectory(featureFolder);
                 var path = Path.Combine(featureFolder, "feature.json");
@@ -562,7 +578,8 @@ public static class DomainModelEndpointExtensions
             .Replace("{{ASSETS_URL}}", assetsPrefix)
             .Replace("{{DEVELOPER_MODE}}", options.EnableDeveloperView ? "true" : "false")
             .Replace("{{TESTING_MODE}}", options.EnableTestingView ? "true" : "false")
-            .Replace("{{FEATURE_EDITOR_MODE}}", options.EnableFeatureEditor ? "true" : "false");
+            .Replace("{{FEATURE_EDITOR_MODE}}", options.EnableFeatureEditor ? "true" : "false")
+            .Replace("{{FEATURE_EDITOR_READ_ONLY_MODE}}", options.EnableReadOnlyFeatureEditor ? "true" : "false");
     }
 
     private static string? GetEmbeddedAsset(string relativePath)
