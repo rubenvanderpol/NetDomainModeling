@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using DomainModeling.Builder;
 using DomainModeling.Graph;
 using MethodInfo = DomainModeling.Graph.MethodInfo;
@@ -160,6 +161,22 @@ internal sealed class AssemblyScanner
                     TargetType = handled,
                     Kind = RelationshipKind.Handles,
                     Label = "handles"
+                });
+            }
+        }
+
+        // CommandHandler → aggregate (instance method calls on aggregates, e.g. order.Place())
+        var aggregateFullNames = new HashSet<string>(aggregateNodes.Select(a => a.FullName), StringComparer.Ordinal);
+        foreach (var handlerType in commandHandlerTypes)
+        {
+            foreach (var (targetFullName, methodName) in DetectInvocationsOnAggregates(handlerType, aggregateFullNames))
+            {
+                relationships.Add(new Relationship
+                {
+                    SourceType = handlerType.FullName!,
+                    TargetType = targetFullName,
+                    Kind = RelationshipKind.References,
+                    Label = $"invokes {methodName}()"
                 });
             }
         }
@@ -857,6 +874,111 @@ internal sealed class AssemblyScanner
             .Select(e => e.EventType)
             .Distinct()
             .ToList();
+    }
+
+    /// <summary>
+    /// Finds instance method calls whose declaring type is a discovered aggregate (e.g. <c>order.Place()</c>
+    /// from a command handler), including inside async state machines.
+    /// </summary>
+    private static List<(string TargetFullName, string MethodName)> DetectInvocationsOnAggregates(
+        Type handlerType,
+        HashSet<string> aggregateFullNames)
+    {
+        var results = new List<(string, string)>();
+        var seen = new HashSet<(string Target, string Method)>();
+
+        void OnCall(string targetFullName, string methodName)
+        {
+            if (seen.Add((targetFullName, methodName)))
+                results.Add((targetFullName, methodName));
+        }
+
+        ScanTypeMethodsForAggregateCalls(handlerType, aggregateFullNames, OnCall);
+
+        foreach (var nested in handlerType.GetNestedTypes(BindingFlags.NonPublic | BindingFlags.Public))
+        {
+            if (nested.GetCustomAttributes(typeof(CompilerGeneratedAttribute), false).Length == 0)
+                continue;
+
+            ScanTypeMethodsForAggregateCalls(nested, aggregateFullNames, OnCall);
+        }
+
+        return results;
+    }
+
+    private static void ScanTypeMethodsForAggregateCalls(
+        Type type,
+        HashSet<string> aggregateFullNames,
+        Action<string, string> onCall)
+    {
+        var allMethods = type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly)
+            .Cast<MethodBase>()
+            .Concat(type.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static));
+
+        foreach (var method in allMethods)
+            ScanMethodBodyForCallsOnAggregates(method, type.Module, aggregateFullNames, onCall);
+    }
+
+    private static void ScanMethodBodyForCallsOnAggregates(
+        MethodBase method,
+        Module module,
+        HashSet<string> aggregateFullNames,
+        Action<string, string> onCall)
+    {
+        System.Reflection.MethodBody? body;
+        try { body = method.GetMethodBody(); }
+        catch { return; }
+
+        if (body is null)
+            return;
+
+        var il = body.GetILAsByteArray();
+        if (il is null)
+            return;
+
+        const byte call = 0x28;
+        const byte callvirt = 0x6F;
+
+        for (var i = 0; i < il.Length; i++)
+        {
+            if (il[i] is not (call or callvirt))
+                continue;
+
+            if (i + 4 >= il.Length)
+                continue;
+
+            var token = il[i + 1]
+                      | (il[i + 2] << 8)
+                      | (il[i + 3] << 16)
+                      | (il[i + 4] << 24);
+
+            try
+            {
+                var resolved = module.ResolveMethod(token);
+                if (resolved is not System.Reflection.MethodInfo mi)
+                    continue;
+                if (mi.IsStatic)
+                    continue;
+                if (string.Equals(mi.Name, ".ctor", StringComparison.Ordinal))
+                    continue;
+                if (mi.IsSpecialName)
+                    continue;
+
+                var decl = mi.DeclaringType;
+                if (decl?.FullName is not { } declFullName)
+                    continue;
+                if (!aggregateFullNames.Contains(declFullName))
+                    continue;
+
+                onCall(declFullName, mi.Name);
+            }
+            catch
+            {
+                // Token might not be a method token
+            }
+
+            i += 4;
+        }
     }
 
     private static void AddPropertyReferences(IEnumerable<EntityNode> nodes, HashSet<string> knownDomainTypes, List<Relationship> relationships)
