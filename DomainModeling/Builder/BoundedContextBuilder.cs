@@ -15,6 +15,13 @@ public sealed class BoundedContextBuilder
     internal List<Assembly> AdditionalAssemblies { get; } = [];
     internal List<Assembly> SharedAssemblies { get; } = [];
 
+    /// <summary>
+    /// Assemblies scanned for discovery (handlers, IL, references) in this context, but whose
+    /// primary building blocks are listed only under the bounded context name passed to
+    /// <c>WithSharedAssembly(assembly, boundedContextName)</c> on <see cref="DDDBuilder"/>.
+    /// </summary>
+    internal HashSet<Assembly> ExternallyOwnedSharedAssemblies { get; } = new();
+
     internal TypeConventionBuilder EntityConvention { get; } = new();
     internal TypeConventionBuilder AggregateConvention { get; } = new();
     internal TypeConventionBuilder ValueObjectConvention { get; } = new();
@@ -179,6 +186,7 @@ public sealed class BoundedContextBuilder
         if (InfrastructureAssembly is not null) assemblies.Add(InfrastructureAssembly);
         assemblies.AddRange(AdditionalAssemblies);
         assemblies.AddRange(SharedAssemblies);
+        assemblies.AddRange(ExternallyOwnedSharedAssemblies);
         return assemblies.Distinct().ToList();
     }
 

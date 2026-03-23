@@ -12,6 +12,7 @@ public sealed class DDDBuilder
     private readonly List<BoundedContextBuilder> _contextBuilders = [];
     private readonly Action<BoundedContextBuilder>? _sharedConfiguration;
     private readonly List<Assembly> _sharedAssemblies = [];
+    private readonly List<(string BoundedContextName, Assembly Assembly)> _namedSharedAssemblies = [];
 
     private DDDBuilder(Action<BoundedContextBuilder>? sharedConfiguration = null)
     {
@@ -104,6 +105,20 @@ public sealed class DDDBuilder
     }
 
     /// <summary>
+    /// Registers a shared assembly that every explicit bounded context still scans for discovery
+    /// (e.g. integration-event publish/handle wiring), while integration events and command DTOs
+    /// from that assembly are listed only under <paramref name="boundedContextName"/>.
+    /// A synthetic bounded context with that name is appended when <see cref="Build"/> runs.
+    /// </summary>
+    public DDDBuilder WithSharedAssembly(Assembly assembly, string boundedContextName)
+    {
+        ArgumentNullException.ThrowIfNull(assembly);
+        ArgumentException.ThrowIfNullOrWhiteSpace(boundedContextName);
+        _namedSharedAssemblies.Add((boundedContextName.Trim(), assembly));
+        return this;
+    }
+
+    /// <summary>
     /// Applies shared configuration to all bounded contexts currently defined on this builder.
     /// This allows declaring multiple contexts first, then configuring conventions once.
     /// </summary>
@@ -127,7 +142,43 @@ public sealed class DDDBuilder
         if (_contextBuilders.Count == 0)
             throw new InvalidOperationException("At least one bounded context must be configured.");
 
-        var contexts = _contextBuilders.Select(b => b.BuildContext()).ToList();
+        var namedContextNames = _namedSharedAssemblies.Select(x => x.BoundedContextName).Distinct(StringComparer.Ordinal).ToList();
+        foreach (var name in namedContextNames)
+        {
+            if (_contextBuilders.Any(b => string.Equals(b.Name, name, StringComparison.Ordinal)))
+            {
+                throw new InvalidOperationException(
+                    $"Bounded context name '{name}' is already used by WithBoundedContext; choose a different name for WithSharedAssembly(..., boundedContextName).");
+            }
+        }
+
+        var distinctOwnedAssemblies = _namedSharedAssemblies.Select(x => x.Assembly).Distinct().ToList();
+        foreach (var builder in _contextBuilders)
+        {
+            foreach (var asm in distinctOwnedAssemblies)
+                builder.ExternallyOwnedSharedAssemblies.Add(asm);
+        }
+
+        var syntheticBuilders = new List<BoundedContextBuilder>();
+        foreach (var name in namedContextNames)
+        {
+            var owned = _namedSharedAssemblies
+                .Where(x => string.Equals(x.BoundedContextName, name, StringComparison.Ordinal))
+                .Select(x => x.Assembly)
+                .Distinct()
+                .ToList();
+
+            var sb = new BoundedContextBuilder(name);
+            _sharedConfiguration?.Invoke(sb);
+            foreach (var asm in owned)
+                sb.WithAssembly(asm);
+            syntheticBuilders.Add(sb);
+        }
+
+        var allBuilders = new List<BoundedContextBuilder>(_contextBuilders);
+        allBuilders.AddRange(syntheticBuilders);
+
+        var contexts = allBuilders.Select(b => b.BuildContext()).ToList();
         CrossReferenceIntegrationEvents(contexts);
         return new Graph.DomainGraph(contexts);
     }
@@ -157,6 +208,34 @@ public sealed class DDDBuilder
 
                 foreach (var e in evt.EmittedBy) globalEmittedBy[evt.FullName].Add(e);
                 foreach (var h in evt.HandledBy) globalHandledBy[evt.FullName].Add(h);
+            }
+        }
+
+        // Publishers/handlers often live in other assemblies than the integration contract assembly,
+        // so Publishes/Handles edges may exist even when this context has no integration-event node.
+        var integrationEventNames = new HashSet<string>(
+            contexts.SelectMany(c => c.IntegrationEvents).Select(e => e.FullName),
+            StringComparer.Ordinal);
+
+        foreach (var ctx in contexts)
+        {
+            foreach (var rel in ctx.Relationships)
+            {
+                if (!integrationEventNames.Contains(rel.TargetType))
+                    continue;
+
+                if (rel.Kind == Graph.RelationshipKind.Publishes)
+                {
+                    if (!globalEmittedBy.ContainsKey(rel.TargetType))
+                        globalEmittedBy[rel.TargetType] = [];
+                    globalEmittedBy[rel.TargetType].Add(rel.SourceType);
+                }
+                else if (rel.Kind == Graph.RelationshipKind.Handles)
+                {
+                    if (!globalHandledBy.ContainsKey(rel.TargetType))
+                        globalHandledBy[rel.TargetType] = [];
+                    globalHandledBy[rel.TargetType].Add(rel.SourceType);
+                }
             }
         }
 

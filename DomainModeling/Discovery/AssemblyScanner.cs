@@ -41,22 +41,25 @@ internal sealed class AssemblyScanner
             assemblies.SelectMany(SafeGetTypes),
             assemblyOrder);
 
-        // Categorize types based on configured conventions
-        var entityTypes = allTypes.Where(t => _config.EntityConvention.Matches(t)).ToList();
-        var aggregateTypes = allTypes.Where(t => _config.AggregateConvention.Matches(t)).ToList();
-        var valueObjectTypes = allTypes.Where(t => _config.ValueObjectConvention.Matches(t)).ToList();
-        var domainEventTypes = allTypes.Where(t => _config.DomainEventConvention.Matches(t)).ToList();
-        var integrationEventTypes = allTypes.Where(t => _config.IntegrationEventConvention.Matches(t)).ToList();
-        var eventHandlerTypes = allTypes.Where(t => _config.EventHandlerConvention.Matches(t)).ToList();
-        var commandHandlerTypes = allTypes.Where(t => _config.CommandHandlerConvention.Matches(t)).ToList();
-        var queryHandlerTypes = allTypes.Where(t => _config.QueryHandlerConvention.Matches(t)).ToList();
-        var repositoryTypes = allTypes.Where(t => _config.RepositoryConvention.Matches(t)).ToList();
-        var domainServiceTypes = allTypes.Where(t => _config.DomainServiceConvention.Matches(t)).ToList();
+        bool OwnedElsewhere(Type t) => _config.ExternallyOwnedSharedAssemblies.Contains(t.Assembly);
+
+        // Categorize types based on configured conventions (types "owned" by another BC are scanned but not listed here)
+        var entityTypes = allTypes.Where(t => !OwnedElsewhere(t) && _config.EntityConvention.Matches(t)).ToList();
+        var aggregateTypes = allTypes.Where(t => !OwnedElsewhere(t) && _config.AggregateConvention.Matches(t)).ToList();
+        var valueObjectTypes = allTypes.Where(t => !OwnedElsewhere(t) && _config.ValueObjectConvention.Matches(t)).ToList();
+        var domainEventTypes = allTypes.Where(t => !OwnedElsewhere(t) && _config.DomainEventConvention.Matches(t)).ToList();
+        var integrationEventTypesAll = allTypes.Where(t => _config.IntegrationEventConvention.Matches(t)).ToList();
+        var integrationEventTypes = integrationEventTypesAll.Where(t => !OwnedElsewhere(t)).ToList();
+        var eventHandlerTypes = allTypes.Where(t => !OwnedElsewhere(t) && _config.EventHandlerConvention.Matches(t)).ToList();
+        var commandHandlerTypes = allTypes.Where(t => !OwnedElsewhere(t) && _config.CommandHandlerConvention.Matches(t)).ToList();
+        var queryHandlerTypes = allTypes.Where(t => !OwnedElsewhere(t) && _config.QueryHandlerConvention.Matches(t)).ToList();
+        var repositoryTypes = allTypes.Where(t => !OwnedElsewhere(t) && _config.RepositoryConvention.Matches(t)).ToList();
+        var domainServiceTypes = allTypes.Where(t => !OwnedElsewhere(t) && _config.DomainServiceConvention.Matches(t)).ToList();
 
         // Build a set of all "known domain type" full names for reference detection
         var knownDomainTypes = new HashSet<string>(
             entityTypes.Concat(aggregateTypes).Concat(valueObjectTypes)
-                .Concat(domainEventTypes).Concat(integrationEventTypes)
+                .Concat(domainEventTypes).Concat(integrationEventTypesAll)
                 .Select(t => t.FullName!)
                 .Where(n => n is not null));
 
@@ -152,11 +155,11 @@ internal sealed class AssemblyScanner
         CrossReferenceEvents(domainEventNodes, entityNodes, aggregateNodes, eventHandlerNodes);
 
         // Detect which integration events are published by event handlers (IL scanning)
-        var integrationEventFullNames = new HashSet<string>(integrationEventTypes.Select(e => e.FullName!));
+        var integrationEventFullNames = new HashSet<string>(integrationEventTypesAll.Select(e => e.FullName!));
         var handlerPublishedEvents = new Dictionary<string, List<string>>();
         foreach (var handlerType in eventHandlerTypes)
         {
-            var published = DetectPublishedEvents(handlerType, integrationEventTypes);
+            var published = DetectPublishedEvents(handlerType, integrationEventTypesAll);
             if (published.Count > 0)
                 handlerPublishedEvents[handlerType.FullName!] = published;
         }
@@ -484,6 +487,7 @@ internal sealed class AssemblyScanner
         }
 
         return targetTypes
+            .Where(t => !_config.ExternallyOwnedSharedAssemblies.Contains(t.Assembly))
             .OrderBy(t => t.Name, StringComparer.Ordinal)
             .Select(t => BuildCommandHandlerTargetNode(t, knownDomainTypes))
             .ToList();
@@ -522,7 +526,8 @@ internal sealed class AssemblyScanner
         foreach (var t in allTypes
                      .Where(type => type.FullName is not null
                                     && _config.CommandConvention.Matches(type)
-                                    && !excluded.Contains(type.FullName))
+                                    && !excluded.Contains(type.FullName)
+                                    && !_config.ExternallyOwnedSharedAssemblies.Contains(type.Assembly))
                      .OrderBy(type => type.Name, StringComparer.Ordinal))
         {
             var fn = t.FullName!;

@@ -1,3 +1,5 @@
+using DomainModeling.Example.IntegrationEvents;
+
 namespace DomainModeling.Example.Domain;
 
 // ─── Event handlers ──────────────────────────────────────────────
