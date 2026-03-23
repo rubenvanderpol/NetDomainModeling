@@ -82,3 +82,25 @@ export const SECTION_META = [
   { key: 'repositories',         label: 'Repositories',         color: 'var(--clr-repository)',         tag: 'REPO', bg: 'var(--clr-repository-bg)' },
   { key: 'domainServices',       label: 'Domain Services',      color: 'var(--clr-service)',            tag: 'SVC',  bg: 'var(--clr-service-bg)' },
 ];
+
+/**
+ * Checkbox row for choosing which bounded contexts are merged into the explorer.
+ * Used on the diagram and feature editor (issue #20); toggles via window.__nav.toggleContext.
+ */
+export function renderBoundedContextSelectorHtml(allContexts, selectedNames) {
+  if (!allContexts || allContexts.length <= 1) return '';
+  const set = selectedNames instanceof Set
+    ? selectedNames
+    : new Set(Array.isArray(selectedNames) ? selectedNames : []);
+  let html = '<div class="bc-selector-inline" role="group" aria-label="Bounded contexts">';
+  html += '<span class="bc-selector-label">Bounded contexts</span>';
+  html += `<span class="bc-selector-badge">${set.size}/${allContexts.length}</span>`;
+  for (const c of allContexts) {
+    const checked = set.has(c.name);
+    html += `<label class="ctx-option bc-selector-chip${checked ? ' active' : ''}" onclick="event.stopPropagation()">`;
+    html += `<input type="checkbox" ${checked ? 'checked' : ''} onchange="window.__nav.toggleContext('${escAttr(c.name)}')" />`;
+    html += `<span class="ctx-name">${esc(c.name)}</span></label>`;
+  }
+  html += '</div>';
+  return html;
+}

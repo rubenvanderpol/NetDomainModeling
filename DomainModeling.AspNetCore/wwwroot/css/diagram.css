@@ -7,6 +7,15 @@
   border-radius: var(--radius-lg);
   overflow: hidden;
 }
+
+/* Bounded context selection (below main toolbar) */
+.diagram-bc-row {
+  position: absolute;
+  top: 48px;
+  left: 12px;
+  right: 140px;
+  z-index: 9;
+}
 .diagram-wrap svg { width: 100%; height: 100%; cursor: grab; }
 .diagram-wrap svg.dragging { cursor: grabbing; }
 .diagram-wrap svg.dragging-node { cursor: grabbing; }

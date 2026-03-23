@@ -1,7 +1,7 @@
 /**
  * Interactive SVG diagram with force layout and localStorage persistence.
  */
-import { esc, escAttr, shortName } from './helpers.js';
+import { esc, escAttr, shortName, renderBoundedContextSelectorHtml } from './helpers.js';
 import { renderTabBar } from './tabs.js';
 
 const STORAGE_KEY = 'domain-model-diagram-positions';
@@ -250,10 +250,15 @@ try {
 export function getDiagramState() { return dgState; }
 
 // ── Render the diagram wrapper HTML ──────────────────
-export function renderDiagramView() {
+export function renderDiagramView(allBoundedContexts, selectedContextNames) {
   let html = renderTabBar('diagram');
 
   html += '<div class="diagram-wrap" id="diagramWrap">';
+
+  const bcBar = renderBoundedContextSelectorHtml(allBoundedContexts || [], selectedContextNames);
+  if (bcBar) {
+    html += `<div class="diagram-bc-row">${bcBar}</div>`;
+  }
 
   // Toolbar (top-left)
   html += '<div class="diagram-toolbar">';

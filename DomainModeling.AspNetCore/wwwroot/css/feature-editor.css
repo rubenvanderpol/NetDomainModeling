@@ -35,6 +35,19 @@
   margin-bottom: 8px;
 }
 
+.fe-bc-selector-wrap .bc-selector-inline {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+.fe-bc-selector-wrap .bc-selector-label,
+.fe-bc-selector-wrap .bc-selector-badge {
+  margin-bottom: 2px;
+}
+.fe-bc-selector-wrap .bc-selector-chip.ctx-option {
+  width: 100%;
+}
+
 /* ── Feature list ─────────────────────────────────── */
 .fe-feature-list {
   display: flex;

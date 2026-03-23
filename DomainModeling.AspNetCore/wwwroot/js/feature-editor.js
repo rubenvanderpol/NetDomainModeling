@@ -8,7 +8,7 @@
  *  - Drag/pan/zoom the canvas
  *  - Optionally run in read-only mode (existing graph items only)
  */
-import { esc, escAttr, shortName, ALL_SECTIONS, SECTION_META } from './helpers.js';
+import { esc, escAttr, shortName, ALL_SECTIONS, SECTION_META, renderBoundedContextSelectorHtml } from './helpers.js';
 import { renderTabBar } from './tabs.js';
 
 // ── Constants ────────────────────────────────────────
@@ -96,6 +96,15 @@ export function renderFeatureEditorView() {
 
   // ── Left: Feature list + type palette ──
   html += '<div class="fe-sidebar" id="feSidebar">';
+  const bcSel = renderBoundedContextSelectorHtml(
+    domainData?.boundedContexts || [],
+    typeof window.__nav?.getSelectedContextNames === 'function'
+      ? window.__nav.getSelectedContextNames()
+      : [],
+  );
+  if (bcSel) {
+    html += `<div class="fe-section fe-bc-selector-wrap">${bcSel}</div>`;
+  }
   html += renderFeatureListPanel();
   html += renderPalettePanel();
   html += '</div>';
@@ -219,7 +228,15 @@ function renderPaletteItems(filter) {
   const addedIds = st ? new Set(st.nodes.map(n => n.id)) : new Set();
   let html = '';
 
+  const selectedBc =
+    typeof window.__nav?.getSelectedContextNames === 'function'
+      ? window.__nav.getSelectedContextNames()
+      : null;
+  const allowedBc =
+    Array.isArray(selectedBc) && selectedBc.length > 0 ? new Set(selectedBc) : null;
+
   for (const ctx of (domainData.boundedContexts || [])) {
+    if (allowedBc && !allowedBc.has(ctx.name)) continue;
     for (const sec of ALL_SECTIONS) {
       const kind = SECTION_TO_KIND[sec];
       if (!kind) continue;
