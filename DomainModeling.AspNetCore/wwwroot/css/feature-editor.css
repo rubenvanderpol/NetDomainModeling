@@ -247,6 +247,22 @@
   flex: 1;
 }
 
+.fe-export-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.fe-export-opt input {
+  margin: 0;
+  cursor: pointer;
+}
+
 .fe-canvas {
   flex: 1;
   position: relative;

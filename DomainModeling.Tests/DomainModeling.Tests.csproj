@@ -17,6 +17,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\DomainModeling\DomainModeling.csproj" />
+    <ProjectReference Include="..\DomainModeling.AspNetCore\DomainModeling.AspNetCore.csproj" />
     <ProjectReference Include="..\DomainModeling.Example\DomainModeling.Example.csproj" />
   </ItemGroup>
 

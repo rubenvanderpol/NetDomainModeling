@@ -197,6 +197,9 @@ public class OrderPlacedIntegrationHandler : IIntegrationEventHandler<OrderPlace
 
 public record PlaceOrderCommand(Guid CustomerId, List<string> Products);
 
+/// <summary>Command DTO with no handler — used to test explicit <c>Commands(...)</c> registration on <c>DDDBuilder</c>.</summary>
+public record UnassignedCommand(string Reason);
+
 public class PlaceOrderCommandHandler : ICommandHandler<PlaceOrderCommand>
 {
     public Task HandleAsync(PlaceOrderCommand command, CancellationToken ct = default)

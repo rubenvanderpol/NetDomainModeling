@@ -85,6 +85,20 @@ internal sealed class AssemblyScanner
             queryHandlerNodes,
             repositoryNodes,
             domainServiceNodes);
+        MergeRegisteredCommands(
+            allTypes,
+            knownDomainTypes,
+            entityNodes,
+            aggregateNodes,
+            valueObjectNodes,
+            domainEventNodes,
+            integrationEventNodes,
+            eventHandlerNodes,
+            commandHandlerNodes,
+            queryHandlerNodes,
+            repositoryNodes,
+            domainServiceNodes,
+            commandHandlerTargetNodes);
         CrossReferenceCommandHandlerTargets(commandHandlerTargetNodes, commandHandlerNodes);
 
         // Build relationships
@@ -222,6 +236,9 @@ internal sealed class AssemblyScanner
             FullName = v.FullName,
             Properties = v.Properties
         }), knownDomainTypes, relationships);
+
+        foreach (var cmdTarget in commandHandlerTargetNodes)
+            knownDomainTypes.Add(cmdTarget.FullName);
 
         // Discover sub-types: custom types referenced by properties that aren't registered domain types
         var subTypeNodes = DiscoverSubTypes(
@@ -416,9 +433,7 @@ internal sealed class AssemblyScanner
     /// Surfaces types that command handlers list in <see cref="HandlerNode.Handles"/> when those types
     /// are not already modeled as another building block, so "Handles" edges have diagram endpoints (GitHub #10).
     /// </summary>
-    private List<CommandHandlerTargetNode> DiscoverCommandHandlerTargets(
-        List<Type> allTypes,
-        HashSet<string> knownDomainTypes,
+    private static HashSet<string> CollectPrimaryBuildingBlockFullNames(
         List<EntityNode> entityNodes,
         List<AggregateNode> aggregateNodes,
         List<ValueObjectNode> valueObjectNodes,
@@ -441,6 +456,28 @@ internal sealed class AssemblyScanner
         foreach (var n in queryHandlerNodes) excluded.Add(n.FullName);
         foreach (var n in repositoryNodes) excluded.Add(n.FullName);
         foreach (var n in domainServiceNodes) excluded.Add(n.FullName);
+        return excluded;
+    }
+
+    private List<CommandHandlerTargetNode> DiscoverCommandHandlerTargets(
+        List<Type> allTypes,
+        HashSet<string> knownDomainTypes,
+        List<EntityNode> entityNodes,
+        List<AggregateNode> aggregateNodes,
+        List<ValueObjectNode> valueObjectNodes,
+        List<DomainEventNode> domainEventNodes,
+        List<DomainEventNode> integrationEventNodes,
+        List<HandlerNode> eventHandlerNodes,
+        List<HandlerNode> commandHandlerNodes,
+        List<HandlerNode> queryHandlerNodes,
+        List<RepositoryNode> repositoryNodes,
+        List<DomainServiceNode> domainServiceNodes)
+    {
+        var excluded = CollectPrimaryBuildingBlockFullNames(
+            entityNodes, aggregateNodes, valueObjectNodes,
+            domainEventNodes, integrationEventNodes,
+            eventHandlerNodes, commandHandlerNodes, queryHandlerNodes,
+            repositoryNodes, domainServiceNodes);
 
         var byFullName = allTypes
             .Where(t => t.FullName is not null)
@@ -461,15 +498,62 @@ internal sealed class AssemblyScanner
 
         return targetTypes
             .OrderBy(t => t.Name, StringComparer.Ordinal)
-            .Select(t => new CommandHandlerTargetNode
-            {
-                Name = t.Name,
-                FullName = t.FullName!,
-                Layer = _config.GetLayer(t),
-                Properties = GetProperties(t, knownDomainTypes)
-            })
+            .Select(t => BuildCommandHandlerTargetNode(t, knownDomainTypes))
             .ToList();
     }
+
+    /// <summary>
+    /// Adds command DTO types matched by <see cref="BoundedContextBuilder.Commands"/> so they appear
+    /// in the graph even when no handler references them yet.
+    /// </summary>
+    private void MergeRegisteredCommands(
+        List<Type> allTypes,
+        HashSet<string> knownDomainTypes,
+        List<EntityNode> entityNodes,
+        List<AggregateNode> aggregateNodes,
+        List<ValueObjectNode> valueObjectNodes,
+        List<DomainEventNode> domainEventNodes,
+        List<DomainEventNode> integrationEventNodes,
+        List<HandlerNode> eventHandlerNodes,
+        List<HandlerNode> commandHandlerNodes,
+        List<HandlerNode> queryHandlerNodes,
+        List<RepositoryNode> repositoryNodes,
+        List<DomainServiceNode> domainServiceNodes,
+        List<CommandHandlerTargetNode> commandHandlerTargetNodes)
+    {
+        if (_config.CommandConvention.Predicates.Count == 0)
+            return;
+
+        var excluded = CollectPrimaryBuildingBlockFullNames(
+            entityNodes, aggregateNodes, valueObjectNodes,
+            domainEventNodes, integrationEventNodes,
+            eventHandlerNodes, commandHandlerNodes, queryHandlerNodes,
+            repositoryNodes, domainServiceNodes);
+
+        var existing = new HashSet<string>(commandHandlerTargetNodes.Select(n => n.FullName), StringComparer.Ordinal);
+
+        foreach (var t in allTypes
+                     .Where(type => type.FullName is not null
+                                    && _config.CommandConvention.Matches(type)
+                                    && !excluded.Contains(type.FullName))
+                     .OrderBy(type => type.Name, StringComparer.Ordinal))
+        {
+            var fn = t.FullName!;
+            if (existing.Contains(fn)) continue;
+            commandHandlerTargetNodes.Add(BuildCommandHandlerTargetNode(t, knownDomainTypes));
+            existing.Add(fn);
+        }
+
+        commandHandlerTargetNodes.Sort(static (a, b) => string.CompareOrdinal(a.Name, b.Name));
+    }
+
+    private CommandHandlerTargetNode BuildCommandHandlerTargetNode(Type type, HashSet<string> knownDomainTypes) => new()
+    {
+        Name = type.Name,
+        FullName = type.FullName!,
+        Layer = _config.GetLayer(type),
+        Properties = GetProperties(type, knownDomainTypes)
+    };
 
     private static void CrossReferenceCommandHandlerTargets(
         List<CommandHandlerTargetNode> targets,
