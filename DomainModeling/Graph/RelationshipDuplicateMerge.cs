@@ -1,21 +1,14 @@
 namespace DomainModeling.Graph;
 
 /// <summary>
-/// Collapses duplicate diagram links from the same source type to the same target type when they
-/// originate from separate properties (GitHub #26). Other relationship kinds are left unchanged.
+/// Collapses duplicate diagram links that share the same source type, target type, and
+/// <see cref="RelationshipKind"/> (GitHub #26). Applies to every relationship kind.
 /// </summary>
 internal static class RelationshipDuplicateMerge
 {
-    private static readonly HashSet<RelationshipKind> MergeableKinds =
-    [
-        RelationshipKind.Has,
-        RelationshipKind.HasMany,
-        RelationshipKind.ReferencesById
-    ];
-
     /// <summary>
-    /// Merges relationships that share the same source, target, and kind among <see cref="MergeableKinds"/>,
-    /// combining distinct non-empty labels (sorted) into one edge.
+    /// Merges relationships that share the same source, target, and kind, combining distinct
+    /// non-empty labels (sorted) into one edge.
     /// </summary>
     public static List<Relationship> MergeDuplicateOutgoingLinks(IReadOnlyList<Relationship> relationships)
     {
@@ -23,9 +16,6 @@ internal static class RelationshipDuplicateMerge
 
         foreach (var r in relationships)
         {
-            if (!MergeableKinds.Contains(r.Kind))
-                continue;
-
             var key = (r.SourceType, r.TargetType, r.Kind);
             if (!groups.TryGetValue(key, out var list))
             {
@@ -41,12 +31,6 @@ internal static class RelationshipDuplicateMerge
 
         foreach (var r in relationships)
         {
-            if (!MergeableKinds.Contains(r.Kind))
-            {
-                result.Add(r);
-                continue;
-            }
-
             var key = (r.SourceType, r.TargetType, r.Kind);
             if (!mergedKeys.Add(key))
                 continue;

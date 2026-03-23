@@ -34,6 +34,30 @@ public class FeatureJsonConverterTests
     }
 
     [Fact]
+    public void ToDomainGraph_MergesDuplicateEdges_SameSourceTargetKind_GitHub26()
+    {
+        const string json = """
+            {
+              "nodes": [
+                { "id": "App.Cmd", "name": "Cmd", "kind": "commandHandlerTarget", "isCustom": false, "props": [] },
+                { "id": "App.H", "name": "H", "kind": "commandHandler", "isCustom": false, "props": [] }
+              ],
+              "edges": [
+                { "source": "App.H", "target": "App.Cmd", "kind": "Handles", "label": "a" },
+                { "source": "App.H", "target": "App.Cmd", "kind": "Handles", "label": "b" }
+              ],
+              "positions": {}
+            }
+            """;
+
+        var graph = FeatureJsonConverter.ToDomainGraph(json, "X");
+        var ctx = graph.BoundedContexts.Should().ContainSingle().Subject;
+
+        ctx.Relationships.Where(r => r.Kind == RelationshipKind.Handles).Should().ContainSingle()
+            .Which.Label.Should().Be("a, b");
+    }
+
+    [Fact]
     public void ToDomainGraph_HandlesEdge_ReversedDirection_StillLinks()
     {
         const string json = """
