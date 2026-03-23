@@ -521,7 +521,7 @@ internal sealed class AssemblyScanner
         List<DomainServiceNode> domainServiceNodes,
         List<CommandHandlerTargetNode> commandHandlerTargetNodes)
     {
-        if (_config.CommandConvention.Predicates.Count == 0)
+        if (!_config.CommandConvention.HasPredicates)
             return;
 
         var excluded = CollectPrimaryBuildingBlockFullNames(
