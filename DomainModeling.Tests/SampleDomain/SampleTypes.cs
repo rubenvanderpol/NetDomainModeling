@@ -94,6 +94,8 @@ public sealed class InvoiceCreatedEvent : BaseDomainEvent
     public Guid InvoiceId { get; init; }
 }
 
+public sealed class EntityDeletedEvent<TEntity> : BaseDomainEvent where TEntity : BaseEntity;
+
 // ─── Integration Events ───────────────────────────────────────────
 
 public sealed class OrderPlacedIntegrationEvent : BaseIntegrationEvent
@@ -140,6 +142,11 @@ public class Order : BaseAggregateRoot
     {
         Raise(new OrderShippedEvent { OrderId = Id });
     }
+
+    public void Delete()
+    {
+        Raise(new EntityDeletedEvent<Order>());
+    }
 }
 
 public class Customer : BaseAggregateRoot
@@ -183,6 +190,12 @@ public class OrderPlacedHandler : IEventHandler<OrderPlacedEvent>
 public class SendShipmentNotificationHandler : IEventHandler<OrderShippedEvent>
 {
     public Task HandleAsync(OrderShippedEvent @event, CancellationToken ct = default)
+        => Task.CompletedTask;
+}
+
+public class OrderDeletedEventHandler : IEventHandler<EntityDeletedEvent<Order>>
+{
+    public Task HandleAsync(EntityDeletedEvent<Order> @event, CancellationToken ct = default)
         => Task.CompletedTask;
 }
 

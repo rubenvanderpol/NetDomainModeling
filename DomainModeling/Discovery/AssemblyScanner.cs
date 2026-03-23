@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using DomainModeling.Builder;
@@ -164,15 +165,19 @@ internal sealed class AssemblyScanner
         CrossReferenceEvents(integrationEventNodes, entityNodes, aggregateNodes, eventHandlerNodes);
         CrossReferencePublishedEvents(integrationEventNodes, handlerPublishedEvents);
 
-        // Handler → handled type
+        // Handler → handled type (canonical event targets so generic definitions match closed IEventHandler<T> uses)
+        var registeredEventFullNames = new HashSet<string>(
+            domainEventNodes.Select(e => e.FullName).Concat(integrationEventNodes.Select(e => e.FullName)),
+            StringComparer.Ordinal);
         foreach (var handler in eventHandlerNodes.Concat(commandHandlerNodes).Concat(queryHandlerNodes))
         {
             foreach (var handled in handler.Handles)
             {
+                var target = ResolveCanonicalEventKey(handled, registeredEventFullNames) ?? handled;
                 relationships.Add(new Relationship
                 {
                     SourceType = handler.FullName,
-                    TargetType = handled,
+                    TargetType = target,
                     Kind = RelationshipKind.Handles,
                     Label = "handles"
                 });
@@ -825,8 +830,12 @@ internal sealed class AssemblyScanner
             try
             {
                 var resolved = module.ResolveMethod(token);
-                if (resolved?.DeclaringType?.FullName is { } fullName && eventFullNames.Contains(fullName))
-                    AddEventEmission(emittedByMethod, fullName, sourceMethodName);
+                if (resolved?.DeclaringType?.FullName is { } fullName)
+                {
+                    var key = ResolveCanonicalEventKey(fullName, eventFullNames);
+                    if (key is not null)
+                        AddEventEmission(emittedByMethod, key, sourceMethodName);
+                }
             }
             catch
             {
@@ -843,10 +852,14 @@ internal sealed class AssemblyScanner
         Dictionary<string, HashSet<string>> emittedByMethod,
         string sourceMethodName)
     {
-        if (type.FullName is not null && eventFullNames.Contains(type.FullName))
+        if (type.FullName is not null)
         {
-            AddEventEmission(emittedByMethod, type.FullName, sourceMethodName);
-            return;
+            var key = ResolveCanonicalEventKey(type.FullName, eventFullNames);
+            if (key is not null)
+            {
+                AddEventEmission(emittedByMethod, key, sourceMethodName);
+                return;
+            }
         }
 
         if (type.IsGenericType)
@@ -905,7 +918,7 @@ internal sealed class AssemblyScanner
         {
             foreach (var evtName in entity.EmittedEvents)
             {
-                if (eventMap.TryGetValue(evtName, out var evtNode))
+                if (TryResolveEventNode(eventMap, evtName, out var evtNode))
                     evtNode.EmittedBy.Add(entity.FullName);
             }
         }
@@ -914,7 +927,7 @@ internal sealed class AssemblyScanner
         {
             foreach (var evtName in agg.EmittedEvents)
             {
-                if (eventMap.TryGetValue(evtName, out var evtNode))
+                if (TryResolveEventNode(eventMap, evtName, out var evtNode))
                     evtNode.EmittedBy.Add(agg.FullName);
             }
         }
@@ -923,10 +936,46 @@ internal sealed class AssemblyScanner
         {
             foreach (var handled in handler.Handles)
             {
-                if (eventMap.TryGetValue(handled, out var evtNode))
+                if (TryResolveEventNode(eventMap, handled, out var evtNode))
                     evtNode.HandledBy.Add(handler.FullName);
             }
         }
+    }
+
+    /// <summary>
+    /// For constructed generic CLR names, the open generic definition is the prefix before type arguments (<c>[[...]]</c>).
+    /// Handlers and IL often use the constructed form while the graph node is the generic type definition.
+    /// </summary>
+    private static string? ResolveCanonicalEventKey(string typeFullName, HashSet<string> registeredEventFullNames)
+    {
+        if (registeredEventFullNames.Contains(typeFullName))
+            return typeFullName;
+
+        var bracket = typeFullName.IndexOf("[[", StringComparison.Ordinal);
+        if (bracket >= 0)
+        {
+            var def = typeFullName[..bracket];
+            if (registeredEventFullNames.Contains(def))
+                return def;
+        }
+
+        return null;
+    }
+
+    private static bool TryResolveEventNode(
+        Dictionary<string, DomainEventNode> eventMap,
+        string typeFullName,
+        [NotNullWhen(true)] out DomainEventNode? node)
+    {
+        if (eventMap.TryGetValue(typeFullName, out node))
+            return true;
+
+        var bracket = typeFullName.IndexOf("[[", StringComparison.Ordinal);
+        if (bracket >= 0 && eventMap.TryGetValue(typeFullName[..bracket], out node))
+            return true;
+
+        node = null;
+        return false;
     }
 
     /// <summary>
@@ -942,7 +991,7 @@ internal sealed class AssemblyScanner
         {
             foreach (var evtName in publishedEvents)
             {
-                if (eventMap.TryGetValue(evtName, out var evtNode))
+                if (TryResolveEventNode(eventMap, evtName, out var evtNode))
                     evtNode.EmittedBy.Add(handlerFullName);
             }
         }
