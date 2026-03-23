@@ -425,13 +425,105 @@ public class DDDBuilderTests
                 .WithDomainAssembly(assembly)
                 .DomainEvents(e => e
                     .InheritsFrom<BaseDomainEvent>()
-                    .NameEndsWith("Event") // both rules; any match qualifies
+                    .NameEndsWith("Event") // separate OR branches; any branch qualifies
                 )
             )
             .Build();
 
         var ctx = graph.BoundedContexts.Single();
         ctx.DomainEvents.Should().HaveCountGreaterThanOrEqualTo(3);
+    }
+
+    [Fact]
+    public void Build_EventHandlers_AndConvention_RequiresAllPredicatesInBranch()
+    {
+        var assembly = typeof(Order).Assembly;
+
+        var graph = DDDBuilder.Create()
+            .WithBoundedContext("Sales", ctx => ctx
+                .WithDomainAssembly(assembly)
+                .EventHandlers(h => h
+                    .Implements(typeof(IEventHandler<>))
+                    .And()
+                    .NameEndsWith("Handler")))
+            .Build();
+
+        var ctx = graph.BoundedContexts.Single();
+        ctx.EventHandlers.Should().HaveCount(2);
+        ctx.EventHandlers.Should().Contain(h => h.Name == "OrderPlacedHandler");
+        ctx.EventHandlers.Should().Contain(h => h.Name == "SendShipmentNotificationHandler");
+        ctx.EventHandlers.Should().NotContain(h => h.Name == "OrderPlacedIntegrationHandler");
+        ctx.EventHandlers.Should().NotContain(h => h.Name.Contains("PublishCustomerRegistered"));
+    }
+
+    [Fact]
+    public void Build_EventHandlers_OrBranches_WithAndGroup_MatchesUnion()
+    {
+        var assembly = typeof(Order).Assembly;
+
+        var graph = DDDBuilder.Create()
+            .WithBoundedContext("Sales", ctx => ctx
+                .WithDomainAssembly(assembly)
+                .EventHandlers(h => h
+                    .Implements(typeof(IEventHandler<>))
+                    .And()
+                    .NameEndsWith("Handler")
+                    .Implements(typeof(IIntegrationEventHandler<>))))
+            .Build();
+
+        var ctx = graph.BoundedContexts.Single();
+        ctx.EventHandlers.Should().HaveCount(3);
+    }
+
+    [Fact]
+    public void TypeConventionBuilder_And_WithoutPriorRule_Throws()
+    {
+        var assembly = typeof(Order).Assembly;
+
+        var act = () => DDDBuilder.Create()
+            .WithBoundedContext("Sales", ctx => ctx
+                .WithDomainAssembly(assembly)
+                .EventHandlers(h => h.And()))
+            .Build();
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*follow a convention rule*");
+    }
+
+    [Fact]
+    public void TypeConventionBuilder_DanglingAnd_ThrowsOnMatch()
+    {
+        var assembly = typeof(Order).Assembly;
+
+        var act = () => DDDBuilder.Create()
+            .WithBoundedContext("Sales", ctx => ctx
+                .WithDomainAssembly(assembly)
+                .EventHandlers(h => h
+                    .Implements(typeof(IEventHandler<>))
+                    .And()))
+            .Build();
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*follow the last And()*");
+    }
+
+    [Fact]
+    public void TypeConventionBuilder_DoubleAnd_Throws()
+    {
+        var assembly = typeof(Order).Assembly;
+
+        var act = () => DDDBuilder.Create()
+            .WithBoundedContext("Sales", ctx => ctx
+                .WithDomainAssembly(assembly)
+                .EventHandlers(h => h
+                    .Implements(typeof(IEventHandler<>))
+                    .And()
+                    .And()
+                    .NameEndsWith("Handler")))
+            .Build();
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*before And()*");
     }
 
     [Fact]
