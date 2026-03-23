@@ -26,7 +26,6 @@ public sealed class BoundedContextBuilder
     internal TypeConventionBuilder QueryHandlerConvention { get; } = new();
     internal TypeConventionBuilder RepositoryConvention { get; } = new();
     internal TypeConventionBuilder DomainServiceConvention { get; } = new();
-    internal DocumentationBuilder Documentation { get; } = new();
 
     internal BoundedContextBuilder(string name) => Name = name;
 
@@ -166,23 +165,6 @@ public sealed class BoundedContextBuilder
     public BoundedContextBuilder DomainServices(Action<TypeConventionBuilder> configure)
     {
         configure(DomainServiceConvention);
-        return this;
-    }
-
-    /// <summary>
-    /// Configure how XML documentation descriptions are loaded for discovered types.
-    /// Descriptions serve as friendly names in the output graph.
-    /// <para>
-    /// Example:
-    /// <code>
-    /// .WithDocumentation(d => d.AutoDiscover())
-    /// .WithDocumentation(d => d.FromFile("path/to/MyProject.xml"))
-    /// </code>
-    /// </para>
-    /// </summary>
-    public BoundedContextBuilder WithDocumentation(Action<DocumentationBuilder> configure)
-    {
-        configure(Documentation);
         return this;
     }
 

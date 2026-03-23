@@ -70,7 +70,7 @@ public sealed class EntityNode
     /// <summary>Display name override (alias) set in the feature editor.</summary>
     public string? Alias { get; set; }
 
-    /// <summary>Friendly description from XML documentation comments.</summary>
+    /// <summary>Optional description (e.g. from explorer metadata).</summary>
     public string? Description { get; set; }
 
     /// <summary>The architectural layer this type belongs to (Domain, Application, Infrastructure).</summary>
@@ -101,7 +101,7 @@ public sealed class AggregateNode
     /// <summary>Display name override (alias) set in the feature editor.</summary>
     public string? Alias { get; set; }
 
-    /// <summary>Friendly description from XML documentation comments.</summary>
+    /// <summary>Optional description (e.g. from explorer metadata).</summary>
     public string? Description { get; set; }
 
     /// <summary>The architectural layer this type belongs to (Domain, Application, Infrastructure).</summary>
@@ -137,7 +137,7 @@ public sealed class ValueObjectNode
     /// <summary>Display name override (alias) set in the feature editor.</summary>
     public string? Alias { get; set; }
 
-    /// <summary>Friendly description from XML documentation comments.</summary>
+    /// <summary>Optional description (e.g. from explorer metadata).</summary>
     public string? Description { get; set; }
 
     /// <summary>The architectural layer this type belongs to (Domain, Application, Infrastructure).</summary>
@@ -160,7 +160,7 @@ public sealed class DomainEventNode
     /// <summary>Display name override (alias) set in the feature editor.</summary>
     public string? Alias { get; set; }
 
-    /// <summary>Friendly description from XML documentation comments.</summary>
+    /// <summary>Optional description (e.g. from explorer metadata).</summary>
     public string? Description { get; set; }
 
     /// <summary>The architectural layer this type belongs to (Domain, Application, Infrastructure).</summary>
@@ -189,7 +189,7 @@ public sealed class CommandHandlerTargetNode
     /// <summary>Display name override (alias) set in the feature editor.</summary>
     public string? Alias { get; set; }
 
-    /// <summary>Friendly description from XML documentation comments.</summary>
+    /// <summary>Optional description (e.g. from explorer metadata).</summary>
     public string? Description { get; set; }
 
     /// <summary>The architectural layer this type belongs to (Domain, Application, Infrastructure).</summary>
@@ -215,7 +215,7 @@ public sealed class HandlerNode
     /// <summary>Display name override (alias) set in the feature editor.</summary>
     public string? Alias { get; set; }
 
-    /// <summary>Friendly description from XML documentation comments.</summary>
+    /// <summary>Optional description (e.g. from explorer metadata).</summary>
     public string? Description { get; set; }
 
     /// <summary>The architectural layer this type belongs to (Domain, Application, Infrastructure).</summary>
@@ -239,7 +239,7 @@ public sealed class RepositoryNode
     /// <summary>Display name override (alias) set in the feature editor.</summary>
     public string? Alias { get; set; }
 
-    /// <summary>Friendly description from XML documentation comments.</summary>
+    /// <summary>Optional description (e.g. from explorer metadata).</summary>
     public string? Description { get; set; }
 
     /// <summary>The architectural layer this type belongs to (Domain, Application, Infrastructure).</summary>
@@ -263,7 +263,7 @@ public sealed class DomainServiceNode
     /// <summary>Display name override (alias) set in the feature editor.</summary>
     public string? Alias { get; set; }
 
-    /// <summary>Friendly description from XML documentation comments.</summary>
+    /// <summary>Optional description (e.g. from explorer metadata).</summary>
     public string? Description { get; set; }
 
     /// <summary>The architectural layer this type belongs to (Domain, Application, Infrastructure).</summary>
@@ -285,7 +285,7 @@ public sealed class SubTypeNode
     /// <summary>Display name override (alias) set in the feature editor.</summary>
     public string? Alias { get; set; }
 
-    /// <summary>Friendly description from XML documentation comments.</summary>
+    /// <summary>Optional description (e.g. from explorer metadata).</summary>
     public string? Description { get; set; }
 
     /// <summary>The architectural layer this type belongs to (Domain, Application, Infrastructure).</summary>

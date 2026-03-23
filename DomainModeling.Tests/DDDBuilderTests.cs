@@ -581,196 +581,19 @@ public class DDDBuilderTests
         graph.BoundedContexts.Should().OnlyContain(c => c.Aggregates.Any(a => a.Name == "Order"));
     }
 
-    // ─── XML Documentation ──────────────────────────────────────────
-
-    private static string GetSampleXmlDocPath()
-    {
-        // The XML doc file lives next to the test assembly in the SampleDomain folder at compile time,
-        // but we copied it into the project. Resolve relative to test assembly location.
-        var testDir = Path.GetDirectoryName(typeof(DDDBuilderTests).Assembly.Location)!;
-        // During build it gets copied to output if marked as content/copy. Fallback to project source path.
-        var candidate = Path.Combine(testDir, "SampleDomain", "SampleTypes.xml");
-        if (File.Exists(candidate))
-            return candidate;
-
-        // Fallback: walk up to find it in the source tree
-        var dir = new DirectoryInfo(testDir);
-        while (dir is not null)
-        {
-            var check = Path.Combine(dir.FullName, "DomainModeling.Tests", "SampleDomain", "SampleTypes.xml");
-            if (File.Exists(check))
-                return check;
-            dir = dir.Parent;
-        }
-
-        throw new FileNotFoundException("Could not locate SampleTypes.xml");
-    }
-
     [Fact]
-    public void WithDocumentation_FromFile_PopulatesAggregateDescriptions()
-    {
-        var assembly = typeof(Order).Assembly;
-        var xmlPath = GetSampleXmlDocPath();
-
-        var graph = DDDBuilder.Create()
-            .WithBoundedContext("Sales", ctx => ctx
-                .WithDomainAssembly(assembly)
-                .Aggregates(a => a.InheritsFrom<BaseAggregateRoot>())
-                .WithDocumentation(d => d.FromFile(xmlPath))
-            )
-            .Build();
-
-        var ctx = graph.BoundedContexts.Single();
-        var order = ctx.Aggregates.Single(a => a.Name == "Order");
-        var customer = ctx.Aggregates.Single(a => a.Name == "Customer");
-
-        order.Description.Should().Be("Represents a customer order in the sales domain.");
-        customer.Description.Should().Be("A customer who can place orders.");
-    }
-
-    [Fact]
-    public void WithDocumentation_FromFile_PopulatesEntityDescriptions()
-    {
-        var assembly = typeof(Order).Assembly;
-        var xmlPath = GetSampleXmlDocPath();
-
-        var graph = DDDBuilder.Create()
-            .WithBoundedContext("Sales", ctx => ctx
-                .WithDomainAssembly(assembly)
-                .Entities(e => e.InheritsFrom<BaseEntity>())
-                .WithDocumentation(d => d.FromFile(xmlPath))
-            )
-            .Build();
-
-        var ctx = graph.BoundedContexts.Single();
-        var orderLine = ctx.Entities.Single(e => e.Name == "OrderLine");
-
-        orderLine.Description.Should().Be("A single line item within an order.");
-    }
-
-    [Fact]
-    public void WithDocumentation_FromFile_PopulatesValueObjectDescriptions()
-    {
-        var assembly = typeof(Order).Assembly;
-        var xmlPath = GetSampleXmlDocPath();
-
-        var graph = DDDBuilder.Create()
-            .WithBoundedContext("Sales", ctx => ctx
-                .WithDomainAssembly(assembly)
-                .ValueObjects(v => v.InheritsFrom<BaseValueObject>())
-                .WithDocumentation(d => d.FromFile(xmlPath))
-            )
-            .Build();
-
-        var ctx = graph.BoundedContexts.Single();
-        var address = ctx.ValueObjects.Single(v => v.Name == "Address");
-        var money = ctx.ValueObjects.Single(v => v.Name == "Money");
-
-        address.Description.Should().Be("A physical mailing address.");
-        money.Description.Should().Be("Represents a monetary amount with currency.");
-    }
-
-    [Fact]
-    public void WithDocumentation_FromFile_PopulatesDomainEventDescriptions()
-    {
-        var assembly = typeof(Order).Assembly;
-        var xmlPath = GetSampleXmlDocPath();
-
-        var graph = DDDBuilder.Create()
-            .WithBoundedContext("Sales", ctx => ctx
-                .WithDomainAssembly(assembly)
-                .DomainEvents(e => e.InheritsFrom<BaseDomainEvent>())
-                .WithDocumentation(d => d.FromFile(xmlPath))
-            )
-            .Build();
-
-        var ctx = graph.BoundedContexts.Single();
-        var orderPlaced = ctx.DomainEvents.Single(e => e.Name == "OrderPlacedEvent");
-        var orderShipped = ctx.DomainEvents.Single(e => e.Name == "OrderShippedEvent");
-        var customerCreated = ctx.DomainEvents.Single(e => e.Name == "CustomerCreatedEvent");
-
-        orderPlaced.Description.Should().Be("Raised when an order is placed by a customer.");
-        orderShipped.Description.Should().Be("Raised when an order has shipped.");
-        customerCreated.Description.Should().Be("Raised when a new customer registers.");
-    }
-
-    [Fact]
-    public void WithDocumentation_FromFile_PopulatesHandlerDescriptions()
-    {
-        var assembly = typeof(Order).Assembly;
-        var xmlPath = GetSampleXmlDocPath();
-
-        var graph = DDDBuilder.Create()
-            .WithBoundedContext("Sales", ctx => ctx
-                .WithDomainAssembly(assembly)
-                .WithApplicationAssembly(assembly)
-                .EventHandlers(h => h.Implements(typeof(IEventHandler<>)))
-                .WithDocumentation(d => d.FromFile(xmlPath))
-            )
-            .Build();
-
-        var ctx = graph.BoundedContexts.Single();
-        var handler = ctx.EventHandlers.Single(h => h.Name == "OrderPlacedHandler");
-
-        handler.Description.Should().Be("Processes order-placed events for downstream fulfillment.");
-    }
-
-    [Fact]
-    public void WithDocumentation_FromFile_PopulatesRepositoryDescriptions()
-    {
-        var assembly = typeof(Order).Assembly;
-        var xmlPath = GetSampleXmlDocPath();
-
-        var graph = DDDBuilder.Create()
-            .WithBoundedContext("Sales", ctx => ctx
-                .WithDomainAssembly(assembly)
-                .WithInfrastructureAssembly(assembly)
-                .Aggregates(a => a.InheritsFrom<BaseAggregateRoot>())
-                .Repositories(r => r.Implements(typeof(IRepository<>)))
-                .WithDocumentation(d => d.FromFile(xmlPath))
-            )
-            .Build();
-
-        var ctx = graph.BoundedContexts.Single();
-        var repo = ctx.Repositories.Single(r => r.Name == "OrderRepository");
-
-        repo.Description.Should().Be("Persists and retrieves orders.");
-    }
-
-    [Fact]
-    public void WithDocumentation_NotConfigured_DescriptionsAreNull()
+    public void Build_DiscoveredNodesHaveNullDescriptionByDefault()
     {
         var assembly = typeof(Order).Assembly;
 
         var graph = DDDBuilder.Create()
             .WithBoundedContext("Sales", ctx => ctx
                 .WithDomainAssembly(assembly)
-                .Aggregates(a => a.InheritsFrom<BaseAggregateRoot>())
-            )
+                .Aggregates(a => a.InheritsFrom<BaseAggregateRoot>()))
             .Build();
 
         var ctx = graph.BoundedContexts.Single();
         ctx.Aggregates.Should().OnlyContain(a => a.Description == null);
-    }
-
-    [Fact]
-    public void WithDocumentation_DescriptionAppearsInJsonOutput()
-    {
-        var assembly = typeof(Order).Assembly;
-        var xmlPath = GetSampleXmlDocPath();
-
-        var graph = DDDBuilder.Create()
-            .WithBoundedContext("Sales", ctx => ctx
-                .WithDomainAssembly(assembly)
-                .Aggregates(a => a.InheritsFrom<BaseAggregateRoot>())
-                .WithDocumentation(d => d.FromFile(xmlPath))
-            )
-            .Build();
-
-        var json = graph.ToJson();
-
-        json.Should().Contain("\"description\"");
-        json.Should().Contain("Represents a customer order in the sales domain.");
     }
 
     // ─── Integration Events ─────────────────────────────────────────

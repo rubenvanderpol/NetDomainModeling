@@ -1,6 +1,6 @@
 # Domain Modeling
 
-A small .NET library that **reflects over your assemblies** and builds a **domain graph**: DDD-style building blocks (aggregates, entities, handlers, events, repositories), the **relationships between them**, and optional **XML documentation** text. You can **serialize the graph to JSON** for your own tooling or mount an **embedded web explorer** in ASP.NET Core so teams can navigate how the application is structured and how work flows through handlers and events.
+A small .NET library that **reflects over your assemblies** and builds a **domain graph**: DDD-style building blocks (aggregates, entities, handlers, events, repositories) and the **relationships between them**. You can **serialize the graph to JSON** for your own tooling or mount an **embedded web explorer** in ASP.NET Core so teams can navigate how the application is structured and how work flows through handlers and events.
 
 The `DomainModeling.Example` project and `DomainModeling.Example.*` assemblies exist to **exercise and demonstrate** the scanner and UI. **Treat them as a sample host**, not as a framework you must copy verbatim—point the builder at **your** domain, application, and infrastructure assemblies instead.
 
@@ -63,7 +63,6 @@ Useful APIs:
 
 - **`WithSharedAssembly`** on `DDDBuilder` — assemblies scanned in **every** context (for shared integration contracts).
 - **`WithAssembly`** on `BoundedContextBuilder` — extra assemblies for a single context.
-- **`WithDocumentation`** — control XML doc loading (`AutoDiscover()`, explicit `.xml` paths) so summaries appear on graph nodes.
 
 If you omit conventions for a role, nothing is classified for that role (no implicit defaults).
 
@@ -121,4 +120,4 @@ Then open `/domain-model` (the example also redirects `/` there).
 
 Think of the graph as a **navigable map** of how work moves: command and query handlers link to the types they handle; handlers can link to aggregates when the scanner sees instance calls; domain and integration events connect emitters and handlers; repositories link to aggregates. **Multiple bounded contexts** are merged so **integration events** can show **cross-context** publishers and subscribers.
 
-Tune your **conventions** so they match your real base classes and interfaces; split **Domain / Application / Infrastructure** assemblies when you want **layer** labels on nodes. For richer cards in the UI, enable **XML documentation** in your modeled projects and use `WithDocumentation`.
+Tune your **conventions** so they match your real base classes and interfaces; split **Domain / Application / Infrastructure** assemblies when you want **layer** labels on nodes. In the ASP.NET Core explorer you can also attach **aliases and descriptions** per type via the metadata endpoints and store them on disk.
