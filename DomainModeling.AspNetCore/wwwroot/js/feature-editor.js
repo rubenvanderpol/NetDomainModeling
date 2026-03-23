@@ -6,6 +6,7 @@
  *  - Add types from the existing domain model or create new ones
  *  - Draw relationships by dragging a line from one node to another
  *  - Drag/pan/zoom the canvas
+ *  - Optionally run in read-only mode (existing graph items only)
  */
 import { esc, escAttr, shortName, ALL_SECTIONS, SECTION_META } from './helpers.js';
 import { renderTabBar } from './tabs.js';
@@ -69,6 +70,7 @@ let baseUrl = '';
 let domainData = null;   // full domain graph
 let featureList = [];     // list of feature names
 let currentFeatureName = null;
+let currentFeatureReadOnly = false;
 let st = null;            // current feature editor state
 let dirty = false;
 let connecting = null;    // { sourceId, mouseX, mouseY } when drawing a relation line
@@ -81,6 +83,10 @@ export async function initFeatureEditor(apiBaseUrl, data) {
   domainData = data;
   await loadFeatureList();
   await loadFeatureExports();
+}
+
+function isReadOnlyFeature() {
+  return currentFeatureReadOnly === true;
 }
 
 export function renderFeatureEditorView() {
@@ -101,6 +107,9 @@ export function renderFeatureEditorView() {
   } else {
     html += '<div class="fe-canvas-toolbar">';
     html += `<span class="fe-feature-name">${esc(currentFeatureName)}</span>`;
+    if (isReadOnlyFeature()) {
+      html += '<span class="fe-mode-badge" title="Only existing domain items can be included">read-only feature mode</span>';
+    }
     html += `<span class="fe-dirty-indicator" id="feDirtyIndicator" style="display:${dirty ? 'inline' : 'none'}">● unsaved</span>`;
     html += '<span class="fe-toolbar-spacer"></span>';
     html += '<button class="fe-btn" onclick="window.__featureEditor.fit()" title="Fit to view">⊡ Fit</button>';
@@ -163,6 +172,7 @@ function renderFeatureListPanel() {
   html += '</div>';
   html += '<div class="fe-new-feature">';
   html += '<input type="text" class="fe-input" id="feNewFeatureName" placeholder="New feature name…" />';
+  html += '<label class="fe-checkbox-row"><input type="checkbox" id="feNewFeatureReadOnly" /> Read-only</label>';
   html += '<button class="fe-btn primary" onclick="window.__featureEditor.createFeature()">+ Create</button>';
   html += '</div>';
   html += '</div>';
@@ -173,21 +183,25 @@ function renderFeatureListPanel() {
 
 function renderPalettePanel() {
   let html = '<div class="fe-section">';
-  html += '<div class="fe-section-header">Add Types</div>';
+  html += `<div class="fe-section-header">${isReadOnlyFeature() ? 'Add Existing Types' : 'Add Types'}</div>`;
   html += '<input type="text" class="fe-input fe-search" id="fePaletteSearch" placeholder="Search types…" oninput="window.__featureEditor.filterPalette()" />';
   html += '<div class="fe-palette" id="fePalette">';
   html += renderPaletteItems('');
   html += '</div>';
 
-  // Custom type creation
-  html += '<div class="fe-section-header" style="margin-top:12px">Create New Type</div>';
-  html += '<input type="text" class="fe-input" id="feNewTypeName" placeholder="Type name…" />';
-  html += '<select class="fe-input" id="feNewTypeKind">';
-  for (const [kind, label] of Object.entries(KIND_LABELS)) {
-    html += `<option value="${kind}">${label}</option>`;
+  if (!isReadOnlyFeature()) {
+    // Custom type creation
+    html += '<div class="fe-section-header" style="margin-top:12px">Create New Type</div>';
+    html += '<input type="text" class="fe-input" id="feNewTypeName" placeholder="Type name…" />';
+    html += '<select class="fe-input" id="feNewTypeKind">';
+    for (const [kind, label] of Object.entries(KIND_LABELS)) {
+      html += `<option value="${kind}">${label}</option>`;
+    }
+    html += '</select>';
+    html += '<button class="fe-btn" onclick="window.__featureEditor.addNewType()" style="margin-top:4px">+ Add Custom Type</button>';
+  } else {
+    html += '<div class="fe-readonly-hint">Custom type creation is disabled in read-only feature mode.</div>';
   }
-  html += '</select>';
-  html += '<button class="fe-btn" onclick="window.__featureEditor.addNewType()" style="margin-top:4px">+ Add Custom Type</button>';
 
   html += '</div>';
   return html;
@@ -228,6 +242,7 @@ function renderPaletteItems(filter) {
 
 function renderPropertiesPanel() {
   if (!st) return '<div class="fe-panel-empty">No feature loaded.</div>';
+  const readOnly = isReadOnlyFeature();
 
   if (st.selectedNode) {
     const n = st.nMap[st.selectedNode];
@@ -238,24 +253,37 @@ function renderPropertiesPanel() {
     h += `<div class="fe-panel-field"><label>Name</label><div class="fe-panel-value">${esc(n.name)}</div></div>`;
     h += `<div class="fe-panel-field"><label>Full Name</label><div class="fe-panel-value">${esc(n.id)}</div></div>`;
 
-    // Alias (editable)
+    // Alias
     h += `<div class="fe-panel-field"><label>Alias</label>`;
-    h += `<input type="text" class="fe-input" value="${escAttr(n.alias || '')}" placeholder="Display name override…" `;
-    h += `onchange="window.__featureEditor.changeAlias('${escAttr(n.id)}', this.value)" /></div>`;
+    if (readOnly) {
+      h += `<div class="fe-panel-value">${esc(n.alias || '—')}</div>`;
+    } else {
+      h += `<input type="text" class="fe-input" value="${escAttr(n.alias || '')}" placeholder="Display name override…" `;
+      h += `onchange="window.__featureEditor.changeAlias('${escAttr(n.id)}', this.value)" /></div>`;
+    }
+    if (readOnly) h += '</div>';
 
-    // Description (editable)
+    // Description
     h += `<div class="fe-panel-field"><label>Description</label>`;
-    h += `<textarea class="fe-input" rows="3" placeholder="Custom description…" `;
-    h += `onchange="window.__featureEditor.changeDescription('${escAttr(n.id)}', this.value)">${esc(n.description || '')}</textarea></div>`;
+    if (readOnly) {
+      h += `<div class="fe-panel-value">${esc(n.description || '—')}</div></div>`;
+    } else {
+      h += `<textarea class="fe-input" rows="3" placeholder="Custom description…" `;
+      h += `onchange="window.__featureEditor.changeDescription('${escAttr(n.id)}', this.value)">${esc(n.description || '')}</textarea></div>`;
+    }
 
     // Bounded Context
     h += `<div class="fe-panel-field"><label>Bounded Context</label>`;
-    h += renderBoundedContextDropdown(n);
+    h += readOnly
+      ? `<div class="fe-panel-value">${esc(n.boundedContext || '—')}</div>`
+      : renderBoundedContextDropdown(n);
     h += '</div>';
 
     // Layer
     h += `<div class="fe-panel-field"><label>Layer</label>`;
-    h += renderLayerDropdown(n);
+    h += readOnly
+      ? `<div class="fe-panel-value">${esc(n.layer || '—')}</div>`
+      : renderLayerDropdown(n);
     h += '</div>';
 
     // Properties — editable list
@@ -265,17 +293,21 @@ function renderPropertiesPanel() {
         const p = n.structuredProps[i];
         h += `<div class="fe-panel-prop-row">`;
         h += `<span class="fe-panel-prop-text">${esc(p.name)}: ${esc(p.type)}</span>`;
-        h += `<button class="fe-btn-icon" onclick="window.__featureEditor.removeProperty('${escAttr(n.id)}', ${i})" title="Remove property">✕</button>`;
+        if (!readOnly) {
+          h += `<button class="fe-btn-icon" onclick="window.__featureEditor.removeProperty('${escAttr(n.id)}', ${i})" title="Remove property">✕</button>`;
+        }
         h += `</div>`;
       }
     } else {
       h += '<div class="fe-panel-prop-empty">No properties</div>';
     }
-    h += '<div class="fe-add-prop-row">';
-    h += '<input type="text" class="fe-input fe-input-sm" id="feNewPropName" placeholder="name" />';
-    h += '<input type="text" class="fe-input fe-input-sm" id="feNewPropType" placeholder="type" />';
-    h += `<button class="fe-btn-icon fe-btn-add" onclick="window.__featureEditor.addProperty('${escAttr(n.id)}')" title="Add property">+</button>`;
-    h += '</div>';
+    if (!readOnly) {
+      h += '<div class="fe-add-prop-row">';
+      h += '<input type="text" class="fe-input fe-input-sm" id="feNewPropName" placeholder="name" />';
+      h += '<input type="text" class="fe-input fe-input-sm" id="feNewPropType" placeholder="type" />';
+      h += `<button class="fe-btn-icon fe-btn-add" onclick="window.__featureEditor.addProperty('${escAttr(n.id)}')" title="Add property">+</button>`;
+      h += '</div>';
+    }
 
     // Emitted events (derived from Emits edges)
     const emittedEvents = getEmittedEventsForNode(n.id);
@@ -299,7 +331,9 @@ function renderPropertiesPanel() {
 
     // Actions
     h += '<div class="fe-panel-section">Actions</div>';
-    h += `<button class="fe-btn fe-connect-btn" onclick="window.__featureEditor.startConnect('${escAttr(n.id)}')" title="Drag to another node to create a relation">⟶ Draw Relation</button>`;
+    if (!readOnly) {
+      h += `<button class="fe-btn fe-connect-btn" onclick="window.__featureEditor.startConnect('${escAttr(n.id)}')" title="Drag to another node to create a relation">⟶ Draw Relation</button>`;
+    }
     h += `<button class="fe-btn danger" onclick="window.__featureEditor.removeNode('${escAttr(n.id)}')" style="margin-top:4px">✕ Remove from Feature</button>`;
 
     return h;
@@ -313,11 +347,15 @@ function renderPropertiesPanel() {
     h += `<div class="fe-panel-field"><label>Source</label><div class="fe-panel-value">${esc(shortName(e.source))}</div></div>`;
     h += `<div class="fe-panel-field"><label>Target</label><div class="fe-panel-value">${esc(shortName(e.target))}</div></div>`;
     h += `<div class="fe-panel-field"><label>Kind</label>`;
-    h += renderRelKindDropdown(e.kind, st.selectedEdge);
+    h += readOnly
+      ? `<div class="fe-panel-value">${esc(e.kind)}</div>`
+      : renderRelKindDropdown(e.kind, st.selectedEdge);
     h += '</div>';
     if (e.label) h += `<div class="fe-panel-field"><label>Label</label><div class="fe-panel-value">${esc(e.label)}</div></div>`;
-    h += '<div class="fe-panel-section">Actions</div>';
-    h += `<button class="fe-btn danger" onclick="window.__featureEditor.removeEdge(${st.selectedEdge})">✕ Remove Relation</button>`;
+    if (!readOnly) {
+      h += '<div class="fe-panel-section">Actions</div>';
+      h += `<button class="fe-btn danger" onclick="window.__featureEditor.removeEdge(${st.selectedEdge})">✕ Remove Relation</button>`;
+    }
     return h;
   }
 
@@ -326,6 +364,12 @@ function renderPropertiesPanel() {
 
 function renderPanelInstructions() {
   let h = '<div class="fe-panel-empty">';
+  if (isReadOnlyFeature()) {
+    h += '<p>Read-only mode: add existing types from the palette.</p>';
+    h += '<p>Select a node to inspect details.</p>';
+    h += '</div>';
+    return h;
+  }
   h += '<p>Click a node to inspect it.</p>';
   h += '<p>Click a node then <strong>"Draw Relation"</strong>, then click another node to connect them.</p>';
   h += '<p>Or drag from a node\'s <strong>connector port</strong> (⬤) to another node.</p>';
@@ -353,6 +397,7 @@ function getEmittedEventsForNode(nodeId) {
 // ── Property management ──────────────────────────────
 
 export function addProperty(nodeId) {
+  if (isReadOnlyFeature()) return;
   if (!st) return;
   const n = st.nMap[nodeId];
   if (!n) return;
@@ -374,6 +419,7 @@ export function addProperty(nodeId) {
 }
 
 export function removeProperty(nodeId, idx) {
+  if (isReadOnlyFeature()) return;
   if (!st) return;
   const n = st.nMap[nodeId];
   if (!n || !n.structuredProps) return;
@@ -393,12 +439,14 @@ function rebuildDisplayProps(n) {
 
 export async function createFeature() {
   const input = document.getElementById('feNewFeatureName');
+  const readOnlyInput = document.getElementById('feNewFeatureReadOnly');
   if (!input) return;
   const name = input.value.trim();
   if (!name) return;
+  const readOnly = readOnlyInput?.checked === true;
 
   // Initialize empty feature
-  const feature = { nodes: [], edges: [], positions: {} };
+  const feature = { readOnly, nodes: [], edges: [], positions: {} };
   try {
     const res = await fetch(`${baseUrl}/features/${encodeURIComponent(name)}`, {
       method: 'PUT',
@@ -410,6 +458,7 @@ export async function createFeature() {
 
   await loadFeatureList();
   currentFeatureName = name;
+  currentFeatureReadOnly = readOnly;
   loadFeatureState(feature);
   dirty = false;
   rerender();
@@ -422,6 +471,7 @@ export async function loadFeature(name) {
     if (!res.ok) { console.error('Feature not found'); return; }
     const feature = await res.json();
     currentFeatureName = name;
+    currentFeatureReadOnly = feature?.readOnly === true;
     loadFeatureState(feature);
     dirty = false;
     rerender();
@@ -452,6 +502,7 @@ export async function deleteFeature() {
     await fetch(`${baseUrl}/features/${encodeURIComponent(currentFeatureName)}`, { method: 'DELETE' });
   } catch { /* ignore */ }
   currentFeatureName = null;
+  currentFeatureReadOnly = false;
   st = null;
   dirty = false;
   await loadFeatureList();
@@ -487,12 +538,13 @@ function rerender() {
 // ── Feature state serialization ──────────────────────
 
 function serializeFeature() {
-  if (!st) return { nodes: [], edges: [], positions: {} };
+  if (!st) return { readOnly: currentFeatureReadOnly, nodes: [], edges: [], positions: {} };
   const positions = {};
   for (const n of st.nodes) {
     positions[n.id] = { x: Math.round(n.x * 10) / 10, y: Math.round(n.y * 10) / 10 };
   }
   return {
+    readOnly: currentFeatureReadOnly,
     nodes: st.nodes.map(n => ({
       id: n.id, name: n.name, kind: n.kind, isCustom: n.isCustom || false,
       alias: n.alias || null, description: n.description || null,
@@ -508,6 +560,7 @@ function serializeFeature() {
 }
 
 function loadFeatureState(feature) {
+  currentFeatureReadOnly = feature?.readOnly === true;
   st = {
     nodes: [], edges: [], nMap: {},
     zoom: 1, panX: 0, panY: 0,
@@ -616,6 +669,7 @@ export function addExistingType(fullName, kind) {
 }
 
 export function addNewType() {
+  if (isReadOnlyFeature()) return;
   if (!st) return;
   const nameInput = document.getElementById('feNewTypeName');
   const kindSelect = document.getElementById('feNewTypeKind');
@@ -682,12 +736,14 @@ export function removeNode(id) {
 // ── Relation management ──────────────────────────────
 
 export function startConnect(sourceId) {
+  if (isReadOnlyFeature()) return;
   connecting = { sourceId, mouseX: 0, mouseY: 0 };
   const canvas = document.getElementById('feCanvas');
   if (canvas) canvas.style.cursor = 'crosshair';
 }
 
 function finishConnect(targetId) {
+  if (isReadOnlyFeature()) return;
   if (!connecting || !st) return;
   const { sourceId } = connecting;
   connecting = null;
@@ -813,6 +869,7 @@ function renderBoundedContextDropdown(node) {
 }
 
 export function changeAlias(nodeId, value) {
+  if (isReadOnlyFeature()) return;
   if (!st) return;
   const n = st.nMap[nodeId];
   if (!n) return;
@@ -823,6 +880,7 @@ export function changeAlias(nodeId, value) {
 }
 
 export function changeDescription(nodeId, value) {
+  if (isReadOnlyFeature()) return;
   if (!st) return;
   const n = st.nMap[nodeId];
   if (!n) return;
@@ -832,6 +890,7 @@ export function changeDescription(nodeId, value) {
 }
 
 export function changeBoundedContext(nodeId, ctxName) {
+  if (isReadOnlyFeature()) return;
   if (!st) return;
   const n = st.nMap[nodeId];
   if (!n) return;
@@ -875,6 +934,7 @@ function renderLayerDropdown(node) {
 }
 
 export function changeLayer(nodeId, layer) {
+  if (isReadOnlyFeature()) return;
   if (!st) return;
   const n = st.nMap[nodeId];
   if (!n) return;
@@ -908,6 +968,7 @@ function toggleDropdownById(menuId, wrapperId) {
 }
 
 export function removeEdge(idx) {
+  if (isReadOnlyFeature()) return;
   if (!st) return;
   st.edges.splice(idx, 1);
   st.selectedEdge = null;
@@ -918,6 +979,7 @@ export function removeEdge(idx) {
 }
 
 export function changeEdgeKind(idx, kind) {
+  if (isReadOnlyFeature()) return;
   if (!st || !st.edges[idx]) return;
   st.edges[idx].kind = kind;
   recalcNodeHeights();
@@ -1179,7 +1241,9 @@ function renderSvg() {
     s += `<rect width="${n.w}" height="${n.h}" rx="8" fill="${c.bg}" stroke="${stroke}" stroke-width="${strokeW}" />`;
 
     // Connector port (top-right circle for drag-to-connect)
-    s += `<circle class="fe-port" cx="${n.w - 8}" cy="12" r="5" fill="${c.color}" opacity="0.6" style="cursor:crosshair" />`;
+    if (!isReadOnlyFeature()) {
+      s += `<circle class="fe-port" cx="${n.w - 8}" cy="12" r="5" fill="${c.color}" opacity="0.6" style="cursor:crosshair" />`;
+    }
 
     // Custom type indicator
     if (n.isCustom) {
@@ -1278,7 +1342,7 @@ function setupInteraction() {
     const nodeEl = ev.target.closest('.fe-node');
     const edgeEl = ev.target.closest('.fe-edge');
 
-    if (portEl && nodeEl) {
+    if (!isReadOnlyFeature() && portEl && nodeEl) {
       // Start connection from port
       ev.preventDefault();
       const id = nodeEl.dataset.id;
@@ -1292,7 +1356,7 @@ function setupInteraction() {
       return;
     }
 
-    if (connecting && nodeEl) {
+    if (!isReadOnlyFeature() && connecting && nodeEl) {
       // Finish connection
       ev.preventDefault();
       finishConnect(nodeEl.dataset.id);
@@ -1300,7 +1364,7 @@ function setupInteraction() {
       return;
     }
 
-    if (connecting && !nodeEl) {
+    if (!isReadOnlyFeature() && connecting && !nodeEl) {
       // Cancel connection on background click
       connecting = null;
       svg.style.cursor = '';

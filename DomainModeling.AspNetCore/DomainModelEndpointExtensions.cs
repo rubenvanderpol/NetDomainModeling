@@ -438,14 +438,42 @@ public static class DomainModelEndpointExtensions
                 var body = await reader.ReadToEndAsync();
 
                 // Validate JSON
-                try { using var doc = JsonDocument.Parse(body); }
+                JsonDocument featureDoc;
+                try { featureDoc = JsonDocument.Parse(body); }
                 catch (JsonException) { return Results.BadRequest("Invalid JSON"); }
 
-                var featureFolder = Path.Combine(featureDir, safeName);
-                Directory.CreateDirectory(featureFolder);
-                var path = Path.Combine(featureFolder, "feature.json");
-                await File.WriteAllTextAsync(path, body);
-                return Results.Ok(new { saved = true });
+                using (featureDoc)
+                {
+                    var requestedReadOnly = featureDoc.RootElement.TryGetProperty("readOnly", out var ro)
+                        && ro.ValueKind == JsonValueKind.True;
+
+                    var featureFolder = Path.Combine(featureDir, safeName);
+                    var path = Path.Combine(featureFolder, "feature.json");
+                    var existingReadOnly = false;
+
+                    if (File.Exists(path))
+                    {
+                        existingReadOnly = IsFeatureReadOnly(File.ReadAllText(path));
+                    }
+
+                    // Once a feature is read-only, it cannot be downgraded.
+                    if (existingReadOnly && !requestedReadOnly)
+                    {
+                        return Results.BadRequest("Read-only mode cannot be disabled once enabled for a feature.");
+                    }
+
+                    var effectiveReadOnly = existingReadOnly || requestedReadOnly;
+                    if (effectiveReadOnly)
+                    {
+                        var validation = ReadOnlyFeatureValidator.Validate(body, graph);
+                        if (!validation.IsValid)
+                            return Results.BadRequest(validation.ErrorMessage);
+                    }
+
+                    Directory.CreateDirectory(featureFolder);
+                    await File.WriteAllTextAsync(path, body);
+                    return Results.Ok(new { saved = true });
+                }
             })
             .ExcludeFromDescription()
             .WithName("FeatureEditorSave");
@@ -628,6 +656,20 @@ public static class DomainModelEndpointExtensions
             return true;
         }
         catch
+        {
+            return false;
+        }
+    }
+
+    private static bool IsFeatureReadOnly(string featureJson)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(featureJson);
+            return doc.RootElement.TryGetProperty("readOnly", out var ro)
+                   && ro.ValueKind == JsonValueKind.True;
+        }
+        catch (JsonException)
         {
             return false;
         }

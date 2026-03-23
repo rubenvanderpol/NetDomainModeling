@@ -65,8 +65,18 @@
 
 .fe-new-feature {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   margin-top: 6px;
+}
+
+.fe-checkbox-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-dim);
 }
 
 /* ── Inputs ───────────────────────────────────────── */
@@ -186,6 +196,13 @@
   padding: 8px 0;
 }
 
+.fe-readonly-hint {
+  margin-top: 10px;
+  font-size: 11px;
+  color: var(--text-dim);
+  line-height: 1.4;
+}
+
 /* ── Canvas ───────────────────────────────────────── */
 .fe-canvas-wrap {
   flex: 1;
@@ -207,6 +224,17 @@
   font-size: 14px;
   font-weight: 600;
   color: var(--text);
+}
+
+.fe-mode-badge {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  color: #f59e0b;
+  border: 1px solid #f59e0b66;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-weight: 700;
 }
 
 .fe-dirty-indicator {
