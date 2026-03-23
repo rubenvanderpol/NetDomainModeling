@@ -21,8 +21,4 @@
     <ProjectReference Include="..\DomainModeling.Example\DomainModeling.Example.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
-    <Content Include="SampleDomain\SampleTypes.xml" CopyToOutputDirectory="PreserveNewest" />
-  </ItemGroup>
-
 </Project>

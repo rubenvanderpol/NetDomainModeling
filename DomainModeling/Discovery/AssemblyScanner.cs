@@ -265,24 +265,6 @@ internal sealed class AssemblyScanner
             Properties = a.Properties
         }), knownEntityAndAggregateNames, relationships);
 
-        // Load XML documentation and apply descriptions
-        var xmlDocReader = LoadDocumentation(assemblies);
-        if (xmlDocReader.HasDocumentation)
-        {
-            ApplyDescriptions(entityNodes, xmlDocReader);
-            ApplyDescriptions(aggregateNodes, xmlDocReader);
-            ApplyDescriptions(valueObjectNodes, xmlDocReader);
-            ApplyDescriptions(domainEventNodes, xmlDocReader);
-            ApplyDescriptions(integrationEventNodes, xmlDocReader);
-            ApplyDescriptions(eventHandlerNodes, xmlDocReader);
-            ApplyDescriptions(commandHandlerNodes, xmlDocReader);
-            ApplyDescriptions(queryHandlerNodes, xmlDocReader);
-            ApplyDescriptions(repositoryNodes, xmlDocReader);
-            ApplyDescriptions(domainServiceNodes, xmlDocReader);
-            ApplyDescriptions(commandHandlerTargetNodes, xmlDocReader);
-            ApplyDescriptions(subTypeNodes, xmlDocReader);
-        }
-
         return new BoundedContextNode
         {
             Name = _config.Name,
@@ -1268,87 +1250,5 @@ internal sealed class AssemblyScanner
         {
             return ex.Types.Where(t => t is not null)!;
         }
-    }
-
-    // ─── XML Documentation ──────────────────────────────────────────
-
-    private XmlDocReader LoadDocumentation(IReadOnlyList<Assembly> assemblies)
-    {
-        var docConfig = _config.Documentation;
-        var paths = new List<string>(docConfig.XmlDocPaths);
-
-        if (docConfig.AutoDiscoverEnabled)
-        {
-            var autoReader = XmlDocReader.AutoDiscover(assemblies);
-            if (autoReader.HasDocumentation)
-                return MergeReaders(autoReader, paths);
-        }
-
-        return paths.Count > 0 ? XmlDocReader.Load(paths) : XmlDocReader.Empty;
-    }
-
-    private static XmlDocReader MergeReaders(XmlDocReader autoDiscovered, List<string> extraPaths)
-    {
-        if (extraPaths.Count == 0)
-            return autoDiscovered;
-
-        // Auto-discover already loaded; add extra paths on top
-        // Since XmlDocReader.Load creates a fresh one, combine both sets
-        // For simplicity, re-load everything together
-        return autoDiscovered; // auto-discover already covers assembly XMLs
-    }
-
-    private static void ApplyDescriptions(IEnumerable<EntityNode> nodes, XmlDocReader reader)
-    {
-        foreach (var node in nodes)
-            node.Description ??= reader.GetTypeSummary(node.FullName);
-    }
-
-    private static void ApplyDescriptions(IEnumerable<AggregateNode> nodes, XmlDocReader reader)
-    {
-        foreach (var node in nodes)
-            node.Description ??= reader.GetTypeSummary(node.FullName);
-    }
-
-    private static void ApplyDescriptions(IEnumerable<ValueObjectNode> nodes, XmlDocReader reader)
-    {
-        foreach (var node in nodes)
-            node.Description ??= reader.GetTypeSummary(node.FullName);
-    }
-
-    private static void ApplyDescriptions(IEnumerable<DomainEventNode> nodes, XmlDocReader reader)
-    {
-        foreach (var node in nodes)
-            node.Description ??= reader.GetTypeSummary(node.FullName);
-    }
-
-    private static void ApplyDescriptions(IEnumerable<HandlerNode> nodes, XmlDocReader reader)
-    {
-        foreach (var node in nodes)
-            node.Description ??= reader.GetTypeSummary(node.FullName);
-    }
-
-    private static void ApplyDescriptions(IEnumerable<CommandHandlerTargetNode> nodes, XmlDocReader reader)
-    {
-        foreach (var node in nodes)
-            node.Description ??= reader.GetTypeSummary(node.FullName);
-    }
-
-    private static void ApplyDescriptions(IEnumerable<RepositoryNode> nodes, XmlDocReader reader)
-    {
-        foreach (var node in nodes)
-            node.Description ??= reader.GetTypeSummary(node.FullName);
-    }
-
-    private static void ApplyDescriptions(IEnumerable<DomainServiceNode> nodes, XmlDocReader reader)
-    {
-        foreach (var node in nodes)
-            node.Description ??= reader.GetTypeSummary(node.FullName);
-    }
-
-    private static void ApplyDescriptions(IEnumerable<SubTypeNode> nodes, XmlDocReader reader)
-    {
-        foreach (var node in nodes)
-            node.Description ??= reader.GetTypeSummary(node.FullName);
     }
 }

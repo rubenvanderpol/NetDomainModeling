@@ -649,7 +649,7 @@ export function addExistingType(fullName, kind) {
     kind,
     isCustom: false,
     alias: globalMeta.alias,
-    // Custom description from explorer metadata wins over XML doc from discovery
+    // Explorer metadata overrides description from the domain graph when present
     description: globalMeta.description || (item && item.description) || null,
     boundedContext: findDomainContext(fullName) || '',
     layer: (item && item.layer) || '',
