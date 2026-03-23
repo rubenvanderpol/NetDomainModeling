@@ -242,6 +242,24 @@ public class DDDBuilderTests
     }
 
     [Fact]
+    public void Build_MergesDuplicateHasLinks_ToSameTarget_FromSameSource_GitHub26()
+    {
+        var graph = BuildSampleGraph();
+        var ctx = graph.BoundedContexts.Single();
+
+        var orderLineFullName = ctx.Entities.Single(e => e.Name == "OrderLine").FullName;
+        var addressFullName = ctx.ValueObjects.Single(v => v.Name == "Address").FullName;
+
+        var hasAddressFromOrderLine = ctx.Relationships.Where(r =>
+            r.Kind == RelationshipKind.Has &&
+            r.SourceType == orderLineFullName &&
+            r.TargetType == addressFullName).ToList();
+
+        hasAddressFromOrderLine.Should().ContainSingle();
+        hasAddressFromOrderLine[0].Label.Should().Be("BillTo, ShipTo");
+    }
+
+    [Fact]
     public void Build_CreatesHasManyRelationships_ForCollectionPropertyReferences()
     {
         var graph = BuildSampleGraph();

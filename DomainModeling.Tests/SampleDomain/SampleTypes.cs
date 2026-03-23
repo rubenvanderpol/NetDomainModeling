@@ -123,6 +123,11 @@ public class OrderLine : BaseEntity
     public required string ProductName { get; init; }
     public int Quantity { get; init; }
     public Money Price { get; init; } = new();
+
+    /// <summary>Two references to the same value object — graph should show a single merged link (GitHub #26).</summary>
+    public Address? BillTo { get; init; }
+
+    public Address? ShipTo { get; init; }
 }
 
 // ─── Aggregates ──────────────────────────────────────────────────

@@ -196,6 +196,11 @@ internal static class FeatureJsonConverter
             }
         }
 
+        // GitHub #26: match assembly-scanned graphs — one property-style link per (source, target, kind)
+        var mergedRels = RelationshipDuplicateMerge.MergeDuplicateOutgoingLinks(ctx.Relationships);
+        ctx.Relationships.Clear();
+        ctx.Relationships.AddRange(mergedRels);
+
         // Derive EmittedEvents from Emits relationships
         var emitsBySource = ctx.Relationships
             .Where(r => r.Kind == RelationshipKind.Emits)
