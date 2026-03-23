@@ -241,36 +241,16 @@ body {
   font-size: 13px;
 }
 
-/* Bounded context chips (diagram + feature editor toolbars, issue #20) */
-.bc-selector-inline {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 10px;
+.sidebar-bc-wrap {
+  margin-top: 8px;
 }
-.bc-selector-label {
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
-  color: var(--text-muted);
+.sidebar-bc-wrap .rel-dropdown {
+  width: 100%;
 }
-.bc-selector-badge {
-  font-size: 10px;
-  color: var(--text-dim);
-  padding: 2px 6px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-}
-.bc-selector-chip.ctx-option {
-  padding: 4px 8px;
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
-  background: var(--bg-card);
-}
-.bc-selector-chip.ctx-option.active {
-  border-color: var(--accent);
-  background: var(--accent-dim);
+.sidebar-bc-wrap .rel-dropdown-trigger {
+  width: 100%;
+  box-sizing: border-box;
+  justify-content: space-between;
 }
 
 /* ── Main ───────────────────────────────────────────── */

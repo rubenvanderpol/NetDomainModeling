@@ -8,7 +8,10 @@
  *  - Drag/pan/zoom the canvas
  *  - Optionally run in read-only mode (existing graph items only)
  */
-import { esc, escAttr, shortName, ALL_SECTIONS, SECTION_META, renderBoundedContextSelectorHtml } from './helpers.js';
+import {
+  esc, escAttr, shortName, ALL_SECTIONS, SECTION_META,
+  renderBoundedContextMultiDropdownInner, toggleDropdownMenu,
+} from './helpers.js';
 import { renderTabBar } from './tabs.js';
 
 // ── Constants ────────────────────────────────────────
@@ -65,6 +68,86 @@ const KIND_LABELS = {
 const LAYERS = ['Domain', 'Application', 'Infrastructure'];
 const LAYER_COLORS = { Domain: '#a78bfa', Application: '#60a5fa', Infrastructure: '#fb923c' };
 
+const FE_PALETTE_BC_KEY = 'domainModelFeatureEditorContexts';
+let fePaletteBoundedContextNames = new Set();
+
+function loadFePaletteBoundedContextSelection(validNamesSet) {
+  try {
+    const raw = localStorage.getItem(FE_PALETTE_BC_KEY);
+    if (raw) {
+      const arr = JSON.parse(raw);
+      const s = new Set(arr.filter((n) => validNamesSet.has(n)));
+      if (s.size > 0) return s;
+    }
+  } catch { /* ignore */ }
+  return new Set(validNamesSet);
+}
+
+function saveFePaletteBoundedContextSelection() {
+  try {
+    localStorage.setItem(FE_PALETTE_BC_KEY, JSON.stringify([...fePaletteBoundedContextNames]));
+  } catch { /* ignore */ }
+}
+
+export function initFePaletteBoundedContexts(boundedContexts) {
+  const valid = new Set((boundedContexts || []).map((c) => c.name));
+  fePaletteBoundedContextNames = loadFePaletteBoundedContextSelection(valid);
+}
+
+function renderFePaletteBcDropdownInner() {
+  const all = domainData?.boundedContexts || [];
+  return renderBoundedContextMultiDropdownInner({
+    allContexts: all,
+    selectedSet: fePaletteBoundedContextNames,
+    triggerId: 'fePaletteBcFilterTrigger',
+    menuId: 'fePaletteBcFilterMenu',
+    toggleMenuCall: 'window.__featureEditor.toggleFePaletteBcFilter()',
+    toggleContextCall: 'window.__featureEditor.toggleFePaletteBoundedContext',
+    showAllCall: 'window.__featureEditor.fePaletteBoundedContextsShowAll()',
+    triggerTitle: 'Palette: which bounded contexts to pick types from',
+  });
+}
+
+export function refreshFeatureEditorBoundedContextDropdown() {
+  const el = document.getElementById('fePaletteBcFilterWrap');
+  if (!el) return;
+  el.innerHTML = renderFePaletteBcDropdownInner();
+}
+
+export function toggleFePaletteBcFilter() {
+  toggleDropdownMenu('fePaletteBcFilterMenu', 'fePaletteBcFilterTrigger');
+}
+
+export function toggleFePaletteBoundedContext(event, name) {
+  if (event) {
+    event.stopPropagation();
+    event.preventDefault();
+  }
+  if (fePaletteBoundedContextNames.has(name)) {
+    if (fePaletteBoundedContextNames.size > 1) fePaletteBoundedContextNames.delete(name);
+  } else {
+    fePaletteBoundedContextNames.add(name);
+  }
+  saveFePaletteBoundedContextSelection();
+  refreshFeatureEditorBoundedContextDropdown();
+  const pal = document.getElementById('fePalette');
+  if (pal) {
+    const search = document.getElementById('fePaletteSearch');
+    pal.innerHTML = renderPaletteItems(search ? search.value : '');
+  }
+}
+
+export function fePaletteBoundedContextsShowAll() {
+  for (const c of (domainData?.boundedContexts || [])) fePaletteBoundedContextNames.add(c.name);
+  saveFePaletteBoundedContextSelection();
+  refreshFeatureEditorBoundedContextDropdown();
+  const pal = document.getElementById('fePalette');
+  if (pal) {
+    const search = document.getElementById('fePaletteSearch');
+    pal.innerHTML = renderPaletteItems(search ? search.value : '');
+  }
+}
+
 // ── Module state ─────────────────────────────────────
 let baseUrl = '';
 let domainData = null;   // full domain graph
@@ -81,6 +164,7 @@ let featureExports = [];  // available export registrations from server
 export async function initFeatureEditor(apiBaseUrl, data) {
   baseUrl = apiBaseUrl;
   domainData = data;
+  initFePaletteBoundedContexts(data?.boundedContexts);
   await loadFeatureList();
   await loadFeatureExports();
 }
@@ -96,15 +180,8 @@ export function renderFeatureEditorView() {
 
   // ── Left: Feature list + type palette ──
   html += '<div class="fe-sidebar" id="feSidebar">';
-  const bcSel = renderBoundedContextSelectorHtml(
-    domainData?.boundedContexts || [],
-    typeof window.__nav?.getSelectedContextNames === 'function'
-      ? window.__nav.getSelectedContextNames()
-      : [],
-  );
-  if (bcSel) {
-    html += `<div class="fe-section fe-bc-selector-wrap">${bcSel}</div>`;
-  }
+  const multiBc = (domainData?.boundedContexts || []).length > 1;
+  html += `<div class="fe-section fe-palette-bc" style="display:${multiBc ? 'block' : 'none'}"><div class="rel-dropdown" id="fePaletteBcFilterWrap"></div></div>`;
   html += renderFeatureListPanel();
   html += renderPalettePanel();
   html += '</div>';
@@ -228,15 +305,8 @@ function renderPaletteItems(filter) {
   const addedIds = st ? new Set(st.nodes.map(n => n.id)) : new Set();
   let html = '';
 
-  const selectedBc =
-    typeof window.__nav?.getSelectedContextNames === 'function'
-      ? window.__nav.getSelectedContextNames()
-      : null;
-  const allowedBc =
-    Array.isArray(selectedBc) && selectedBc.length > 0 ? new Set(selectedBc) : null;
-
   for (const ctx of (domainData.boundedContexts || [])) {
-    if (allowedBc && !allowedBc.has(ctx.name)) continue;
+    if (!fePaletteBoundedContextNames.has(ctx.name)) continue;
     for (const sec of ALL_SECTIONS) {
       const kind = SECTION_TO_KIND[sec];
       if (!kind) continue;

@@ -35,17 +35,13 @@
   margin-bottom: 8px;
 }
 
-.fe-bc-selector-wrap .bc-selector-inline {
-  flex-direction: column;
-  align-items: stretch;
-  gap: 6px;
-}
-.fe-bc-selector-wrap .bc-selector-label,
-.fe-bc-selector-wrap .bc-selector-badge {
-  margin-bottom: 2px;
-}
-.fe-bc-selector-wrap .bc-selector-chip.ctx-option {
+.fe-palette-bc .rel-dropdown {
   width: 100%;
+}
+.fe-palette-bc .rel-dropdown-trigger {
+  width: 100%;
+  box-sizing: border-box;
+  justify-content: space-between;
 }
 
 /* ── Feature list ─────────────────────────────────── */

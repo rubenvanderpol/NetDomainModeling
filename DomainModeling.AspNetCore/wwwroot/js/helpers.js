@@ -83,24 +83,107 @@ export const SECTION_META = [
   { key: 'domainServices',       label: 'Domain Services',      color: 'var(--clr-service)',            tag: 'SVC',  bg: 'var(--clr-service-bg)' },
 ];
 
-/**
- * Checkbox row for choosing which bounded contexts are merged into the explorer.
- * Used on the diagram and feature editor (issue #20); toggles via window.__nav.toggleContext.
- */
-export function renderBoundedContextSelectorHtml(allContexts, selectedNames) {
-  if (!allContexts || allContexts.length <= 1) return '';
-  const set = selectedNames instanceof Set
-    ? selectedNames
-    : new Set(Array.isArray(selectedNames) ? selectedNames : []);
-  let html = '<div class="bc-selector-inline" role="group" aria-label="Bounded contexts">';
-  html += '<span class="bc-selector-label">Bounded contexts</span>';
-  html += `<span class="bc-selector-badge">${set.size}/${allContexts.length}</span>`;
-  for (const c of allContexts) {
-    const checked = set.has(c.name);
-    html += `<label class="ctx-option bc-selector-chip${checked ? ' active' : ''}" onclick="event.stopPropagation()">`;
-    html += `<input type="checkbox" ${checked ? 'checked' : ''} onchange="window.__nav.toggleContext('${escAttr(c.name)}')" />`;
-    html += `<span class="ctx-name">${esc(c.name)}</span></label>`;
+/** Merge an array of bounded-context objects into one view (same shape as API nodes). */
+export function mergeBoundedContextNodes(selected) {
+  if (!selected || selected.length === 0) return null;
+  if (selected.length === 1) return selected[0];
+  const merged = { name: selected.map(c => c.name).join(' + ') };
+  for (const key of ALL_SECTIONS) {
+    merged[key] = selected.flatMap(c => c[key] || []);
   }
-  html += '</div>';
-  return html;
+  merged.relationships = selected.flatMap(c => c.relationships || []);
+  return merged;
+}
+
+/**
+ * Inner HTML for a multi-select .rel-dropdown (Node Types / Relations pattern).
+ * Caller places this inside an existing `<div class="rel-dropdown">`.
+ */
+export function renderMultiSelectDropdownInnerHtml(opts) {
+  const {
+    triggerId, menuId, triggerIconHtml, triggerLabel, badgeText, triggerTitle,
+    toggleHandler, actionButtonsHtml, items,
+  } = opts;
+
+  let h = `<button type="button" class="rel-dropdown-trigger" id="${escAttr(triggerId)}" onclick="${toggleHandler}" title="${escAttr(triggerTitle || '')}">`;
+  if (triggerIconHtml) h += triggerIconHtml;
+  h += `<span>${esc(triggerLabel)}</span>`;
+  if (badgeText) h += `<span class="rel-hidden-count">${esc(badgeText)}</span>`;
+  h += '<span class="rel-chevron">▾</span></button>';
+  h += `<div class="rel-dropdown-menu" id="${escAttr(menuId)}">`;
+  if (actionButtonsHtml) {
+    h += `<div class="rel-dropdown-actions">${actionButtonsHtml}</div>`;
+  }
+  for (const it of items) {
+    const extra = it.dataAttr || '';
+    h += `<div class="rel-dropdown-item${it.checked ? ' checked' : ''}" onclick="${it.rowClick}"${extra}>`;
+    h += `<span class="rel-check">${it.checked ? '✓' : ''}</span>`;
+    if (it.prefixHtml) h += it.prefixHtml;
+    h += `<span class="rel-kind-label">${esc(it.label)}</span>`;
+    if (it.suffixHtml) h += it.suffixHtml;
+    h += '</div>';
+  }
+  h += '</div>';
+  return h;
+}
+
+/** Open/close dropdown; closes on outside click (shared with diagram + feature editor). */
+export function toggleDropdownMenu(menuId, triggerId) {
+  const menu = document.getElementById(menuId);
+  const trigger = document.getElementById(triggerId);
+  if (!menu) return;
+  const open = menu.classList.toggle('visible');
+  if (trigger) trigger.classList.toggle('open', open);
+  if (!open) return;
+
+  const close = (ev) => {
+    const clickedTrigger = trigger && (ev.target === trigger || trigger.contains(ev.target));
+    const containsTarget = menu.contains(ev.target);
+    if (!containsTarget && !clickedTrigger) {
+      menu.classList.remove('visible');
+      if (trigger) trigger.classList.remove('open');
+      document.removeEventListener('click', close);
+    }
+  };
+  setTimeout(() => document.addEventListener('click', close), 0);
+}
+
+/**
+ * Multi-select bounded-context dropdown (same UX as diagram Node Types).
+ * @param {object} o
+ * @param {{ name: string }[]} o.allContexts
+ * @param {Set<string>|string[]} o.selectedSet
+ * @param {string} o.triggerId
+ * @param {string} o.menuId
+ * @param {string} o.toggleMenuCall - onclick for trigger
+ * @param {string} o.toggleContextCall - global fn name; invoked as toggleContextCall(event,'Name')
+ * @param {string} o.showAllCall - onclick for Show all button
+ * @param {string} [o.triggerLabel]
+ * @param {string} [o.triggerTitle]
+ */
+export function renderBoundedContextMultiDropdownInner(o) {
+  const all = o.allContexts || [];
+  if (all.length <= 1) return '';
+  const selected = o.selectedSet instanceof Set ? o.selectedSet : new Set(o.selectedSet || []);
+  const badgeText = `${selected.size}/${all.length}`;
+  const actionButtonsHtml =
+    `<button type="button" onclick="${o.showAllCall}">Show all</button>`;
+  const items = all.map((c) => ({
+    label: c.name,
+    checked: selected.has(c.name),
+    dataAttr: ` data-bounded-context="${esc(c.name)}"`,
+    rowClick: `${o.toggleContextCall}(event,'${escAttr(c.name)}')`,
+    prefixHtml: '<span class="diagram-kind-dot" style="background:var(--accent)"></span>',
+  }));
+  return renderMultiSelectDropdownInnerHtml({
+    triggerId: o.triggerId,
+    menuId: o.menuId,
+    triggerIconHtml: '<span style="font-size:10px;opacity:.7">◇</span>',
+    triggerLabel: o.triggerLabel || 'Contexts',
+    badgeText,
+    triggerTitle: o.triggerTitle || 'Bounded contexts',
+    toggleHandler: o.toggleMenuCall,
+    actionButtonsHtml,
+    items,
+  });
 }

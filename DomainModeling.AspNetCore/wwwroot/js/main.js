@@ -1,9 +1,18 @@
 /**
  * Main entry point — wires up data loading, navigation, sidebar, and views.
  */
-import { esc, escAttr, shortName, ALL_SECTIONS, SECTION_META } from './helpers.js';
+import {
+  esc, escAttr, shortName, ALL_SECTIONS, SECTION_META,
+  mergeBoundedContextNodes, renderBoundedContextMultiDropdownInner, toggleDropdownMenu,
+} from './helpers.js';
 import { renderDetailView } from './views.js';
-import { renderDiagramView, initDiagram, diagramZoom, diagramFit, diagramResetLayout, diagramToggleKind, diagramShowAll, diagramDownloadSvg, diagramToggleAliases, diagramToggleLayers, diagramToggleEdgeKind, diagramToggleEdgeFilter, diagramToggleKindFilter, diagramShowAllKinds, diagramHideAllKinds } from './diagram.js';
+import {
+  renderDiagramView, initDiagram, initDiagramBoundedContexts, mergeDiagramBoundedContexts,
+  diagramZoom, diagramFit, diagramResetLayout, diagramToggleKind, diagramShowAll, diagramDownloadSvg,
+  diagramToggleAliases, diagramToggleLayers, diagramToggleEdgeKind, diagramToggleEdgeFilter,
+  diagramToggleKindFilter, diagramShowAllKinds, diagramHideAllKinds,
+  diagramToggleBcFilter, toggleDiagramBoundedContext, diagramBoundedContextsShowAll,
+} from './diagram.js';
 
 const API_URL = window.__config?.apiUrl || '/domain-model/json';
 const BASE_URL = API_URL.replace(/\/json$/, '');
@@ -16,27 +25,57 @@ let featureEditorModule = null; // lazy-loaded when feature editor mode is on
 // Custom metadata (alias / description) per fullName
 let metadata = {};
 
-const STORAGE_KEY = 'domainModelSelectedContexts';
-// Legacy browser persistence key (migration-only).
+const EXPLORER_CTX_KEY = 'domainModelExplorerContexts';
+/** @deprecated Migration source only; replaced by per-view keys. */
+const LEGACY_CTX_KEY = 'domainModelSelectedContexts';
 const METADATA_STORAGE_KEY = 'domainModelMetadata';
+const DIAGRAM_CTX_KEY = 'domainModelDiagramContexts';
+const FE_CTX_KEY = 'domainModelFeatureEditorContexts';
 
 let data = null;
-let selectedContextNames = new Set();
+let explorerContextNames = new Set();
 let currentCtx = null; // merged view of selected contexts
 let currentView = 'diagram';
 let currentDetail = null;
 let availableExports = [];
 
-function saveSelection() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify([...selectedContextNames]));
+function migrateContextStorageKeys(validNames) {
+  const validSet = new Set(validNames);
+  let explorerPayload = localStorage.getItem(EXPLORER_CTX_KEY);
+  try {
+    if (!explorerPayload && localStorage.getItem(LEGACY_CTX_KEY)) {
+      const arr = JSON.parse(localStorage.getItem(LEGACY_CTX_KEY)).filter((n) => validSet.has(n));
+      explorerPayload = JSON.stringify(arr.length ? arr : [...validSet]);
+      localStorage.setItem(EXPLORER_CTX_KEY, explorerPayload);
+    }
+    if (!explorerPayload && validNames.length > 0) {
+      explorerPayload = JSON.stringify([...validSet]);
+      localStorage.setItem(EXPLORER_CTX_KEY, explorerPayload);
+    }
+    if (explorerPayload) {
+      if (!localStorage.getItem(DIAGRAM_CTX_KEY)) localStorage.setItem(DIAGRAM_CTX_KEY, explorerPayload);
+      if (!localStorage.getItem(FE_CTX_KEY)) localStorage.setItem(FE_CTX_KEY, explorerPayload);
+    }
+  } catch { /* ignore corrupt data */ }
 }
 
-function loadSelection() {
+function loadExplorerContextSet(validNames) {
+  const validSet = new Set(validNames);
   try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) return new Set(JSON.parse(stored));
+    const raw = localStorage.getItem(EXPLORER_CTX_KEY);
+    if (raw) {
+      const arr = JSON.parse(raw);
+      const s = new Set(arr.filter((n) => validSet.has(n)));
+      if (s.size > 0) return s;
+    }
   } catch { /* ignore corrupt data */ }
-  return null;
+  return new Set(validSet);
+}
+
+function saveExplorerContexts() {
+  try {
+    localStorage.setItem(EXPLORER_CTX_KEY, JSON.stringify([...explorerContextNames]));
+  } catch { /* ignore */ }
 }
 
 // ── Bootstrap ────────────────────────────────────────
@@ -92,18 +131,13 @@ async function init() {
       }
     } catch { /* exports endpoint optional */ }
 
+    window.__domainData = data;
+
     if (data.boundedContexts && data.boundedContexts.length > 0) {
-      const saved = loadSelection();
-      const validNames = new Set(data.boundedContexts.map(c => c.name));
-      if (saved && [...saved].some(n => validNames.has(n))) {
-        for (const name of saved) {
-          if (validNames.has(name)) selectedContextNames.add(name);
-        }
-      } else {
-        for (const ctx of data.boundedContexts) {
-          selectedContextNames.add(ctx.name);
-        }
-      }
+      const validNames = data.boundedContexts.map((c) => c.name);
+      migrateContextStorageKeys(validNames);
+      explorerContextNames = loadExplorerContextSet(validNames);
+      initDiagramBoundedContexts(data.boundedContexts);
       currentCtx = mergeContexts();
     }
 
@@ -132,31 +166,60 @@ async function init() {
 // ── Merge selected bounded contexts ──────────────────
 
 function mergeContexts() {
-  const selected = (data.boundedContexts || []).filter(c => selectedContextNames.has(c.name));
-  if (selected.length === 0) return null;
-  if (selected.length === 1) return selected[0];
-  const merged = { name: selected.map(c => c.name).join(' + ') };
-  for (const key of ALL_SECTIONS) {
-    merged[key] = selected.flatMap(c => c[key] || []);
-  }
-  merged.relationships = selected.flatMap(c => c.relationships || []);
-  return merged;
+  const selected = (data.boundedContexts || []).filter((c) => explorerContextNames.has(c.name));
+  return mergeBoundedContextNodes(selected);
 }
 
-function toggleContext(name) {
-  if (selectedContextNames.has(name)) {
-    if (selectedContextNames.size > 1) selectedContextNames.delete(name);
-  } else {
-    selectedContextNames.add(name);
+function toggleExplorerBoundedContext(event, name) {
+  if (event) {
+    event.stopPropagation();
+    event.preventDefault();
   }
-  saveSelection();
+  if (explorerContextNames.has(name)) {
+    if (explorerContextNames.size > 1) explorerContextNames.delete(name);
+  } else {
+    explorerContextNames.add(name);
+  }
+  saveExplorerContexts();
   currentCtx = mergeContexts();
   currentDetail = null;
   render();
 }
 
-function getSelectedContextNames() {
-  return [...selectedContextNames];
+function explorerBoundedContextsShowAll() {
+  for (const c of (data?.boundedContexts || [])) explorerContextNames.add(c.name);
+  saveExplorerContexts();
+  currentCtx = mergeContexts();
+  currentDetail = null;
+  render();
+}
+
+function toggleExplorerBcFilter() {
+  toggleDropdownMenu('explorerBcFilterMenu', 'explorerBcFilterTrigger');
+}
+
+function renderExplorerBcDropdownInner() {
+  return renderBoundedContextMultiDropdownInner({
+    allContexts: data?.boundedContexts || [],
+    selectedSet: explorerContextNames,
+    triggerId: 'explorerBcFilterTrigger',
+    menuId: 'explorerBcFilterMenu',
+    toggleMenuCall: 'window.__nav.toggleExplorerBcFilter()',
+    toggleContextCall: 'window.__nav.toggleExplorerBoundedContext',
+    showAllCall: 'window.__nav.explorerBoundedContextsShowAll()',
+    triggerTitle: 'Bounded contexts in the explorer list',
+  });
+}
+
+function refreshExplorerBcDropdown() {
+  const el = document.getElementById('explorerBcWrap');
+  if (!el) return;
+  el.innerHTML = renderExplorerBcDropdownInner();
+}
+
+function refreshDiagramView() {
+  if (currentView !== 'diagram') return;
+  renderMain();
 }
 
 // ── Sidebar collapse ─────────────────────────────────
@@ -195,9 +258,9 @@ function renderSidebar() {
   if (!currentCtx) { nav.innerHTML = ''; return; }
 
   const allContexts = data.boundedContexts || [];
-  const contextLabel = selectedContextNames.size === allContexts.length
+  const contextLabel = explorerContextNames.size === allContexts.length
     ? 'All Bounded Contexts'
-    : [...selectedContextNames].join(', ');
+    : [...explorerContextNames].join(', ');
   document.getElementById('contextName').textContent = contextLabel;
 
   let html = '';
@@ -248,6 +311,7 @@ function renderSidebar() {
   html += `</div>`;
 
   nav.innerHTML = html;
+  refreshExplorerBcDropdown();
 }
 
 function isActive(key, item) {
@@ -267,7 +331,10 @@ function renderMain() {
 
   if (currentView === 'features' && FEATURE_EDITOR_MODE && featureEditorModule) {
     main.innerHTML = featureEditorModule.renderFeatureEditorView();
-    requestAnimationFrame(() => featureEditorModule.mountFeatureEditor());
+    requestAnimationFrame(() => {
+      featureEditorModule.refreshFeatureEditorBoundedContextDropdown();
+      featureEditorModule.mountFeatureEditor();
+    });
     return;
   }
 
@@ -283,9 +350,9 @@ function renderMain() {
   }
 
   // Default to diagram
-  main.innerHTML = renderDiagramView(data.boundedContexts || [], selectedContextNames);
-  const selectedCtxs = (data.boundedContexts || []).filter(c => selectedContextNames.has(c.name));
-  requestAnimationFrame(() => initDiagram(currentCtx, selectedCtxs));
+  main.innerHTML = renderDiagramView();
+  const { merged, selectedCtxs } = mergeDiagramBoundedContexts(data);
+  requestAnimationFrame(() => initDiagram(merged, selectedCtxs));
 }
 
 // ── Metadata persistence ─────────────────────────────
@@ -346,7 +413,16 @@ function toggleSection(el) {
 }
 
 // ── Expose to global scope for onclick handlers ──────
-window.__nav = { switchTab, showDetail, navigateTo, toggleSection, toggleContext, getSelectedContextNames };
+window.__nav = {
+  switchTab,
+  showDetail,
+  navigateTo,
+  toggleSection,
+  toggleExplorerBoundedContext,
+  explorerBoundedContextsShowAll,
+  toggleExplorerBcFilter,
+  refreshDiagramView,
+};
 window.__saveMetadata = saveMetadata;
 window.__downloadExport = async function(name) {
   try {
@@ -371,7 +447,10 @@ window.__downloadExport = async function(name) {
 window.__diagram = {
   zoom: diagramZoom,
   fit: diagramFit,
-  resetLayout: () => diagramResetLayout(currentCtx),
+  resetLayout: () => {
+    const { merged } = mergeDiagramBoundedContexts(window.__domainData);
+    if (merged) diagramResetLayout(merged);
+  },
   toggleKind: diagramToggleKind,
   showAll: diagramShowAll,
   downloadSvg: diagramDownloadSvg,
@@ -382,6 +461,9 @@ window.__diagram = {
   toggleKindFilter: diagramToggleKindFilter,
   showAllKinds: diagramShowAllKinds,
   hideAllKinds: diagramHideAllKinds,
+  toggleBcFilter: diagramToggleBcFilter,
+  toggleBoundedContext: toggleDiagramBoundedContext,
+  boundedContextsShowAll: diagramBoundedContextsShowAll,
 };
 window.__metadata = metadata;
 
@@ -429,6 +511,9 @@ function wireFeatureEditorGlobals() {
     toggleBcDropdown: featureEditorModule.toggleBcDropdown,
     changeLayer: featureEditorModule.changeLayer,
     toggleLayerDropdown: featureEditorModule.toggleLayerDropdown,
+    toggleFePaletteBcFilter: featureEditorModule.toggleFePaletteBcFilter,
+    toggleFePaletteBoundedContext: featureEditorModule.toggleFePaletteBoundedContext,
+    fePaletteBoundedContextsShowAll: featureEditorModule.fePaletteBoundedContextsShowAll,
   };
 }
 // ── Go! ──────────────────────────────────────────────

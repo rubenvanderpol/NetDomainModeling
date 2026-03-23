@@ -1,7 +1,12 @@
 /**
  * Interactive SVG diagram with force layout and localStorage persistence.
  */
-import { esc, escAttr, shortName, renderBoundedContextSelectorHtml } from './helpers.js';
+import {
+  esc, escAttr, shortName,
+  mergeBoundedContextNodes,
+  renderBoundedContextMultiDropdownInner,
+  toggleDropdownMenu,
+} from './helpers.js';
 import { renderTabBar } from './tabs.js';
 
 const STORAGE_KEY = 'domain-model-diagram-positions';
@@ -10,6 +15,7 @@ const HIDDEN_EDGE_KINDS_KEY = 'domain-model-diagram-hidden-edge-kinds';
 const VIEWPORT_KEY = 'domain-model-diagram-viewport';
 const SHOW_ALIASES_KEY = 'domain-model-diagram-show-aliases';
 const SHOW_LAYERS_KEY = 'domain-model-diagram-show-layers';
+const DIAGRAM_BC_KEY = 'domainModelDiagramContexts';
 
 const EDGE_CFG = {
   Contains:      { label: 'Contains',          color: '#60a5fa', dashed: false },
@@ -141,6 +147,86 @@ let dgState = null;
 let showAliases = false;
 let showLayers = false;
 
+let diagramBoundedContextNames = new Set();
+
+function loadDiagramBoundedContextSelection(validNamesSet) {
+  try {
+    const raw = localStorage.getItem(DIAGRAM_BC_KEY);
+    if (raw) {
+      const arr = JSON.parse(raw);
+      const s = new Set(arr.filter((n) => validNamesSet.has(n)));
+      if (s.size > 0) return s;
+    }
+  } catch { /* ignore */ }
+  return new Set(validNamesSet);
+}
+
+function saveDiagramBoundedContextSelection() {
+  try {
+    localStorage.setItem(DIAGRAM_BC_KEY, JSON.stringify([...diagramBoundedContextNames]));
+  } catch { /* ignore */ }
+}
+
+export function initDiagramBoundedContexts(boundedContexts) {
+  const valid = new Set((boundedContexts || []).map((c) => c.name));
+  diagramBoundedContextNames = loadDiagramBoundedContextSelection(valid);
+}
+
+export function mergeDiagramBoundedContexts(data) {
+  const all = data?.boundedContexts || [];
+  const selected = all.filter((c) => diagramBoundedContextNames.has(c.name));
+  return {
+    merged: mergeBoundedContextNodes(selected),
+    selectedCtxs: selected,
+  };
+}
+
+function renderDiagramBoundedContextDropdownInner() {
+  const data = window.__domainData;
+  const all = data?.boundedContexts || [];
+  return renderBoundedContextMultiDropdownInner({
+    allContexts: all,
+    selectedSet: diagramBoundedContextNames,
+    triggerId: 'diagramBcFilterTrigger',
+    menuId: 'diagramBcFilterMenu',
+    toggleMenuCall: 'window.__diagram.toggleBcFilter()',
+    toggleContextCall: 'window.__diagram.toggleBoundedContext',
+    showAllCall: 'window.__diagram.boundedContextsShowAll()',
+    triggerTitle: 'Bounded contexts in this diagram',
+  });
+}
+
+export function refreshDiagramBoundedContextDropdown() {
+  const el = document.getElementById('diagramBcFilterWrap');
+  if (!el) return;
+  el.innerHTML = renderDiagramBoundedContextDropdownInner();
+}
+
+export function diagramToggleBcFilter() {
+  toggleDropdownMenu('diagramBcFilterMenu', 'diagramBcFilterTrigger');
+}
+
+export function toggleDiagramBoundedContext(event, name) {
+  if (event) {
+    event.stopPropagation();
+    event.preventDefault();
+  }
+  if (diagramBoundedContextNames.has(name)) {
+    if (diagramBoundedContextNames.size > 1) diagramBoundedContextNames.delete(name);
+  } else {
+    diagramBoundedContextNames.add(name);
+  }
+  saveDiagramBoundedContextSelection();
+  window.__nav?.refreshDiagramView?.();
+}
+
+export function diagramBoundedContextsShowAll() {
+  const all = window.__domainData?.boundedContexts || [];
+  for (const c of all) diagramBoundedContextNames.add(c.name);
+  saveDiagramBoundedContextSelection();
+  window.__nav?.refreshDiagramView?.();
+}
+
 // ── Node sizing constants ────────────────────────────
 const NODE_W = 200;
 const PROP_H = 17;
@@ -250,15 +336,10 @@ try {
 export function getDiagramState() { return dgState; }
 
 // ── Render the diagram wrapper HTML ──────────────────
-export function renderDiagramView(allBoundedContexts, selectedContextNames) {
+export function renderDiagramView() {
   let html = renderTabBar('diagram');
 
   html += '<div class="diagram-wrap" id="diagramWrap">';
-
-  const bcBar = renderBoundedContextSelectorHtml(allBoundedContexts || [], selectedContextNames);
-  if (bcBar) {
-    html += `<div class="diagram-bc-row">${bcBar}</div>`;
-  }
 
   // Toolbar (top-left)
   html += '<div class="diagram-toolbar">';
@@ -267,6 +348,8 @@ export function renderDiagramView(allBoundedContexts, selectedContextNames) {
   html += `<button id="diagramAliasToggle" onclick="window.__diagram.toggleAliases()" title="Show aliases instead of original names" style="${showAliases ? 'background:var(--bg-hover)' : ''}">Aa Aliases</button>`;
   html += '<span class="diagram-toolbar-sep"></span>';
   html += `<button id="diagramLayerToggle" onclick="window.__diagram.toggleLayers()" title="Show architectural layers (Domain, Application, Infrastructure)" style="${showLayers ? 'background:var(--bg-hover)' : ''}">⊞ Layers</button>`;
+  html += '<span class="diagram-toolbar-sep"></span>';
+  html += '<div class="rel-dropdown" id="diagramBcFilterWrap"></div>';
   html += '<span class="diagram-toolbar-sep"></span>';
   html += '<div class="rel-dropdown" id="diagramKindFilterWrap"></div>';
   html += '<span class="diagram-toolbar-sep"></span>';
@@ -394,6 +477,7 @@ export function initDiagram(ctx, boundedContexts) {
   }
 
   renderSvg();
+  refreshDiagramBoundedContextDropdown();
   refreshDiagramKindFilters();
 
   if (!hasSaved || !savedViewport) {
@@ -993,32 +1077,12 @@ export function diagramToggleEdgeKind(eventOrKind, maybeKind) {
   refreshDiagramEdgeFilter();
 }
 
-function toggleDropdown(menuId, triggerId) {
-  const menu = document.getElementById(menuId);
-  const trigger = document.getElementById(triggerId);
-  if (!menu) return;
-  const open = menu.classList.toggle('visible');
-  if (trigger) trigger.classList.toggle('open', open);
-  if (!open) return;
-
-  const close = (ev) => {
-    const clickedTrigger = trigger && (ev.target === trigger || trigger.contains(ev.target));
-    const containsTarget = menu.contains(ev.target);
-    if (!containsTarget && !clickedTrigger) {
-      menu.classList.remove('visible');
-      if (trigger) trigger.classList.remove('open');
-      document.removeEventListener('click', close);
-    }
-  };
-  setTimeout(() => document.addEventListener('click', close), 0);
-}
-
 export function diagramToggleKindFilter() {
-  toggleDropdown('diagramKindFilterMenu', 'diagramKindFilterTrigger');
+  toggleDropdownMenu('diagramKindFilterMenu', 'diagramKindFilterTrigger');
 }
 
 export function diagramToggleEdgeFilter() {
-  toggleDropdown('diagramEdgeFilterMenu', 'diagramEdgeFilterTrigger');
+  toggleDropdownMenu('diagramEdgeFilterMenu', 'diagramEdgeFilterTrigger');
 }
 
 export function diagramDownloadSvg() {
