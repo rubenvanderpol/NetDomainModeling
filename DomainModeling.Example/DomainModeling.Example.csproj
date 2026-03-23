@@ -10,6 +10,7 @@
     <ProjectReference Include="..\DomainModeling\DomainModeling.csproj" />
     <ProjectReference Include="..\DomainModeling.AspNetCore\DomainModeling.AspNetCore.csproj" />
     <ProjectReference Include="..\DomainModeling.Example.Shared\DomainModeling.Example.Shared.csproj" />
+    <ProjectReference Include="..\DomainModeling.Example.IntegrationEvents\DomainModeling.Example.IntegrationEvents.csproj" />
     <ProjectReference Include="..\DomainModeling.Example.Shipping\DomainModeling.Example.Shipping.csproj" />
   </ItemGroup>
 

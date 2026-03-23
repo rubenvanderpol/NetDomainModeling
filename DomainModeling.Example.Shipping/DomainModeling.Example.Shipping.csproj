@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\DomainModeling.Example.Shared\DomainModeling.Example.Shared.csproj" />
+    <ProjectReference Include="..\DomainModeling.Example.IntegrationEvents\DomainModeling.Example.IntegrationEvents.csproj" />
   </ItemGroup>
 
 </Project>

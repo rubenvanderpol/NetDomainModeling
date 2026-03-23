@@ -1,4 +1,5 @@
 using DomainModeling.Example.Domain;
+using DomainModeling.Example.IntegrationEvents;
 
 namespace DomainModeling.Example.Shipping.Domain;
 

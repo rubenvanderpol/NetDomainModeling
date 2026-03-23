@@ -1,6 +1,7 @@
 using System.Reflection;
 using DomainModeling.Builder;
 using DomainModeling.Example.Domain;
+using DomainModeling.Example.IntegrationEvents;
 using DomainModeling.Graph;
 using DomainModeling.Example.Shipping.Domain;
 using FluentAssertions;
@@ -11,7 +12,8 @@ namespace DomainModeling.Tests;
 /// <summary>
 /// Regression: DomainModeling.Example and DomainModeling.Example.Shared both define types like
 /// <c>Money</c> under the same namespace, so scanning both assemblies produced duplicate
-/// <see cref="Type.FullName"/> values and crashed the scanner.
+/// <see cref="Type.FullName"/> values and crashed the scanner. Integration event contracts live in
+/// <c>DomainModeling.Example.IntegrationEvents</c> and must be registered as an additional shared assembly.
 /// </summary>
 public class ExampleAppGraphTests
 {
@@ -19,6 +21,8 @@ public class ExampleAppGraphTests
         domainAssembly.GetReferencedAssemblies()
             .Select(Assembly.Load)
             .First(a => string.Equals(a.GetName().Name, "DomainModeling.Example.Shared", StringComparison.Ordinal));
+
+    private static Assembly GetIntegrationEventsAssembly() => typeof(IntegrationEvent).Assembly;
 
     [Fact]
     public void Build_ExampleLikeConfiguration_DoesNotThrowWhenDomainAndSharedShareTypeFullNames()
@@ -40,6 +44,7 @@ public class ExampleAppGraphTests
                 .Repositories(r => r.Implements(typeof(IRepository<>)))
             )
             .WithSharedAssembly(sharedAssembly)
+            .WithSharedAssembly(GetIntegrationEventsAssembly())
             .WithBoundedContext("Catalog", ctx => ctx
                 .WithDomainAssembly(catalogDomainAssembly))
             .WithBoundedContext("Shipping", ctx => ctx
@@ -78,6 +83,7 @@ public class ExampleAppGraphTests
                 .Repositories(r => r.Implements(typeof(IRepository<>)))
             )
             .WithSharedAssembly(sharedAssembly)
+            .WithSharedAssembly(GetIntegrationEventsAssembly())
             .WithBoundedContext("Catalog", ctx => ctx
                 .WithDomainAssembly(catalogDomainAssembly))
             .WithBoundedContext("Shipping", ctx => ctx
