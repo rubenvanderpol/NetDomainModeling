@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Text.Json;
 using DomainModeling.Builder;
 using DomainModeling.Graph;
@@ -761,5 +762,53 @@ public class DDDBuilderTests
 
         evtB.EmittedBy.Should().Contain(e => e.Contains("OrderPlacedHandler"));
         evtB.HandledBy.Should().Contain(h => h.Contains("OrderPlacedIntegrationHandler"));
+    }
+
+    [Fact]
+    public void Build_NamedSharedAssembly_ContextNameCollision_Throws()
+    {
+        var assembly = typeof(Order).Assembly;
+
+        var act = () => DDDBuilder.Create(ctx => ctx.Aggregates(a => a.InheritsFrom<BaseAggregateRoot>()))
+            .WithBoundedContext("Contracts", c => c.WithDomainAssembly(assembly))
+            .WithSharedAssembly(assembly, "Contracts")
+            .Build();
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*Contracts*");
+    }
+
+    [Fact]
+    public void Build_NamedSharedAssembly_ListsIntegrationEventsUnderDedicatedContextOnly()
+    {
+        static Assembly SharedAsm(Assembly domainAssembly) =>
+            domainAssembly.GetReferencedAssemblies()
+                .Select(Assembly.Load)
+                .First(a => string.Equals(a.GetName().Name, "DomainModeling.Example.Shared", StringComparison.Ordinal));
+
+        var catalogAsm = typeof(DomainModeling.Example.Domain.Product).Assembly;
+        var graph = DDDBuilder.Create(ctx => ctx
+                .Entities(e => e.InheritsFrom<DomainModeling.Example.Domain.Entity>())
+                .Aggregates(a => a.InheritsFrom<DomainModeling.Example.Domain.AggregateRoot>())
+                .ValueObjects(v => v.InheritsFrom<DomainModeling.Example.Domain.ValueObject>())
+                .DomainEvents(e => e.InheritsFrom<DomainModeling.Example.Domain.DomainEvent>())
+                .IntegrationEvents(e => e.InheritsFrom<DomainModeling.Example.IntegrationEvents.IntegrationEvent>())
+                .EventHandlers(h => h
+                    .Implements(typeof(DomainModeling.Example.Domain.IEventHandler<>))
+                    .Implements(typeof(DomainModeling.Example.IntegrationEvents.IIntegrationEventHandler<>)))
+                .CommandHandlers(h => h.Implements(typeof(DomainModeling.Example.Domain.ICommandHandler<>)))
+                .Commands(c => c.NameEndsWith("Command"))
+                .Repositories(r => r.Implements(typeof(DomainModeling.Example.Domain.IRepository<>)))
+            )
+            .WithSharedAssembly(SharedAsm(catalogAsm))
+            .WithSharedAssembly(typeof(DomainModeling.Example.IntegrationEvents.IntegrationEvent).Assembly, "IntegrationContracts")
+            .WithBoundedContext("Catalog", c => c.WithDomainAssembly(catalogAsm))
+            .WithBoundedContext("Shipping", c => c.WithDomainAssembly(typeof(DomainModeling.Example.Shipping.Domain.Shipment).Assembly))
+            .Build();
+
+        graph.BoundedContexts.Should().Contain(c => c.Name == "IntegrationContracts");
+        graph.BoundedContexts.Single(c => c.Name == "Catalog").IntegrationEvents.Should().BeEmpty();
+        graph.BoundedContexts.Single(c => c.Name == "IntegrationContracts").IntegrationEvents
+            .Should().Contain(e => e.Name == "OrderPlacedIntegrationEvent");
     }
 }

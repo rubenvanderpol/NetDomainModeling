@@ -27,7 +27,7 @@ var domainGraph = DDDBuilder.Create(ctx => ctx
         .Repositories(r => r.Implements(typeof(IRepository<>)))
     )
     .WithSharedAssembly(SharedExampleAssembly(typeof(Product).Assembly))
-    .WithSharedAssembly(typeof(IntegrationEvent).Assembly)
+    .WithSharedAssembly(typeof(IntegrationEvent).Assembly, "IntegrationContracts")
     .WithBoundedContext("Catalog", ctx => ctx
         .WithDomainAssembly(typeof(Product).Assembly)
     )

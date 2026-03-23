@@ -31,3 +31,8 @@ public sealed class ShipmentDispatchedIntegrationEvent : IntegrationEvent
     public Guid ShipmentId { get; init; }
     public Guid OrderId { get; init; }
 }
+
+/// <summary>
+/// Example cross-context command shape carried in the integration assembly (not a specific handler here).
+/// </summary>
+public record PartnerNotificationCommand(Guid OrderId, string Message);
