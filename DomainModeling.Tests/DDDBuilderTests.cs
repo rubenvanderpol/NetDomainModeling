@@ -70,9 +70,10 @@ public class DDDBuilderTests
         var graph = BuildSampleGraph();
         var ctx = graph.BoundedContexts.Single();
 
-        ctx.DomainEvents.Should().HaveCount(4);
+        ctx.DomainEvents.Should().HaveCount(5);
         ctx.DomainEvents.Select(e => e.Name).Should()
             .Contain(["OrderPlacedEvent", "OrderShippedEvent", "CustomerCreatedEvent", "InvoiceCreatedEvent"]);
+        ctx.DomainEvents.Should().Contain(e => e.Name.StartsWith("EntityDeletedEvent", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -81,7 +82,7 @@ public class DDDBuilderTests
         var graph = BuildSampleGraph();
         var ctx = graph.BoundedContexts.Single();
 
-        ctx.EventHandlers.Should().HaveCount(3);
+        ctx.EventHandlers.Should().HaveCount(4);
         ctx.CommandHandlers.Should().ContainSingle(h => h.Name == "PlaceOrderCommandHandler");
         ctx.QueryHandlers.Should().ContainSingle(h => h.Name == "GetOrderQueryHandler");
     }
@@ -293,6 +294,34 @@ public class DDDBuilderTests
     }
 
     [Fact]
+    public void Build_GenericDomainEvent_HandlerLinksToOpenGenericEventNode()
+    {
+        var graph = BuildSampleGraph();
+        var ctx = graph.BoundedContexts.Single();
+
+        var genericEvent = ctx.DomainEvents.Single(e => e.Name.StartsWith("EntityDeletedEvent", StringComparison.Ordinal));
+        genericEvent.HandledBy.Should().Contain(h => h.Contains("OrderDeletedEventHandler"));
+
+        ctx.Relationships.Should().Contain(r =>
+            r.Kind == RelationshipKind.Handles &&
+            r.SourceType.Contains("OrderDeletedEventHandler", StringComparison.Ordinal) &&
+            r.TargetType == genericEvent.FullName);
+    }
+
+    [Fact]
+    public void Build_GenericDomainEvent_EmissionUsesOpenGenericEventKey()
+    {
+        var graph = BuildSampleGraph();
+        var ctx = graph.BoundedContexts.Single();
+
+        var genericEvent = ctx.DomainEvents.Single(e => e.Name.StartsWith("EntityDeletedEvent", StringComparison.Ordinal));
+        genericEvent.EmittedBy.Should().Contain(e => e.Contains("Order"));
+
+        var order = ctx.Aggregates.Single(a => a.Name == "Order");
+        order.EmittedEvents.Should().Contain(genericEvent.FullName);
+    }
+
+    [Fact]
     public void Build_RepositoryManagesAggregate()
     {
         var graph = BuildSampleGraph();
@@ -449,9 +478,10 @@ public class DDDBuilderTests
             .Build();
 
         var ctx = graph.BoundedContexts.Single();
-        ctx.EventHandlers.Should().HaveCount(2);
+        ctx.EventHandlers.Should().HaveCount(3);
         ctx.EventHandlers.Should().Contain(h => h.Name == "OrderPlacedHandler");
         ctx.EventHandlers.Should().Contain(h => h.Name == "SendShipmentNotificationHandler");
+        ctx.EventHandlers.Should().Contain(h => h.Name == "OrderDeletedEventHandler");
         ctx.EventHandlers.Should().NotContain(h => h.Name == "OrderPlacedIntegrationHandler");
         ctx.EventHandlers.Should().NotContain(h => h.Name.Contains("PublishCustomerRegistered"));
     }
@@ -472,7 +502,7 @@ public class DDDBuilderTests
             .Build();
 
         var ctx = graph.BoundedContexts.Single();
-        ctx.EventHandlers.Should().HaveCount(3);
+        ctx.EventHandlers.Should().HaveCount(4);
     }
 
     [Fact]
