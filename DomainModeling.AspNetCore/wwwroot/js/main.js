@@ -7,7 +7,8 @@ import {
 } from './helpers.js';
 import { renderDetailView } from './views.js';
 import {
-  renderDiagramView, initDiagram, initDiagramBoundedContexts, mergeDiagramBoundedContexts,
+  renderDiagramView, initDiagram, mergeDiagramBoundedContexts,
+  applyDiagramBoundedContextSelection, getDiagramBoundedContextNames,
   diagramZoom, diagramFit, diagramResetLayout, diagramToggleKind, diagramShowAll, diagramDownloadSvg,
   diagramToggleAliases, diagramToggleLayers, diagramToggleEdgeKind, diagramToggleEdgeFilter,
   diagramToggleKindFilter, diagramShowAllKinds, diagramHideAllKinds,
@@ -25,12 +26,13 @@ let featureEditorModule = null; // lazy-loaded when feature editor mode is on
 // Custom metadata (alias / description) per fullName
 let metadata = {};
 
-const EXPLORER_CTX_KEY = 'domainModelExplorerContexts';
-/** @deprecated Migration source only; replaced by per-view keys. */
-const LEGACY_CTX_KEY = 'domainModelSelectedContexts';
+/** @deprecated Browser-only keys; migrated once to server file storage. */
+const LS_EXPLORER_CTX = 'domainModelExplorerContexts';
+const LS_LEGACY_CTX = 'domainModelSelectedContexts';
+const LS_DIAGRAM_CTX = 'domainModelDiagramContexts';
+const LS_FE_CTX = 'domainModelFeatureEditorContexts';
+
 const METADATA_STORAGE_KEY = 'domainModelMetadata';
-const DIAGRAM_CTX_KEY = 'domainModelDiagramContexts';
-const FE_CTX_KEY = 'domainModelFeatureEditorContexts';
 
 let data = null;
 let explorerContextNames = new Set();
@@ -39,43 +41,130 @@ let currentView = 'diagram';
 let currentDetail = null;
 let availableExports = [];
 
-function migrateContextStorageKeys(validNames) {
-  const validSet = new Set(validNames);
-  let explorerPayload = localStorage.getItem(EXPLORER_CTX_KEY);
-  try {
-    if (!explorerPayload && localStorage.getItem(LEGACY_CTX_KEY)) {
-      const arr = JSON.parse(localStorage.getItem(LEGACY_CTX_KEY)).filter((n) => validSet.has(n));
-      explorerPayload = JSON.stringify(arr.length ? arr : [...validSet]);
-      localStorage.setItem(EXPLORER_CTX_KEY, explorerPayload);
-    }
-    if (!explorerPayload && validNames.length > 0) {
-      explorerPayload = JSON.stringify([...validSet]);
-      localStorage.setItem(EXPLORER_CTX_KEY, explorerPayload);
-    }
-    if (explorerPayload) {
-      if (!localStorage.getItem(DIAGRAM_CTX_KEY)) localStorage.setItem(DIAGRAM_CTX_KEY, explorerPayload);
-      if (!localStorage.getItem(FE_CTX_KEY)) localStorage.setItem(FE_CTX_KEY, explorerPayload);
-    }
-  } catch { /* ignore corrupt data */ }
-}
+/** Last successful PUT payload for feature palette when feature editor module is not loaded. */
+let uiBoundedContextCache = {
+  explorer: [],
+  diagram: [],
+  featureEditorPalette: [],
+};
 
-function loadExplorerContextSet(validNames) {
-  const validSet = new Set(validNames);
+async function fetchUiBoundedContexts() {
   try {
-    const raw = localStorage.getItem(EXPLORER_CTX_KEY);
-    if (raw) {
-      const arr = JSON.parse(raw);
-      const s = new Set(arr.filter((n) => validSet.has(n)));
-      if (s.size > 0) return s;
-    }
-  } catch { /* ignore corrupt data */ }
-  return new Set(validSet);
-}
-
-function saveExplorerContexts() {
-  try {
-    localStorage.setItem(EXPLORER_CTX_KEY, JSON.stringify([...explorerContextNames]));
+    const r = await fetch(`${BASE_URL}/ui/bounded-contexts`);
+    if (r.ok) return await r.json();
   } catch { /* ignore */ }
+  return { explorer: null, diagram: null, featureEditorPalette: null };
+}
+
+function selectionSetFromArray(arr, validNames) {
+  const valid = new Set(validNames);
+  if (!arr?.length) return new Set(validNames);
+  const s = new Set(arr.filter((n) => valid.has(n)));
+  return s.size > 0 ? s : new Set(validNames);
+}
+
+function readLsStringArray(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr : null;
+  } catch { return null; }
+}
+
+/**
+ * One-time migration from localStorage to server disk (metadata/ui/bounded-contexts.json).
+ */
+async function migrateLocalStorageUiBoundedContexts(validNames, serverUi) {
+  const exp = readLsStringArray(LS_EXPLORER_CTX) ?? readLsStringArray(LS_LEGACY_CTX);
+  const dia = readLsStringArray(LS_DIAGRAM_CTX);
+  const fe = readLsStringArray(LS_FE_CTX);
+  if (exp === null && dia === null && fe === null) return false;
+
+  const body = {
+    explorer: exp ?? serverUi.explorer ?? validNames,
+    diagram: dia ?? serverUi.diagram ?? validNames,
+    featureEditorPalette: fe ?? serverUi.featureEditorPalette ?? validNames,
+  };
+  try {
+    const res = await fetch(`${BASE_URL}/ui/bounded-contexts`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) return false;
+  } catch { return false; }
+
+  try {
+    localStorage.removeItem(LS_EXPLORER_CTX);
+    localStorage.removeItem(LS_LEGACY_CTX);
+    localStorage.removeItem(LS_DIAGRAM_CTX);
+    localStorage.removeItem(LS_FE_CTX);
+  } catch { /* ignore */ }
+  return true;
+}
+
+async function saveBoundedContextUiToServer() {
+  try {
+    const fe = FEATURE_EDITOR_MODE && featureEditorModule?.getFePaletteBoundedContextNames
+      ? featureEditorModule.getFePaletteBoundedContextNames()
+      : uiBoundedContextCache.featureEditorPalette;
+    const body = {
+      explorer: [...explorerContextNames],
+      diagram: getDiagramBoundedContextNames(),
+      featureEditorPalette: [...fe],
+    };
+    const res = await fetch(`${BASE_URL}/ui/bounded-contexts`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (res.ok) {
+      uiBoundedContextCache = {
+        explorer: [...body.explorer],
+        diagram: [...body.diagram],
+        featureEditorPalette: [...body.featureEditorPalette],
+      };
+    }
+  } catch { /* ignore */ }
+}
+
+function persistUiBoundedContexts() {
+  void saveBoundedContextUiToServer();
+}
+
+async function bootstrapBoundedContextUi(graphData) {
+  const validNames = graphData.boundedContexts.map((c) => c.name);
+  let ui = await fetchUiBoundedContexts();
+  if (await migrateLocalStorageUiBoundedContexts(validNames, ui)) {
+    ui = await fetchUiBoundedContexts();
+  }
+
+  explorerContextNames = selectionSetFromArray(ui.explorer, validNames);
+  applyDiagramBoundedContextSelection(graphData.boundedContexts, ui.diagram);
+
+  uiBoundedContextCache = {
+    explorer: [...explorerContextNames],
+    diagram: getDiagramBoundedContextNames(),
+    featureEditorPalette: Array.isArray(ui.featureEditorPalette) && ui.featureEditorPalette.length > 0
+      ? [...ui.featureEditorPalette]
+      : [...validNames],
+  };
+
+  if (FEATURE_EDITOR_MODE) {
+    featureEditorModule = await import('./feature-editor.js');
+    featureEditorModule.applyFePaletteBoundedContextSelection(
+      graphData.boundedContexts,
+      ui.featureEditorPalette,
+    );
+    await featureEditorModule.initFeatureEditor(BASE_URL, graphData);
+    wireFeatureEditorGlobals();
+    uiBoundedContextCache = {
+      explorer: [...explorerContextNames],
+      diagram: getDiagramBoundedContextNames(),
+      featureEditorPalette: featureEditorModule.getFePaletteBoundedContextNames(),
+    };
+  }
 }
 
 // ── Bootstrap ────────────────────────────────────────
@@ -134,10 +223,7 @@ async function init() {
     window.__domainData = data;
 
     if (data.boundedContexts && data.boundedContexts.length > 0) {
-      const validNames = data.boundedContexts.map((c) => c.name);
-      migrateContextStorageKeys(validNames);
-      explorerContextNames = loadExplorerContextSet(validNames);
-      initDiagramBoundedContexts(data.boundedContexts);
+      await bootstrapBoundedContextUi(data);
       currentCtx = mergeContexts();
     }
 
@@ -146,13 +232,6 @@ async function init() {
       testingModule = await import('./testing.js');
       await testingModule.initTesting(API_URL.replace('/json', ''));
       wireTestingGlobals();
-    }
-
-    // Lazy-load feature editor module when feature editor mode is enabled
-    if (FEATURE_EDITOR_MODE) {
-      featureEditorModule = await import('./feature-editor.js');
-      await featureEditorModule.initFeatureEditor(BASE_URL, data);
-      wireFeatureEditorGlobals();
     }
 
     render();
@@ -180,7 +259,7 @@ function toggleExplorerBoundedContext(event, name) {
   } else {
     explorerContextNames.add(name);
   }
-  saveExplorerContexts();
+  persistUiBoundedContexts();
   currentCtx = mergeContexts();
   currentDetail = null;
   render();
@@ -188,7 +267,7 @@ function toggleExplorerBoundedContext(event, name) {
 
 function explorerBoundedContextsShowAll() {
   for (const c of (data?.boundedContexts || [])) explorerContextNames.add(c.name);
-  saveExplorerContexts();
+  persistUiBoundedContexts();
   currentCtx = mergeContexts();
   currentDetail = null;
   render();
@@ -422,6 +501,7 @@ window.__nav = {
   explorerBoundedContextsShowAll,
   toggleExplorerBcFilter,
   refreshDiagramView,
+  persistUiBoundedContexts,
 };
 window.__saveMetadata = saveMetadata;
 window.__downloadExport = async function(name) {

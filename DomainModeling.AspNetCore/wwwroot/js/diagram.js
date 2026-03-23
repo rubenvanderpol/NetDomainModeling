@@ -15,8 +15,6 @@ const HIDDEN_EDGE_KINDS_KEY = 'domain-model-diagram-hidden-edge-kinds';
 const VIEWPORT_KEY = 'domain-model-diagram-viewport';
 const SHOW_ALIASES_KEY = 'domain-model-diagram-show-aliases';
 const SHOW_LAYERS_KEY = 'domain-model-diagram-show-layers';
-const DIAGRAM_BC_KEY = 'domainModelDiagramContexts';
-
 const EDGE_CFG = {
   Contains:      { label: 'Contains',          color: '#60a5fa', dashed: false },
   References:    { label: 'References',         color: '#34d399', dashed: true  },
@@ -149,27 +147,20 @@ let showLayers = false;
 
 let diagramBoundedContextNames = new Set();
 
-function loadDiagramBoundedContextSelection(validNamesSet) {
-  try {
-    const raw = localStorage.getItem(DIAGRAM_BC_KEY);
-    if (raw) {
-      const arr = JSON.parse(raw);
-      const s = new Set(arr.filter((n) => validNamesSet.has(n)));
-      if (s.size > 0) return s;
-    }
-  } catch { /* ignore */ }
-  return new Set(validNamesSet);
-}
-
-function saveDiagramBoundedContextSelection() {
-  try {
-    localStorage.setItem(DIAGRAM_BC_KEY, JSON.stringify([...diagramBoundedContextNames]));
-  } catch { /* ignore */ }
-}
-
-export function initDiagramBoundedContexts(boundedContexts) {
+export function applyDiagramBoundedContextSelection(boundedContexts, selectedNames) {
   const valid = new Set((boundedContexts || []).map((c) => c.name));
-  diagramBoundedContextNames = loadDiagramBoundedContextSelection(valid);
+  let next;
+  if (!selectedNames?.length) {
+    next = new Set(valid);
+  } else {
+    next = new Set(selectedNames.filter((n) => valid.has(n)));
+    if (next.size === 0) next = new Set(valid);
+  }
+  diagramBoundedContextNames = next;
+}
+
+export function getDiagramBoundedContextNames() {
+  return [...diagramBoundedContextNames];
 }
 
 export function mergeDiagramBoundedContexts(data) {
@@ -216,14 +207,14 @@ export function toggleDiagramBoundedContext(event, name) {
   } else {
     diagramBoundedContextNames.add(name);
   }
-  saveDiagramBoundedContextSelection();
+  window.__nav?.persistUiBoundedContexts?.();
   window.__nav?.refreshDiagramView?.();
 }
 
 export function diagramBoundedContextsShowAll() {
   const all = window.__domainData?.boundedContexts || [];
   for (const c of all) diagramBoundedContextNames.add(c.name);
-  saveDiagramBoundedContextSelection();
+  window.__nav?.persistUiBoundedContexts?.();
   window.__nav?.refreshDiagramView?.();
 }
 

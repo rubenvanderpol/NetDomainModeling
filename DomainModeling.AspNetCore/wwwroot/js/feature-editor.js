@@ -68,30 +68,22 @@ const KIND_LABELS = {
 const LAYERS = ['Domain', 'Application', 'Infrastructure'];
 const LAYER_COLORS = { Domain: '#a78bfa', Application: '#60a5fa', Infrastructure: '#fb923c' };
 
-const FE_PALETTE_BC_KEY = 'domainModelFeatureEditorContexts';
 let fePaletteBoundedContextNames = new Set();
 
-function loadFePaletteBoundedContextSelection(validNamesSet) {
-  try {
-    const raw = localStorage.getItem(FE_PALETTE_BC_KEY);
-    if (raw) {
-      const arr = JSON.parse(raw);
-      const s = new Set(arr.filter((n) => validNamesSet.has(n)));
-      if (s.size > 0) return s;
-    }
-  } catch { /* ignore */ }
-  return new Set(validNamesSet);
-}
-
-function saveFePaletteBoundedContextSelection() {
-  try {
-    localStorage.setItem(FE_PALETTE_BC_KEY, JSON.stringify([...fePaletteBoundedContextNames]));
-  } catch { /* ignore */ }
-}
-
-export function initFePaletteBoundedContexts(boundedContexts) {
+export function applyFePaletteBoundedContextSelection(boundedContexts, selectedNames) {
   const valid = new Set((boundedContexts || []).map((c) => c.name));
-  fePaletteBoundedContextNames = loadFePaletteBoundedContextSelection(valid);
+  let next;
+  if (!selectedNames?.length) {
+    next = new Set(valid);
+  } else {
+    next = new Set(selectedNames.filter((n) => valid.has(n)));
+    if (next.size === 0) next = new Set(valid);
+  }
+  fePaletteBoundedContextNames = next;
+}
+
+export function getFePaletteBoundedContextNames() {
+  return [...fePaletteBoundedContextNames];
 }
 
 function renderFePaletteBcDropdownInner() {
@@ -128,7 +120,7 @@ export function toggleFePaletteBoundedContext(event, name) {
   } else {
     fePaletteBoundedContextNames.add(name);
   }
-  saveFePaletteBoundedContextSelection();
+  window.__nav?.persistUiBoundedContexts?.();
   refreshFeatureEditorBoundedContextDropdown();
   const pal = document.getElementById('fePalette');
   if (pal) {
@@ -139,7 +131,7 @@ export function toggleFePaletteBoundedContext(event, name) {
 
 export function fePaletteBoundedContextsShowAll() {
   for (const c of (domainData?.boundedContexts || [])) fePaletteBoundedContextNames.add(c.name);
-  saveFePaletteBoundedContextSelection();
+  window.__nav?.persistUiBoundedContexts?.();
   refreshFeatureEditorBoundedContextDropdown();
   const pal = document.getElementById('fePalette');
   if (pal) {
@@ -164,7 +156,6 @@ let featureExports = [];  // available export registrations from server
 export async function initFeatureEditor(apiBaseUrl, data) {
   baseUrl = apiBaseUrl;
   domainData = data;
-  initFePaletteBoundedContexts(data?.boundedContexts);
   await loadFeatureList();
   await loadFeatureExports();
 }

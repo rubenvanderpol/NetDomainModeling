@@ -44,6 +44,7 @@ public sealed class DomainModelOptions
 
     /// <summary>
     /// Directory path where domain type alias/description metadata is stored.
+    /// Bounded-context UI selections for the explorer are stored under <c>{MetadataStoragePath}/ui/bounded-contexts.json</c>.
     /// Defaults to <c>./metadata</c> relative to the application root.
     /// </summary>
     public string MetadataStoragePath { get; set; } = "./metadata";
@@ -184,6 +185,38 @@ public static class DomainModelEndpointExtensions
             }
         }
 
+        var uiStateJsonDir = Path.Combine(metadataDir, "ui");
+        var uiBoundedContextsPath = Path.Combine(uiStateJsonDir, "bounded-contexts.json");
+        var uiBcJsonOpts = new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            WriteIndented = true,
+            PropertyNameCaseInsensitive = true,
+            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+        };
+
+        BoundedContextUiSelections LoadUiBoundedContextSelectionsFromDisk()
+        {
+            try
+            {
+                if (File.Exists(uiBoundedContextsPath))
+                {
+                    var text = File.ReadAllText(uiBoundedContextsPath);
+                    var parsed = JsonSerializer.Deserialize<BoundedContextUiSelections>(text, uiBcJsonOpts);
+                    return NormalizeBoundedContextUiSelections(parsed, graph);
+                }
+            }
+            catch
+            {
+                // Corrupt or unreadable file — fall through to defaults
+            }
+
+            return CreateDefaultBoundedContextUiSelections(graph);
+        }
+
+        var uiBoundedContextSelections = LoadUiBoundedContextSelectionsFromDisk();
+        var uiBcSync = new object();
+
         var assetsPrefix = $"{routePrefix}/assets";
 
         // GET /domain-model/json — raw JSON
@@ -227,6 +260,56 @@ public static class DomainModelEndpointExtensions
             .ExcludeFromDescription()
             .WithName("DomainModelExportDownload");
         }
+
+        // GET /domain-model/ui/bounded-contexts — explorer / diagram / feature palette context selection
+        endpoints.MapGet($"{routePrefix}/ui/bounded-contexts", () =>
+        {
+            lock (uiBcSync)
+            {
+                var normalized = NormalizeBoundedContextUiSelections(uiBoundedContextSelections, graph);
+                return Results.Json(normalized, new JsonSerializerOptions
+                {
+                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                    DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+                });
+            }
+        })
+        .ExcludeFromDescription()
+        .WithName("DomainModelUiBoundedContexts");
+
+        // PUT /domain-model/ui/bounded-contexts — persist selection (same folder as type metadata)
+        endpoints.MapPut($"{routePrefix}/ui/bounded-contexts", async (HttpContext ctx) =>
+        {
+            using var reader = new StreamReader(ctx.Request.Body);
+            var body = await reader.ReadToEndAsync();
+            BoundedContextUiSelections? parsed;
+            try
+            {
+                parsed = JsonSerializer.Deserialize<BoundedContextUiSelections>(body, uiBcJsonOpts);
+            }
+            catch (JsonException)
+            {
+                return Results.BadRequest("Invalid JSON");
+            }
+
+            if (parsed is null)
+                return Results.BadRequest("Invalid body");
+
+            var normalized = NormalizeBoundedContextUiSelections(parsed, graph);
+            string serialized;
+            lock (uiBcSync)
+            {
+                uiBoundedContextSelections = normalized;
+                serialized = JsonSerializer.Serialize(normalized, uiBcJsonOpts);
+            }
+
+            Directory.CreateDirectory(uiStateJsonDir);
+            await File.WriteAllTextAsync(uiBoundedContextsPath, serialized);
+
+            return Results.Ok(new { saved = true });
+        })
+        .ExcludeFromDescription()
+        .WithName("DomainModelUiBoundedContextsUpdate");
 
         // PUT /domain-model/metadata/{fullName} — update alias/description for a type
         endpoints.MapPut($"{routePrefix}/metadata/{{**fullName}}", async (string fullName, HttpContext ctx) =>
@@ -688,5 +771,47 @@ public static class DomainModelEndpointExtensions
         {
             return false;
         }
+    }
+
+    private static BoundedContextUiSelections CreateDefaultBoundedContextUiSelections(DomainGraph graph)
+    {
+        var all = graph.BoundedContexts.Select(c => c.Name).ToList();
+        return new BoundedContextUiSelections
+        {
+            Explorer = [.. all],
+            Diagram = [.. all],
+            FeatureEditorPalette = [.. all],
+        };
+    }
+
+    private static BoundedContextUiSelections NormalizeBoundedContextUiSelections(BoundedContextUiSelections? incoming, DomainGraph graph)
+    {
+        var all = graph.BoundedContexts.Select(c => c.Name).ToList();
+        var valid = all.ToHashSet(StringComparer.Ordinal);
+        if (all.Count == 0)
+        {
+            return new BoundedContextUiSelections
+            {
+                Explorer = [],
+                Diagram = [],
+                FeatureEditorPalette = [],
+            };
+        }
+
+        List<string> Coerce(List<string>? part)
+        {
+            if (part is null || part.Count == 0)
+                return [.. all];
+            var filtered = part.Where(valid.Contains).Distinct(StringComparer.Ordinal).ToList();
+            return filtered.Count > 0 ? filtered : [.. all];
+        }
+
+        var src = incoming ?? new BoundedContextUiSelections();
+        return new BoundedContextUiSelections
+        {
+            Explorer = Coerce(src.Explorer),
+            Diagram = Coerce(src.Diagram),
+            FeatureEditorPalette = Coerce(src.FeatureEditorPalette),
+        };
     }
 }
