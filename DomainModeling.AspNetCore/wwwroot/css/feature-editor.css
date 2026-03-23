@@ -381,6 +381,14 @@
   color: var(--text);
   line-height: 1.5;
   word-break: break-word;
+  overflow: visible;
+  position: relative;
+}
+
+.fe-panel-rel-label {
+  display: inline;
+  position: relative;
+  vertical-align: baseline;
 }
 
 .fe-panel-section {

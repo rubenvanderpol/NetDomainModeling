@@ -268,9 +268,6 @@ internal sealed class AssemblyScanner
             Properties = a.Properties
         }), knownEntityAndAggregateNames, relationships);
 
-        // GitHub #26: one diagram/detail link per (source, target, kind)
-        relationships = RelationshipDuplicateMerge.MergeDuplicateOutgoingLinks(relationships);
-
         return new BoundedContextNode
         {
             Name = _config.Name,

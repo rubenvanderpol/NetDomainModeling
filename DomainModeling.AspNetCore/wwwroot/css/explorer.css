@@ -509,8 +509,54 @@ body {
 }
 
 .rel-table th { text-align: left; padding: 8px 12px; color: var(--text-muted); font-weight: 500; background: var(--bg-card); border-bottom: 1px solid var(--border); }
-.rel-table td { padding: 6px 12px; border-bottom: 1px solid rgba(42,45,55,.5); font-family: var(--font-mono); font-size: 11px; }
+.rel-table td { padding: 6px 12px; border-bottom: 1px solid rgba(42,45,55,.5); font-family: var(--font-mono); font-size: 11px; position: relative; overflow: visible; vertical-align: top; }
 .rel-table tr:last-child td { border-bottom: none; }
+
+/* Duplicate relationship labels: first + (more…) with bullet tooltip (GitHub #26) */
+.rel-primary { font-weight: 500; }
+.rel-more-wrap {
+  position: relative;
+  display: inline-block;
+  margin-left: 4px;
+  vertical-align: baseline;
+}
+.rel-more-trigger {
+  color: var(--accent);
+  cursor: help;
+  text-decoration: underline dotted var(--text-dim);
+  text-underline-offset: 2px;
+  font-size: 0.92em;
+  white-space: nowrap;
+}
+.rel-more-tip {
+  display: none;
+  position: absolute;
+  left: 0;
+  top: calc(100% + 6px);
+  z-index: 300;
+  min-width: 140px;
+  max-width: 340px;
+  padding: 8px 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+  color: var(--text);
+  line-height: 1.4;
+  font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif;
+}
+.rel-more-list {
+  margin: 0;
+  padding-left: 1.15em;
+}
+.rel-more-wrap:hover .rel-more-tip,
+.rel-more-wrap:focus-within .rel-more-tip {
+  display: block;
+}
+
+.detail-panel .rel-table { overflow: visible; }
+.detail-section:has(.rel-table) { overflow: visible; }
 
 .rel-kind {
   font-size: 10px;

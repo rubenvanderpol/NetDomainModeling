@@ -1,7 +1,7 @@
 /**
  * Interactive SVG diagram with force layout and localStorage persistence.
  */
-import { esc, escAttr, shortName } from './helpers.js';
+import { esc, escAttr, shortName, mergeRelationshipsToDisplayEdges } from './helpers.js';
 import { renderTabBar } from './tabs.js';
 
 const STORAGE_KEY = 'domain-model-diagram-positions';
@@ -355,10 +355,8 @@ export function initDiagram(ctx, boundedContexts) {
   (ctx.repositories || []).forEach(r => addNode(r, 'repository'));
   (ctx.domainServices || []).forEach(s => addNode(s, 'service'));
 
-  for (const rel of (ctx.relationships || [])) {
-    if (nMap[rel.sourceType] && nMap[rel.targetType]) {
-      edges.push({ source: rel.sourceType, target: rel.targetType, kind: rel.kind, label: rel.label || '' });
-    }
+  for (const e of mergeRelationshipsToDisplayEdges(ctx.relationships || [], nMap)) {
+    edges.push(e);
   }
 
   // Restore saved positions or run force layout
@@ -701,8 +699,19 @@ function renderSvg() {
     const markerEnd = (e.kind === 'References' || e.kind === 'ReferencesById') ? '' : ` marker-end="url(#arrow-${e.kind})"`;
     s += `<line x1="${p1.x}" y1="${p1.y}" x2="${p2.x}" y2="${p2.y}" stroke="${color}" stroke-width="1.5"${dashed}${markerStart}${markerEnd} opacity="0.65" />`;
     const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
-    const label = e.label || e.kind;
-    s += `<text x="${mx}" y="${my - 6}" text-anchor="middle" fill="${color}" font-size="9" font-family="-apple-system,sans-serif" opacity="0.7">${esc(label)}</text>`;
+    const primary = e.primaryDisplay ?? (e.label || e.kind);
+    const more = e.moreDisplay || [];
+    s += '<g class="dg-edge-label">';
+    if (more.length > 0) {
+      const tip = more.map(x => `• ${x}`).join('\n');
+      s += `<title>${esc(tip)}</title>`;
+    }
+    s += `<text x="${mx}" y="${my - 6}" text-anchor="middle" fill="${color}" font-size="9" font-family="-apple-system,sans-serif" opacity="0.7">`;
+    s += `<tspan>${esc(primary)}</tspan>`;
+    if (more.length > 0) {
+      s += `<tspan fill="#94a3b8" font-size="8"> (more…)</tspan>`;
+    }
+    s += '</text></g>';
   }
 
   // Nodes

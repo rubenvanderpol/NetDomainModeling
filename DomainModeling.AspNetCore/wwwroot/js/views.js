@@ -1,7 +1,10 @@
 /**
  * Overview + Cards + Detail views.
  */
-import { esc, escAttr, shortName, kindMeta, relKindColor, syntaxHighlight, SECTION_META } from './helpers.js';
+import {
+  esc, escAttr, shortName, kindMeta, relKindColor, syntaxHighlight, SECTION_META,
+  formatRelLabelMoreHtml, groupDuplicateRelationships, groupRelationshipsForDetailItem, relLinkDisplayText,
+} from './helpers.js';
 import { renderTabBar } from './tabs.js';
 
 // ── Overview ─────────────────────────────────────────
@@ -234,19 +237,22 @@ export function renderDetailView(kind, item, ctx, metadata, saveMetadataFn) {
   const rels = (ctx.relationships || []).filter(r =>
     r.sourceType === item.fullName || r.targetType === item.fullName
   );
-  if (rels.length > 0) {
+  const relGroups = groupRelationshipsForDetailItem(rels, item.fullName);
+  if (relGroups.length > 0) {
     html += '<div class="detail-section"><h3>Relationships</h3>';
     html += '<table class="rel-table"><tr><th>Direction</th><th>Kind</th><th>Related Type</th><th>Label</th></tr>';
-    for (const r of rels) {
+    for (const g of relGroups) {
+      const r = g[0];
       const isSource = r.sourceType === item.fullName;
       const other = isSource ? r.targetType : r.sourceType;
       const dir = isSource ? '→ outgoing' : '← incoming';
       const kindColor = relKindColor(r.kind);
+      const labelCell = formatRelLabelMoreHtml(relLinkDisplayText(r), g.slice(1).map(relLinkDisplayText));
       html += `<tr>
         <td style="color:var(--text-muted)">${dir}</td>
         <td><span class="rel-kind" style="color:${kindColor};background:${kindColor}18">${esc(r.kind)}</span></td>
         <td><span class="rel-link" onclick="window.__nav.navigateTo('${escAttr(other)}')">${esc(shortName(other))}</span></td>
-        <td style="color:var(--text-muted)">${r.label ? esc(r.label) : '—'}</td>
+        <td style="color:var(--text-muted)">${labelCell}</td>
       </tr>`;
     }
     html += '</table></div>';
@@ -261,17 +267,20 @@ export function renderRelationshipsView(ctx) {
   const rels = ctx.relationships || [];
   if (rels.length === 0) return '<div class="empty-state"><h2>No Relationships</h2></div>';
 
+  const groups = groupDuplicateRelationships(rels);
   let html = renderTabBar('relationships');
 
-  html += `<div class="section-title"><span class="dot" style="background:var(--clr-relationship)"></span>All Relationships (${rels.length})</div>`;
+  html += `<div class="section-title"><span class="dot" style="background:var(--clr-relationship)"></span>All Relationships (${groups.length})</div>`;
   html += '<table class="rel-table"><tr><th>Source</th><th>Kind</th><th>Target</th><th>Label</th></tr>';
-  for (const r of rels) {
+  for (const g of groups) {
+    const r = g[0];
     const kindColor = relKindColor(r.kind);
+    const labelCell = formatRelLabelMoreHtml(relLinkDisplayText(r), g.slice(1).map(relLinkDisplayText));
     html += `<tr>
       <td><span class="rel-link" onclick="window.__nav.navigateTo('${escAttr(r.sourceType)}')">${esc(shortName(r.sourceType))}</span></td>
       <td><span class="rel-kind" style="color:${kindColor};background:${kindColor}18">${esc(r.kind)}</span></td>
       <td><span class="rel-link" onclick="window.__nav.navigateTo('${escAttr(r.targetType)}')">${esc(shortName(r.targetType))}</span></td>
-      <td style="color:var(--text-muted)">${r.label ? esc(r.label) : '—'}</td>
+      <td style="color:var(--text-muted)">${labelCell}</td>
     </tr>`;
   }
   html += '</table>';

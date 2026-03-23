@@ -34,7 +34,7 @@ public class FeatureJsonConverterTests
     }
 
     [Fact]
-    public void ToDomainGraph_MergesDuplicateEdges_SameSourceTargetKind_GitHub26()
+    public void ToDomainGraph_PreservesDuplicateEdges_SameSourceTargetKind_GitHub26()
     {
         const string json = """
             {
@@ -53,8 +53,7 @@ public class FeatureJsonConverterTests
         var graph = FeatureJsonConverter.ToDomainGraph(json, "X");
         var ctx = graph.BoundedContexts.Should().ContainSingle().Subject;
 
-        ctx.Relationships.Where(r => r.Kind == RelationshipKind.Handles).Should().ContainSingle()
-            .Which.Label.Should().Be("a, b");
+        ctx.Relationships.Where(r => r.Kind == RelationshipKind.Handles).Should().HaveCount(2);
     }
 
     [Fact]

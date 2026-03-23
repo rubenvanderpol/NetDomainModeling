@@ -10,7 +10,7 @@
  *  - Drag, pan, zoom (positions persisted in localStorage)
  *  - Selection shows read-only properties in a side panel
  */
-import { esc, escAttr, shortName, SECTION_META } from './helpers.js';
+import { esc, escAttr, shortName, SECTION_META, mergeRelationshipsToDisplayEdges } from './helpers.js';
 import { renderTabBar } from './tabs.js';
 
 // ── Constants ────────────────────────────────────────
@@ -262,10 +262,8 @@ function buildGraph() {
   (ctx.repositories || []).forEach(r => addNode(r, 'repository'));
   (ctx.domainServices || []).forEach(s => addNode(s, 'service'));
 
-  for (const rel of (ctx.relationships || [])) {
-    if (st.nMap[rel.sourceType] && st.nMap[rel.targetType]) {
-      st.allEdges.push({ source: rel.sourceType, target: rel.targetType, kind: rel.kind, label: rel.label || '' });
-    }
+  for (const e of mergeRelationshipsToDisplayEdges(ctx.relationships || [], st.nMap)) {
+    st.allEdges.push(e);
   }
 
   applyAutoLayout(st.allNodes, st.allEdges, st.nMap);
@@ -371,7 +369,18 @@ function renderSvg() {
     s += `<line class="dg-edge" data-idx="${ei}" x1="${p1.x}" y1="${p1.y}" x2="${p2.x}" y2="${p2.y}" stroke="transparent" stroke-width="12" style="cursor:pointer" />`;
     s += `<line class="dg-edge-vis" data-idx="${ei}" x1="${p1.x}" y1="${p1.y}" x2="${p2.x}" y2="${p2.y}" stroke="${color}" stroke-width="${sw}"${dashed}${markerStart}${markerEnd} opacity="${op}" style="pointer-events:none" />`;
     const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
-    s += `<text x="${mx}" y="${my - 6}" text-anchor="middle" fill="${color}" font-size="9" font-family="-apple-system,sans-serif" opacity="0.7" style="pointer-events:none">${esc(e.label || e.kind)}</text>`;
+    const primary = e.primaryDisplay ?? (e.label || e.kind);
+    const more = e.moreDisplay || [];
+    s += '<g style="pointer-events:none">';
+    if (more.length > 0) {
+      s += `<title>${esc(more.map(x => `• ${x}`).join('\n'))}</title>`;
+    }
+    s += `<text x="${mx}" y="${my - 6}" text-anchor="middle" fill="${color}" font-size="9" font-family="-apple-system,sans-serif" opacity="0.7">`;
+    s += `<tspan>${esc(primary)}</tspan>`;
+    if (more.length > 0) {
+      s += `<tspan fill="#94a3b8" font-size="8"> (more…)</tspan>`;
+    }
+    s += '</text></g>';
   }
 
   // Nodes (only visible)
@@ -595,7 +604,11 @@ function renderPanel() {
     h += panelField('Source', shortName(e.source));
     h += panelField('Target', shortName(e.target));
     h += panelField('Kind', e.kind);
-    if (e.label) h += panelField('Label', e.label);
+    const primary = e.primaryDisplay ?? (e.label || e.kind);
+    h += panelField('Label', primary);
+    if (e.moreDisplay && e.moreDisplay.length > 0) {
+      h += panelField('Also linked via', e.moreDisplay.map(x => `• ${x}`).join('\n'));
+    }
     return h;
   }
 

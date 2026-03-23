@@ -9,7 +9,10 @@
  *  - Drag/pan/zoom the canvas
  *  - Optionally run in read-only mode (existing graph items only)
  */
-import { esc, escAttr, shortName, ALL_SECTIONS, SECTION_META } from './helpers.js';
+import {
+  esc, escAttr, shortName, ALL_SECTIONS, SECTION_META,
+  formatRelLabelMoreHtml, groupRelationshipsForDetailItem, mergeRelationshipsToDisplayEdges, relLinkDisplayText,
+} from './helpers.js';
 import { renderTabBar } from './tabs.js';
 
 // ── Constants ────────────────────────────────────────
@@ -337,14 +340,28 @@ function renderPropertiesPanel() {
       }
     }
 
-    // Relationships
+    // Relationships (group duplicate source/target/kind for display)
     const rels = st.edges.filter(e => e.source === n.id || e.target === n.id);
-    if (rels.length > 0) {
+    const shaped = rels.map(e => ({
+      sourceType: e.source,
+      targetType: e.target,
+      kind: e.kind,
+      label: e.label || '',
+    }));
+    const relGroups = groupRelationshipsForDetailItem(shaped, n.id);
+    if (relGroups.length > 0) {
       h += '<div class="fe-panel-section">Relationships</div>';
-      for (const e of rels) {
-        const other = e.source === n.id ? shortName(e.target) : shortName(e.source);
-        const dir = e.source === n.id ? '→' : '←';
-        h += `<div class="fe-panel-rel">${dir} <span style="color:${EDGE_COLORS[e.kind] || '#888'}">${e.kind}</span> ${esc(other)}</div>`;
+      for (const g of relGroups) {
+        const e = g[0];
+        const other = e.sourceType === n.id ? shortName(e.targetType) : shortName(e.sourceType);
+        const dir = e.sourceType === n.id ? '→' : '←';
+        let extra = '';
+        if (g.length > 1) {
+          extra = ` <span class="fe-panel-rel-label">${formatRelLabelMoreHtml(relLinkDisplayText(e), g.slice(1).map(relLinkDisplayText))}</span>`;
+        } else if (e.label) {
+          extra = ` <span class="fe-panel-rel-label" style="color:var(--text-dim)">— ${esc(e.label)}</span>`;
+        }
+        h += `<div class="fe-panel-rel">${dir} <span style="color:${EDGE_COLORS[e.kind] || '#888'}">${e.kind}</span> ${esc(other)}${extra}</div>`;
       }
     }
 
@@ -362,6 +379,10 @@ function renderPropertiesPanel() {
     const e = st.edges[st.selectedEdge];
     if (!e) return renderPanelInstructions();
 
+    const group = st.edges.filter(
+      x => x.source === e.source && x.target === e.target && x.kind === e.kind
+    );
+
     let h = `<div class="fe-panel-title" style="color:${EDGE_COLORS[e.kind] || '#888'}">Relationship</div>`;
     h += `<div class="fe-panel-field"><label>Source</label><div class="fe-panel-value">${esc(shortName(e.source))}</div></div>`;
     h += `<div class="fe-panel-field"><label>Target</label><div class="fe-panel-value">${esc(shortName(e.target))}</div></div>`;
@@ -370,7 +391,8 @@ function renderPropertiesPanel() {
       ? `<div class="fe-panel-value">${esc(e.kind)}</div>`
       : renderRelKindDropdown(e.kind, st.selectedEdge);
     h += '</div>';
-    if (e.label) h += `<div class="fe-panel-field"><label>Label</label><div class="fe-panel-value">${esc(e.label)}</div></div>`;
+    const primary = relLinkDisplayText({ label: group[0].label, kind: group[0].kind });
+    h += `<div class="fe-panel-field"><label>Label</label><div class="fe-panel-value">${formatRelLabelMoreHtml(primary, group.slice(1).map(x => relLinkDisplayText(x)))}</div></div>`;
     if (!readOnly) {
       h += '<div class="fe-panel-section">Actions</div>';
       h += `<button class="fe-btn danger" onclick="window.__featureEditor.removeEdge(${st.selectedEdge})">✕ Remove Relation</button>`;
@@ -633,7 +655,7 @@ function loadFeatureState(feature) {
   // Auto-layout nodes without positions
   const needsLayout = st.nodes.filter(n => n.x === 0 && n.y === 0);
   if (needsLayout.length > 0 && needsLayout.length === st.nodes.length) {
-    applyAutoLayout(st.nodes, st.edges, st.nMap);
+    applyAutoLayout(st.nodes, edgesForForceLayout(st), st.nMap);
   }
 }
 
@@ -1147,6 +1169,25 @@ function refreshPalette() {
 
 // ── Auto-layout (reused from diagram logic) ──────────
 
+/** One force edge per (source, target, kind) so stacked duplicates do not multiply attraction. */
+function edgesForForceLayout(st) {
+  const shaped = (st.edges || []).map(e => ({
+    sourceType: e.source,
+    targetType: e.target,
+    kind: e.kind,
+    label: e.label || '',
+  }));
+  return mergeRelationshipsToDisplayEdges(shaped, st.nMap);
+}
+
+function canonicalFeatureEdgeIndex(st, idx) {
+  const e = st.edges[idx];
+  if (!e) return idx;
+  return st.edges.findIndex(
+    x => x.source === e.source && x.target === e.target && x.kind === e.kind
+  );
+}
+
 function applyAutoLayout(nodes, edges, nMap) {
   const kindRow = {
     aggregate: 0, entity: 1, valueObject: 1, event: 2, integrationEvent: 2,
@@ -1283,9 +1324,21 @@ function renderSvg() {
     s += '</g>';
   }
 
-  // Edges
-  for (let ei = 0; ei < st.edges.length; ei++) {
-    const e = st.edges[ei];
+  // Edges (one visual edge per source/target/kind; data-idx = first raw edge in group)
+  const shaped = (st.edges || []).map(e => ({
+    sourceType: e.source,
+    targetType: e.target,
+    kind: e.kind,
+    label: e.label || '',
+  }));
+  const displayEdges = mergeRelationshipsToDisplayEdges(shaped, st.nMap);
+  const rawIdxForDisplay = displayEdges.map(d =>
+    st.edges.findIndex(e => e.source === d.source && e.target === d.target && e.kind === d.kind)
+  );
+
+  for (let di = 0; di < displayEdges.length; di++) {
+    const e = displayEdges[di];
+    const ei = rawIdxForDisplay[di];
     const src = st.nMap[e.source], tgt = st.nMap[e.target];
     if (!src || !tgt) continue;
     const srcCx = src.x + src.w / 2, srcCy = src.y + src.h / 2;
@@ -1296,14 +1349,26 @@ function renderSvg() {
     const dashed = (e.kind === 'Emits' || e.kind === 'Handles' || e.kind === 'Publishes' || e.kind === 'References' || e.kind === 'ReferencesById') ? ' stroke-dasharray="6,4"' : '';
     const markerStart = (e.kind === 'Contains' || e.kind === 'Has' || e.kind === 'HasMany') ? ' marker-start="url(#fe-diamond)"' : '';
     const markerEnd = (e.kind === 'References' || e.kind === 'ReferencesById') ? '' : ` marker-end="url(#fe-arrow-${e.kind})"`;
-    const selected = st.selectedEdge === ei;
+    const sel = st.selectedEdge != null ? st.edges[st.selectedEdge] : null;
+    const selected = !!(sel && e.source === sel.source && e.target === sel.target && e.kind === sel.kind);
     const sw = selected ? 3 : 1.5;
     const op = selected ? 1 : 0.65;
     // Invisible hit area
     s += `<line class="fe-edge" data-idx="${ei}" x1="${p1.x}" y1="${p1.y}" x2="${p2.x}" y2="${p2.y}" stroke="transparent" stroke-width="12" style="cursor:pointer" />`;
     s += `<line class="fe-edge-vis" data-idx="${ei}" x1="${p1.x}" y1="${p1.y}" x2="${p2.x}" y2="${p2.y}" stroke="${color}" stroke-width="${sw}"${dashed}${markerStart}${markerEnd} opacity="${op}" style="pointer-events:none" />`;
     const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
-    s += `<text x="${mx}" y="${my - 6}" text-anchor="middle" fill="${color}" font-size="9" font-family="-apple-system,sans-serif" opacity="0.7" style="pointer-events:none">${esc(e.label || e.kind)}</text>`;
+    const primary = e.primaryDisplay ?? (e.label || e.kind);
+    const more = e.moreDisplay || [];
+    s += '<g style="pointer-events:none">';
+    if (more.length > 0) {
+      s += `<title>${esc(more.map(x => `• ${x}`).join('\n'))}</title>`;
+    }
+    s += `<text x="${mx}" y="${my - 6}" text-anchor="middle" fill="${color}" font-size="9" font-family="-apple-system,sans-serif" opacity="0.7">`;
+    s += `<tspan>${esc(primary)}</tspan>`;
+    if (more.length > 0) {
+      s += `<tspan fill="#94a3b8" font-size="8"> (more…)</tspan>`;
+    }
+    s += '</text></g>';
   }
 
   // Connection line being drawn
@@ -1471,8 +1536,8 @@ function setupInteraction() {
       refreshPanel();
     } else if (edgeEl) {
       ev.preventDefault();
-      const idx = parseInt(edgeEl.dataset.idx);
-      st.selectedEdge = idx;
+      const idx = parseInt(edgeEl.dataset.idx, 10);
+      st.selectedEdge = canonicalFeatureEdgeIndex(st, idx);
       st.selectedNode = null;
       renderSvg();
       refreshPanel();

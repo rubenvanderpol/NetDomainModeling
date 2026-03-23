@@ -242,7 +242,7 @@ public class DDDBuilderTests
     }
 
     [Fact]
-    public void Build_MergesDuplicateHasLinks_ToSameTarget_FromSameSource_GitHub26()
+    public void Build_AllowsDuplicateHasLinks_ToSameTarget_FromSameSource_GitHub26()
     {
         var graph = BuildSampleGraph();
         var ctx = graph.BoundedContexts.Single();
@@ -255,8 +255,8 @@ public class DDDBuilderTests
             r.SourceType == orderLineFullName &&
             r.TargetType == addressFullName).ToList();
 
-        hasAddressFromOrderLine.Should().ContainSingle();
-        hasAddressFromOrderLine[0].Label.Should().Be("BillTo, ShipTo");
+        hasAddressFromOrderLine.Should().HaveCount(2);
+        hasAddressFromOrderLine.Select(r => r.Label).Should().BeEquivalentTo(["BillTo", "ShipTo"]);
     }
 
     [Fact]

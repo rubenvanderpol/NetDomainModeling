@@ -82,3 +82,75 @@ export const SECTION_META = [
   { key: 'repositories',         label: 'Repositories',         color: 'var(--clr-repository)',         tag: 'REPO', bg: 'var(--clr-repository-bg)' },
   { key: 'domainServices',       label: 'Domain Services',      color: 'var(--clr-service)',            tag: 'SVC',  bg: 'var(--clr-service-bg)' },
 ];
+
+// ── Duplicate relationship display (GitHub #26) ─────
+
+/** Text shown for one relationship edge (label, or kind if unlabeled). */
+export function relLinkDisplayText(r) {
+  const t = (r.label || '').trim();
+  return t || String(r.kind || '');
+}
+
+/** Groups relationships that share the same source, target, and kind (order preserved). */
+export function groupDuplicateRelationships(rels) {
+  const map = new Map();
+  for (const r of rels || []) {
+    const key = `${r.sourceType}\0${r.targetType}\0${r.kind}`;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(r);
+  }
+  return [...map.values()];
+}
+
+/**
+ * Groups relationships for a detail row: same direction (in/out), related type, and kind.
+ */
+export function groupRelationshipsForDetailItem(rels, itemFullName) {
+  const map = new Map();
+  for (const r of rels || []) {
+    const outgoing = r.sourceType === itemFullName;
+    const other = outgoing ? r.targetType : r.sourceType;
+    const key = `${outgoing ? 'o' : 'i'}\0${other}\0${r.kind}`;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(r);
+  }
+  return [...map.values()];
+}
+
+/**
+ * Collapses duplicate edges for diagram/editor force layout (one spring per source/target/kind).
+ * @param nMap If set, only edges whose endpoints exist in nMap are included.
+ */
+export function mergeRelationshipsToDisplayEdges(relationships, nMap) {
+  const map = new Map();
+  for (const r of relationships || []) {
+    if (nMap && (!nMap[r.sourceType] || !nMap[r.targetType])) continue;
+    const key = `${r.sourceType}\0${r.targetType}\0${r.kind}`;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(r);
+  }
+  const out = [];
+  for (const list of map.values()) {
+    const first = list[0];
+    out.push({
+      source: first.sourceType,
+      target: first.targetType,
+      kind: first.kind,
+      label: first.label || '',
+      primaryDisplay: relLinkDisplayText(first),
+      moreDisplay: list.slice(1).map(relLinkDisplayText),
+    });
+  }
+  return out;
+}
+
+/** HTML for relationship label column: first link + (more…) with bullet tooltip. */
+export function formatRelLabelMoreHtml(primaryText, moreTexts) {
+  const primary = primaryText || '';
+  if (!moreTexts || moreTexts.length === 0) {
+    if (!primary) return '<span style="color:var(--text-dim)">—</span>';
+    return esc(primary);
+  }
+  const bullets = moreTexts.map(t => `<li>${esc(t)}</li>`).join('');
+  return `<span class="rel-primary">${esc(primary)}</span><span class="rel-more-wrap" tabindex="0"><span class="rel-more-trigger">(more…)</span><span class="rel-more-tip" role="tooltip"><ul class="rel-more-list">${bullets}</ul></span></span>`;
+}
