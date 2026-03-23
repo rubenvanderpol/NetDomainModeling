@@ -431,6 +431,7 @@ function wireFeatureEditorGlobals() {
     save: featureEditorModule.saveFeature,
     deleteFeature: featureEditorModule.deleteFeature,
     addExistingType: featureEditorModule.addExistingType,
+    addAllFromBoundedContext: featureEditorModule.addAllFromBoundedContext,
     addNewType: featureEditorModule.addNewType,
     removeNode: featureEditorModule.removeNode,
     removeEdge: featureEditorModule.removeEdge,
