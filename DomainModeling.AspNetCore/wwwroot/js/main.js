@@ -115,6 +115,9 @@ async function init() {
       currentCtx = mergeContexts();
     }
 
+    window.__domainGraph = data;
+    window.__selectedContextNames = selectedContextNames;
+
     // Lazy-load testing module when testing mode is enabled
     if (TESTING_MODE) {
       testingModule = await import('./testing.js');
@@ -205,28 +208,6 @@ function renderSidebar() {
   document.getElementById('contextName').textContent = contextLabel;
 
   let html = '';
-
-  // Bounded context selector (only shown if there are multiple contexts)
-  if (allContexts.length > 1) {
-    html += `<div class="nav-section ctx-selector">
-      <div class="nav-section-header" onclick="window.__nav.toggleSection(this)">
-        <span class="dot" style="width:6px;height:6px;border-radius:50%;background:var(--accent)"></span>
-        Bounded Contexts
-        <span class="badge">${selectedContextNames.size}/${allContexts.length}</span>
-        <span class="chevron">▼</span>
-      </div>
-      <div class="nav-items">
-        ${allContexts.map(c => {
-          const checked = selectedContextNames.has(c.name);
-          return `<label class="nav-item ctx-option${checked ? ' active' : ''}" onclick="event.stopPropagation()">
-            <input type="checkbox" ${checked ? 'checked' : ''}
-                   onchange="window.__nav.toggleContext('${escAttr(c.name)}')" />
-            <span class="ctx-name">${esc(c.name)}</span>
-          </label>`;
-        }).join('')}
-      </div>
-    </div>`;
-  }
 
   for (const sec of SECTION_META) {
     const items = currentCtx[sec.key] || [];

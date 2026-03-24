@@ -241,6 +241,20 @@ body {
   font-size: 13px;
 }
 
+/* Bounded context toolbar above diagram / feature editor (#20) */
+.bc-toolbar {
+  margin-bottom: 12px;
+}
+.bc-toolbar-inner.ctx-selector {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface);
+  padding: 4px 0 0;
+}
+
 /* ── Main ───────────────────────────────────────────── */
 .main {
   flex: 1;

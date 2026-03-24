@@ -4,6 +4,7 @@
  */
 import { esc, escAttr, shortName } from './helpers.js';
 import { renderTabBar } from './tabs.js';
+import { renderBoundedContextToolbar } from './context-selector.js';
 
 // Global layout (not scoped by bounded-context selection)
 const STORAGE_KEY = 'domain-model-diagram-positions-global';
@@ -372,6 +373,10 @@ export function getDiagramState() { return dgState; }
 // ── Render the diagram wrapper HTML ──────────────────
 export function renderDiagramView() {
   let html = renderTabBar('diagram');
+  html += renderBoundedContextToolbar(
+    window.__domainGraph?.boundedContexts,
+    window.__selectedContextNames,
+  );
 
   html += '<div class="diagram-wrap" id="diagramWrap">';
 

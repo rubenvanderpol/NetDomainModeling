@@ -11,6 +11,7 @@
  */
 import { esc, escAttr, shortName, ALL_SECTIONS, SECTION_META } from './helpers.js';
 import { renderTabBar } from './tabs.js';
+import { renderBoundedContextToolbar } from './context-selector.js';
 
 // ── Constants ────────────────────────────────────────
 const NODE_W = 200;
@@ -92,6 +93,10 @@ function isReadOnlyFeature() {
 
 export function renderFeatureEditorView() {
   let html = renderTabBar('features');
+  html += renderBoundedContextToolbar(
+    window.__domainGraph?.boundedContexts,
+    window.__selectedContextNames,
+  );
 
   html += '<div class="fe-layout">';
 
