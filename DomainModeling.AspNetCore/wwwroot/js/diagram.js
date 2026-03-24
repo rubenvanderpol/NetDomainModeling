@@ -6,6 +6,7 @@ import {
   mergeBoundedContextNodes,
   renderBoundedContextMultiDropdownInner,
   toggleDropdownMenu,
+  restoreOpenDropdown,
 } from './helpers.js';
 import { renderTabBar } from './tabs.js';
 
@@ -187,10 +188,14 @@ function renderDiagramBoundedContextDropdownInner() {
   });
 }
 
-export function refreshDiagramBoundedContextDropdown() {
+export function refreshDiagramBoundedContextDropdown(preserveOpen = false) {
   const el = document.getElementById('diagramBcFilterWrap');
   if (!el) return;
+  const wasOpen = preserveOpen && document.getElementById('diagramBcFilterMenu')?.classList.contains('visible');
   el.innerHTML = renderDiagramBoundedContextDropdownInner();
+  if (wasOpen) {
+    restoreOpenDropdown('diagramBcFilterMenu', 'diagramBcFilterTrigger');
+  }
 }
 
 export function diagramToggleBcFilter() {
@@ -208,14 +213,30 @@ export function toggleDiagramBoundedContext(event, name) {
     diagramBoundedContextNames.add(name);
   }
   window.__nav?.persistUiBoundedContexts?.();
-  window.__nav?.refreshDiagramView?.();
+  rebindDiagramAfterBoundedContextChange();
 }
 
 export function diagramBoundedContextsShowAll() {
   const all = window.__domainData?.boundedContexts || [];
   for (const c of all) diagramBoundedContextNames.add(c.name);
   window.__nav?.persistUiBoundedContexts?.();
-  window.__nav?.refreshDiagramView?.();
+  rebindDiagramAfterBoundedContextChange();
+}
+
+function rebindDiagramAfterBoundedContextChange() {
+  const prev = dgState;
+  const prevZoom = prev?.zoom ?? 1;
+  const prevPanX = prev?.panX ?? 0;
+  const prevPanY = prev?.panY ?? 0;
+  const bcMenuOpen = document.getElementById('diagramBcFilterMenu')?.classList.contains('visible');
+  const { merged, selectedCtxs } = mergeDiagramBoundedContexts(window.__domainData);
+  initDiagram(merged, selectedCtxs, {
+    preserveViewport: true,
+    prevZoom,
+    prevPanX,
+    prevPanY,
+    preserveBcDropdownOpen: bcMenuOpen,
+  });
 }
 
 // ── Node sizing constants ────────────────────────────
@@ -374,8 +395,22 @@ export function renderDiagramView() {
 }
 
 // ── Build the diagram graph & start interaction ──────
-export function initDiagram(ctx, boundedContexts) {
+/**
+ * @param {object} [options]
+ * @param {boolean} [options.preserveViewport] Keep zoom/pan instead of loading saved viewport / fit
+ * @param {number} [options.prevZoom]
+ * @param {number} [options.prevPanX]
+ * @param {number} [options.prevPanY]
+ * @param {boolean} [options.preserveBcDropdownOpen] Re-open contexts dropdown after refresh
+ */
+export function initDiagram(ctx, boundedContexts, options = {}) {
   if (!ctx) return;
+
+  const preserveViewport = options.preserveViewport === true;
+  const preserveBcDropdownOpen = options.preserveBcDropdownOpen === true;
+  const skipFit = preserveViewport;
+
+  teardownDiagramInteraction();
 
   const nodes = [];
   const edges = [];
@@ -459,21 +494,29 @@ export function initDiagram(ctx, boundedContexts) {
   dgState = { nodes, edges, nMap, allNodes: nodes, allEdges: edges, zoom: 1, panX: 0, panY: 0, contextName: ctx.name, hiddenKinds: loadHiddenKinds(ctx.name), hiddenEdgeKinds: loadHiddenEdgeKinds(ctx.name) };
   applyDiagramVisibility();
 
-  // Restore saved viewport or fit to view on first load
-  const savedViewport = loadViewport(ctx.name);
-  if (hasSaved && savedViewport) {
-    dgState.zoom = savedViewport.zoom;
-    dgState.panX = savedViewport.panX;
-    dgState.panY = savedViewport.panY;
+  if (preserveViewport) {
+    dgState.zoom = typeof options.prevZoom === 'number' ? options.prevZoom : 1;
+    dgState.panX = typeof options.prevPanX === 'number' ? options.prevPanX : 0;
+    dgState.panY = typeof options.prevPanY === 'number' ? options.prevPanY : 0;
+  } else {
+    const savedViewport = loadViewport(ctx.name);
+    if (hasSaved && savedViewport) {
+      dgState.zoom = savedViewport.zoom;
+      dgState.panX = savedViewport.panX;
+      dgState.panY = savedViewport.panY;
+    }
   }
 
   renderSvg();
-  refreshDiagramBoundedContextDropdown();
+  refreshDiagramBoundedContextDropdown(preserveBcDropdownOpen);
   refreshDiagramKindFilters();
 
-  if (!hasSaved || !savedViewport) {
-    fitToView();
-    saveViewport(ctx.name, dgState.zoom, dgState.panX, dgState.panY);
+  if (!skipFit) {
+    const savedViewport = loadViewport(ctx.name);
+    if (!hasSaved || !savedViewport) {
+      fitToView();
+      saveViewport(ctx.name, dgState.zoom, dgState.panX, dgState.panY);
+    }
   }
 
   setupInteraction();
@@ -859,15 +902,30 @@ function fitToView() {
 }
 
 // ── Interaction (drag nodes, drag context groups, pan, zoom) ──
+function teardownDiagramInteraction() {
+  const svg = document.getElementById('diagramSvg');
+  const h = svg?._dgIx;
+  if (!svg || !h) return;
+  svg.removeEventListener('mousedown', h.onMouseDown);
+  svg.removeEventListener('mousemove', h.onMouseMove);
+  svg.removeEventListener('mouseup', h.onEndDrag);
+  svg.removeEventListener('mouseleave', h.onEndDrag);
+  svg.removeEventListener('wheel', h.onWheel);
+  svg.removeEventListener('dblclick', h.onDblClick);
+  svg._dgIx = null;
+}
+
 function setupInteraction() {
   const svg = document.getElementById('diagramSvg');
   if (!svg || !dgState) return;
+
+  teardownDiagramInteraction();
 
   let dragNode = null, dragOffX = 0, dragOffY = 0;
   let dragCtx = null, dragCtxStartX = 0, dragCtxStartY = 0, dragCtxNodeStarts = null;
   let panning = false, panStartX = 0, panStartY = 0, panOrigX = 0, panOrigY = 0;
 
-  svg.addEventListener('mousedown', function(ev) {
+  function onMouseDown(ev) {
     const nodeEl = ev.target.closest('.dg-node');
     const ctxEl = ev.target.closest('.dg-ctx-boundary');
 
@@ -885,7 +943,6 @@ function setupInteraction() {
       dragCtx = ctxName;
       const pt = svgPoint(svg, ev);
       dragCtxStartX = pt.x; dragCtxStartY = pt.y;
-      // Snapshot starting positions of all nodes in this context (visible + hidden)
       dragCtxNodeStarts = new Map();
       for (const n of dgState.allNodes) {
         if (n.contextName === ctxName) {
@@ -899,9 +956,9 @@ function setupInteraction() {
       panOrigX = dgState.panX; panOrigY = dgState.panY;
       svg.classList.add('dragging');
     }
-  });
+  }
 
-  svg.addEventListener('mousemove', function(ev) {
+  function onMouseMove(ev) {
     if (dragNode) {
       const pt = svgPoint(svg, ev);
       dragNode.x = pt.x - dragOffX; dragNode.y = pt.y - dragOffY;
@@ -919,7 +976,7 @@ function setupInteraction() {
       dgState.panY = panOrigY + (ev.clientY - panStartY);
       renderSvg();
     }
-  });
+  }
 
   function endDrag() {
     if (dragNode || dragCtx) {
@@ -934,10 +991,8 @@ function setupInteraction() {
     panning = false;
     svg.classList.remove('dragging', 'dragging-node');
   }
-  svg.addEventListener('mouseup', endDrag);
-  svg.addEventListener('mouseleave', endDrag);
 
-  svg.addEventListener('wheel', function(ev) {
+  function onWheel(ev) {
     ev.preventDefault();
     const factor = ev.deltaY < 0 ? 1.1 : 0.9;
     const rect = svg.getBoundingClientRect();
@@ -947,12 +1002,22 @@ function setupInteraction() {
     dgState.zoom *= factor;
     renderSvg();
     saveViewport(dgState.contextName, dgState.zoom, dgState.panX, dgState.panY);
-  }, { passive: false });
+  }
 
-  svg.addEventListener('dblclick', function(ev) {
+  function onDblClick(ev) {
     const nodeEl = ev.target.closest('.dg-node');
     if (nodeEl) window.__nav.navigateTo(nodeEl.dataset.id);
-  });
+  }
+
+  svg.addEventListener('mousedown', onMouseDown);
+  svg.addEventListener('mousemove', onMouseMove);
+  svg.addEventListener('mouseup', endDrag);
+  svg.addEventListener('mouseleave', endDrag);
+  svg.addEventListener('wheel', onWheel, { passive: false });
+  svg.addEventListener('dblclick', onDblClick);
+  svg._dgIx = {
+    onMouseDown, onMouseMove, onEndDrag: endDrag, onWheel, onDblClick,
+  };
 }
 
 function svgPoint(svg, ev) {

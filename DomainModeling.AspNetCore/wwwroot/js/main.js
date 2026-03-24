@@ -4,6 +4,7 @@
 import {
   esc, escAttr, shortName, ALL_SECTIONS, SECTION_META,
   mergeBoundedContextNodes, renderBoundedContextMultiDropdownInner, toggleDropdownMenu,
+  restoreOpenDropdown,
 } from './helpers.js';
 import { renderDetailView } from './views.js';
 import {
@@ -249,7 +250,10 @@ function toggleExplorerBoundedContext(event, name) {
   persistUiBoundedContexts();
   currentCtx = mergeContexts();
   currentDetail = null;
-  render();
+  renderSidebar();
+  // Diagram / Features / Testing main panes do not depend on explorer merge; skip renderMain to avoid resetting them.
+  if (currentView === 'diagram' || currentView === 'features' || currentView === 'testing') return;
+  renderMain();
 }
 
 function explorerBoundedContextsShowAll() {
@@ -257,7 +261,9 @@ function explorerBoundedContextsShowAll() {
   persistUiBoundedContexts();
   currentCtx = mergeContexts();
   currentDetail = null;
-  render();
+  renderSidebar();
+  if (currentView === 'diagram' || currentView === 'features' || currentView === 'testing') return;
+  renderMain();
 }
 
 function toggleExplorerBcFilter() {
@@ -280,7 +286,11 @@ function renderExplorerBcDropdownInner() {
 function refreshExplorerBcDropdown() {
   const el = document.getElementById('explorerBcWrap');
   if (!el) return;
+  const wasOpen = document.getElementById('explorerBcFilterMenu')?.classList.contains('visible');
   el.innerHTML = renderExplorerBcDropdownInner();
+  if (wasOpen) {
+    restoreOpenDropdown('explorerBcFilterMenu', 'explorerBcFilterTrigger');
+  }
 }
 
 function refreshDiagramView() {

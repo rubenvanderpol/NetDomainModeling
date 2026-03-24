@@ -127,25 +127,47 @@ export function renderMultiSelectDropdownInnerHtml(opts) {
   return h;
 }
 
-/** Open/close dropdown; closes on outside click (shared with diagram + feature editor). */
-export function toggleDropdownMenu(menuId, triggerId) {
-  const menu = document.getElementById(menuId);
-  const trigger = document.getElementById(triggerId);
-  if (!menu) return;
-  const open = menu.classList.toggle('visible');
-  if (trigger) trigger.classList.toggle('open', open);
-  if (!open) return;
+function detachDropdownOutsideClose(menu) {
+  if (menu?._dropdownOutsideClose) {
+    document.removeEventListener('click', menu._dropdownOutsideClose);
+    menu._dropdownOutsideClose = null;
+  }
+}
 
+function attachDropdownOutsideClose(menu, trigger) {
+  detachDropdownOutsideClose(menu);
   const close = (ev) => {
     const clickedTrigger = trigger && (ev.target === trigger || trigger.contains(ev.target));
     const containsTarget = menu.contains(ev.target);
     if (!containsTarget && !clickedTrigger) {
       menu.classList.remove('visible');
       if (trigger) trigger.classList.remove('open');
-      document.removeEventListener('click', close);
+      detachDropdownOutsideClose(menu);
     }
   };
+  menu._dropdownOutsideClose = close;
   setTimeout(() => document.addEventListener('click', close), 0);
+}
+
+/** Open/close dropdown; closes on outside click (shared with diagram + feature editor). */
+export function toggleDropdownMenu(menuId, triggerId) {
+  const menu = document.getElementById(menuId);
+  const trigger = document.getElementById(triggerId);
+  if (!menu) return;
+  detachDropdownOutsideClose(menu);
+  const open = menu.classList.toggle('visible');
+  if (trigger) trigger.classList.toggle('open', open);
+  if (open) attachDropdownOutsideClose(menu, trigger);
+}
+
+/** After replacing dropdown HTML while it should stay open, re-attach outside-close and restore classes. */
+export function restoreOpenDropdown(menuId, triggerId) {
+  const menu = document.getElementById(menuId);
+  const trigger = document.getElementById(triggerId);
+  if (!menu || !trigger) return;
+  menu.classList.add('visible');
+  trigger.classList.add('open');
+  attachDropdownOutsideClose(menu, trigger);
 }
 
 /**
