@@ -3,7 +3,7 @@
  */
 import { esc, escAttr, shortName, ALL_SECTIONS, SECTION_META } from './helpers.js';
 import { renderDetailView } from './views.js';
-import { renderDiagramView, initDiagram, diagramZoom, diagramFit, diagramResetLayout, diagramToggleKind, diagramShowAll, diagramDownloadSvg, diagramToggleAliases, diagramToggleLayers, diagramToggleEdgeKind, diagramToggleEdgeFilter, diagramToggleKindFilter, diagramShowAllKinds, diagramHideAllKinds } from './diagram.js';
+import { renderDiagramView, initDiagram, diagramZoom, diagramFit, diagramResetLayout, diagramToggleKind, diagramShowAll, diagramDownloadSvg, diagramToggleAliases, diagramToggleLayers, diagramToggleEdgeKind, diagramToggleEdgeFilter, diagramToggleKindFilter, diagramShowAllKinds, diagramHideAllKinds, setDiagramLayoutBaseUrl, setServerDiagramLayoutCache } from './diagram.js';
 
 const API_URL = window.__config?.apiUrl || '/domain-model/json';
 const BASE_URL = API_URL.replace(/\/json$/, '');
@@ -83,6 +83,14 @@ async function init() {
       metadata = legacyMetadata;
     }
     window.__metadata = metadata;
+
+    setDiagramLayoutBaseUrl(BASE_URL);
+    try {
+      const layoutRes = await fetch(`${BASE_URL}/diagram-layout`);
+      if (layoutRes.ok) {
+        setServerDiagramLayoutCache(await layoutRes.json());
+      }
+    } catch { /* diagram-layout endpoint optional */ }
 
     // Load available exports
     try {

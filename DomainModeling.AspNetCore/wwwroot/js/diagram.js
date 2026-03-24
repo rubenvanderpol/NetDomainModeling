@@ -1,5 +1,6 @@
 /**
- * Interactive SVG diagram with force layout and localStorage persistence.
+ * Interactive SVG diagram with force layout.
+ * Layout (positions, viewport, filters) syncs to server disk when available, with localStorage fallback.
  */
 import { esc, escAttr, shortName } from './helpers.js';
 import { renderTabBar } from './tabs.js';
@@ -10,6 +11,14 @@ const HIDDEN_EDGE_KINDS_KEY = 'domain-model-diagram-hidden-edge-kinds';
 const VIEWPORT_KEY = 'domain-model-diagram-viewport';
 const SHOW_ALIASES_KEY = 'domain-model-diagram-show-aliases';
 const SHOW_LAYERS_KEY = 'domain-model-diagram-show-layers';
+
+const FLUSH_MS = 450;
+let diagramLayoutBaseUrl = null;
+/** @type {Record<string, object>} */
+let serverLayoutCache = {};
+let diagramLayoutFlushTimer = null;
+let diagramLayoutFlushContextKey = null;
+let suppressDiagramLayoutFlush = false;
 
 const EDGE_CFG = {
   Contains:      { label: 'Contains',          color: '#60a5fa', dashed: false },
@@ -38,7 +47,71 @@ const KIND_CFG = {
   service:          { label: 'Services',             color: '#bda0ff', bg: '#1e1828', border: '#7860b0', stereotype: '\xABService\xBB' },
 };
 
-// ── Persistence ──────────────────────────────────────
+// ── Persistence (localStorage + optional server file storage) ──
+
+export function setDiagramLayoutBaseUrl(baseUrl) {
+  diagramLayoutBaseUrl = baseUrl && baseUrl.length ? baseUrl.replace(/\/$/, '') : null;
+}
+
+export function setServerDiagramLayoutCache(layouts) {
+  serverLayoutCache = layouts && typeof layouts === 'object' ? layouts : {};
+}
+
+function buildLayoutPayloadFromState() {
+  if (!dgState) return null;
+  const positions = {};
+  for (const n of dgState.allNodes) {
+    positions[n.id] = { x: Math.round(n.x * 10) / 10, y: Math.round(n.y * 10) / 10 };
+  }
+  return {
+    positions,
+    viewport: {
+      zoom: Math.round(dgState.zoom * 1000) / 1000,
+      panX: Math.round(dgState.panX * 10) / 10,
+      panY: Math.round(dgState.panY * 10) / 10,
+    },
+    hiddenKinds: [...dgState.hiddenKinds],
+    hiddenEdgeKinds: [...dgState.hiddenEdgeKinds],
+    showAliases,
+    showLayers,
+  };
+}
+
+function scheduleFlushDiagramLayout(contextName) {
+  if (suppressDiagramLayoutFlush) return;
+  if (!diagramLayoutBaseUrl || !contextName) return;
+  diagramLayoutFlushContextKey = contextName;
+  if (diagramLayoutFlushTimer) clearTimeout(diagramLayoutFlushTimer);
+  diagramLayoutFlushTimer = setTimeout(() => {
+    diagramLayoutFlushTimer = null;
+    void flushDiagramLayoutToServer();
+  }, FLUSH_MS);
+}
+
+async function flushDiagramLayoutToServer() {
+  const key = diagramLayoutFlushContextKey;
+  if (!diagramLayoutBaseUrl || !key || !dgState || dgState.contextName !== key) return;
+  const payload = buildLayoutPayloadFromState();
+  if (!payload) return;
+  try {
+    const res = await fetch(
+      `${diagramLayoutBaseUrl}/diagram-layout/${encodeURIComponent(key)}`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      },
+    );
+    if (res.ok) serverLayoutCache[key] = payload;
+  } catch { /* ignore network errors */ }
+}
+
+function syncDiagramToolbarToggles() {
+  const aliasBtn = document.getElementById('diagramAliasToggle');
+  if (aliasBtn) aliasBtn.style.background = showAliases ? 'var(--bg-hover)' : '';
+  const layerBtn = document.getElementById('diagramLayerToggle');
+  if (layerBtn) layerBtn.style.background = showLayers ? 'var(--bg-hover)' : '';
+}
 
 function loadPositions(contextName) {
   try {
@@ -60,6 +133,7 @@ function savePositions(contextName, nodes) {
     all[contextName] = positions;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
   } catch { /* quota exceeded or private mode */ }
+  scheduleFlushDiagramLayout(contextName);
 }
 
 function clearPositions(contextName) {
@@ -70,6 +144,7 @@ function clearPositions(contextName) {
     delete all[contextName];
     localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
   } catch { /* ignore */ }
+  scheduleFlushDiagramLayout(contextName);
 }
 
 function loadHiddenKinds(contextName) {
@@ -88,6 +163,7 @@ function saveHiddenKinds(contextName, hiddenKinds) {
     all[contextName] = [...hiddenKinds];
     localStorage.setItem(HIDDEN_KINDS_KEY, JSON.stringify(all));
   } catch { /* quota exceeded or private mode */ }
+  scheduleFlushDiagramLayout(contextName);
 }
 
 function loadHiddenEdgeKinds(contextName) {
@@ -106,6 +182,7 @@ function saveHiddenEdgeKinds(contextName, hiddenEdgeKinds) {
     all[contextName] = [...hiddenEdgeKinds];
     localStorage.setItem(HIDDEN_EDGE_KINDS_KEY, JSON.stringify(all));
   } catch { /* quota exceeded or private mode */ }
+  scheduleFlushDiagramLayout(contextName);
 }
 
 function loadViewport(contextName) {
@@ -124,6 +201,7 @@ function saveViewport(contextName, zoom, panX, panY) {
     all[contextName] = { zoom: Math.round(zoom * 1000) / 1000, panX: Math.round(panX * 10) / 10, panY: Math.round(panY * 10) / 10 };
     localStorage.setItem(VIEWPORT_KEY, JSON.stringify(all));
   } catch { /* quota exceeded or private mode */ }
+  scheduleFlushDiagramLayout(contextName);
 }
 
 function clearViewport(contextName) {
@@ -134,6 +212,7 @@ function clearViewport(contextName) {
     delete all[contextName];
     localStorage.setItem(VIEWPORT_KEY, JSON.stringify(all));
   } catch { /* ignore */ }
+  scheduleFlushDiagramLayout(contextName);
 }
 
 // ── Module state ─────────────────────────────────────
@@ -361,39 +440,147 @@ export function initDiagram(ctx, boundedContexts) {
     }
   }
 
-  // Restore saved positions or run force layout
-  const saved = loadPositions(ctx.name);
-  let hasSaved = false;
-  if (saved) {
-    let allFound = true;
-    for (const n of nodes) {
-      if (saved[n.id]) { n.x = saved[n.id].x; n.y = saved[n.id].y; }
-      else { allFound = false; }
+  const contextName = ctx.name;
+  let posSource = 'none';
+
+  suppressDiagramLayoutFlush = true;
+  try {
+    const serverLayout = diagramLayoutBaseUrl ? serverLayoutCache[contextName] : null;
+
+    const lsPos = loadPositions(contextName);
+    let saved = null;
+    if (serverLayout?.positions && typeof serverLayout.positions === 'object' && Object.keys(serverLayout.positions).length > 0) {
+      saved = serverLayout.positions;
+      posSource = 'server';
+    } else if (lsPos && Object.keys(lsPos).length > 0) {
+      saved = lsPos;
+      posSource = 'local';
     }
-    hasSaved = allFound;
+
+    let hasSaved = false;
+    if (saved) {
+      let allFound = true;
+      for (const n of nodes) {
+        if (saved[n.id]) { n.x = saved[n.id].x; n.y = saved[n.id].y; }
+        else { allFound = false; }
+      }
+      hasSaved = allFound;
+    }
+
+    if (!hasSaved) {
+      applyAutoLayout(nodes, edges, nMap);
+    }
+
+    let hiddenKinds;
+    if (serverLayout && Array.isArray(serverLayout.hiddenKinds)) {
+      hiddenKinds = new Set(serverLayout.hiddenKinds);
+    } else {
+      hiddenKinds = loadHiddenKinds(contextName);
+    }
+
+    let hiddenEdgeKinds;
+    if (serverLayout && Array.isArray(serverLayout.hiddenEdgeKinds)) {
+      hiddenEdgeKinds = new Set(serverLayout.hiddenEdgeKinds);
+    } else {
+      hiddenEdgeKinds = loadHiddenEdgeKinds(contextName);
+    }
+
+    if (serverLayout && typeof serverLayout.showAliases === 'boolean') {
+      showAliases = serverLayout.showAliases;
+      try { localStorage.setItem(SHOW_ALIASES_KEY, showAliases ? 'true' : 'false'); } catch { /* ignore */ }
+    }
+    if (serverLayout && typeof serverLayout.showLayers === 'boolean') {
+      showLayers = serverLayout.showLayers;
+      try { localStorage.setItem(SHOW_LAYERS_KEY, showLayers); } catch { /* ignore */ }
+    }
+
+    dgState = {
+      nodes, edges, nMap, allNodes: nodes, allEdges: edges,
+      zoom: 1, panX: 0, panY: 0, contextName,
+      hiddenKinds, hiddenEdgeKinds,
+    };
+    applyDiagramVisibility();
+
+    const lsViewport = loadViewport(contextName);
+    let savedViewport = null;
+    if (hasSaved) {
+      if (serverLayout?.viewport && typeof serverLayout.viewport.zoom === 'number') {
+        savedViewport = serverLayout.viewport;
+      } else {
+        savedViewport = lsViewport;
+      }
+    }
+    if (hasSaved && savedViewport) {
+      dgState.zoom = savedViewport.zoom;
+      dgState.panX = savedViewport.panX;
+      dgState.panY = savedViewport.panY;
+    }
+
+    renderSvg();
+    refreshDiagramKindFilters();
+    syncDiagramToolbarToggles();
+
+    if (!hasSaved || !savedViewport) {
+      fitToView();
+      saveViewport(contextName, dgState.zoom, dgState.panX, dgState.panY);
+    }
+
+    if (posSource === 'server') {
+      const positions = {};
+      for (const n of nodes) {
+        positions[n.id] = { x: Math.round(n.x * 10) / 10, y: Math.round(n.y * 10) / 10 };
+      }
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        const all = raw ? JSON.parse(raw) : {};
+        all[contextName] = positions;
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
+      } catch { /* ignore */ }
+      try {
+        const raw = localStorage.getItem(HIDDEN_KINDS_KEY);
+        const all = raw ? JSON.parse(raw) : {};
+        all[contextName] = [...hiddenKinds];
+        localStorage.setItem(HIDDEN_KINDS_KEY, JSON.stringify(all));
+      } catch { /* ignore */ }
+      try {
+        const raw = localStorage.getItem(HIDDEN_EDGE_KINDS_KEY);
+        const all = raw ? JSON.parse(raw) : {};
+        all[contextName] = [...hiddenEdgeKinds];
+        localStorage.setItem(HIDDEN_EDGE_KINDS_KEY, JSON.stringify(all));
+      } catch { /* ignore */ }
+      if (savedViewport) {
+        try {
+          const raw = localStorage.getItem(VIEWPORT_KEY);
+          const all = raw ? JSON.parse(raw) : {};
+          all[contextName] = {
+            zoom: Math.round(savedViewport.zoom * 1000) / 1000,
+            panX: Math.round(savedViewport.panX * 10) / 10,
+            panY: Math.round(savedViewport.panY * 10) / 10,
+          };
+          localStorage.setItem(VIEWPORT_KEY, JSON.stringify(all));
+        } catch { /* ignore */ }
+      }
+    }
+  } finally {
+    suppressDiagramLayoutFlush = false;
   }
 
-  if (!hasSaved) {
-    applyAutoLayout(nodes, edges, nMap);
-  }
-
-  dgState = { nodes, edges, nMap, allNodes: nodes, allEdges: edges, zoom: 1, panX: 0, panY: 0, contextName: ctx.name, hiddenKinds: loadHiddenKinds(ctx.name), hiddenEdgeKinds: loadHiddenEdgeKinds(ctx.name) };
-  applyDiagramVisibility();
-
-  // Restore saved viewport or fit to view on first load
-  const savedViewport = loadViewport(ctx.name);
-  if (hasSaved && savedViewport) {
-    dgState.zoom = savedViewport.zoom;
-    dgState.panX = savedViewport.panX;
-    dgState.panY = savedViewport.panY;
-  }
-
-  renderSvg();
-  refreshDiagramKindFilters();
-
-  if (!hasSaved || !savedViewport) {
-    fitToView();
-    saveViewport(ctx.name, dgState.zoom, dgState.panX, dgState.panY);
+  if (posSource === 'local' && diagramLayoutBaseUrl && dgState) {
+    void (async () => {
+      const payload = buildLayoutPayloadFromState();
+      if (!payload) return;
+      try {
+        const res = await fetch(
+          `${diagramLayoutBaseUrl}/diagram-layout/${encodeURIComponent(contextName)}`,
+          {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          },
+        );
+        if (res.ok) serverLayoutCache[contextName] = payload;
+      } catch { /* ignore */ }
+    })();
   }
 
   setupInteraction();
@@ -1036,9 +1223,9 @@ export function diagramDownloadSvg() {
 export function diagramToggleAliases() {
   showAliases = !showAliases;
   try { localStorage.setItem(SHOW_ALIASES_KEY, showAliases ? 'true' : 'false'); } catch { /* ignore */ }
-  const btn = document.getElementById('diagramAliasToggle');
-  if (btn) btn.style.background = showAliases ? 'var(--bg-hover)' : '';
+  syncDiagramToolbarToggles();
   if (dgState) {
+    scheduleFlushDiagramLayout(dgState.contextName);
     for (const n of dgState.allNodes) n.h = nodeHeight(n);
     renderSvg();
   }
@@ -1047,9 +1234,11 @@ export function diagramToggleAliases() {
 export function diagramToggleLayers() {
   showLayers = !showLayers;
   try { localStorage.setItem(SHOW_LAYERS_KEY, showLayers); } catch { /* ignore */ }
-  const btn = document.getElementById('diagramLayerToggle');
-  if (btn) btn.style.background = showLayers ? 'var(--bg-hover)' : '';
-  if (dgState) renderSvg();
+  syncDiagramToolbarToggles();
+  if (dgState) {
+    scheduleFlushDiagramLayout(dgState.contextName);
+    renderSvg();
+  }
 }
 
 function diagramDisplayName(n) {

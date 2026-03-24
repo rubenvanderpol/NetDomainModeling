@@ -49,6 +49,12 @@ public sealed class DomainModelOptions
     public string MetadataStoragePath { get; set; } = "./metadata";
 
     /// <summary>
+    /// Directory path where main diagram layout (node positions, viewport, filters) is stored as JSON files.
+    /// Defaults to <c>./diagram-layout</c> relative to the application root.
+    /// </summary>
+    public string DiagramLayoutStoragePath { get; set; } = "./diagram-layout";
+
+    /// <summary>
     /// Configuration for the aggregate testing feature.
     /// </summary>
     public DomainModelTestingOptions Testing { get; } = new();
@@ -158,6 +164,9 @@ public static class DomainModelEndpointExtensions
         // Cache the JSON — mutable so it can be updated when developer view saves
         var json = graph.ToJson();
 
+        // Diagram layout (positions, viewport, filters) per context key — JSON files on disk
+        var diagramLayoutDir = Path.GetFullPath(options.DiagramLayoutStoragePath);
+
         // Custom metadata store (alias / description per type) persisted as JSON files on disk
         var metadataDir = Path.GetFullPath(options.MetadataStoragePath);
         var metadata = new System.Collections.Concurrent.ConcurrentDictionary<string, TypeMetadata>();
@@ -266,6 +275,77 @@ public static class DomainModelEndpointExtensions
         })
         .ExcludeFromDescription()
         .WithName("DomainModelMetadataUpdate");
+
+        static JsonSerializerOptions DiagramLayoutJsonOptions() => new()
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            WriteIndented = true,
+            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+        };
+
+        // GET /domain-model/diagram-layout — all saved diagram layouts (key → layout)
+        endpoints.MapGet($"{routePrefix}/diagram-layout", () =>
+        {
+            var result = new Dictionary<string, DiagramContextLayout>(StringComparer.Ordinal);
+            if (!Directory.Exists(diagramLayoutDir))
+                return Results.Json(result, DiagramLayoutJsonOptions());
+
+            foreach (var file in Directory.GetFiles(diagramLayoutDir, "*.json"))
+            {
+                var fileName = Path.GetFileNameWithoutExtension(file);
+                if (!TryDecodeDiagramLayoutFileName(fileName, out var contextKey))
+                    continue;
+
+                try
+                {
+                    var jsonText = File.ReadAllText(file);
+                    var layout = JsonSerializer.Deserialize<DiagramContextLayout>(jsonText, DiagramLayoutJsonOptions());
+                    if (layout is not null)
+                        result[contextKey] = layout;
+                }
+                catch (JsonException)
+                {
+                    // Skip corrupt files
+                }
+            }
+
+            return Results.Json(result, DiagramLayoutJsonOptions());
+        })
+        .ExcludeFromDescription()
+        .WithName("DomainModelDiagramLayoutGetAll");
+
+        // PUT /domain-model/diagram-layout/{**contextKey} — save layout for one context key
+        endpoints.MapPut($"{routePrefix}/diagram-layout/{{**contextKey}}", async (string contextKey, HttpContext ctx) =>
+        {
+            if (string.IsNullOrWhiteSpace(contextKey))
+                return Results.BadRequest("Invalid context key");
+
+            using var reader = new StreamReader(ctx.Request.Body);
+            var body = await reader.ReadToEndAsync();
+            DiagramContextLayout? layout;
+            try
+            {
+                layout = JsonSerializer.Deserialize<DiagramContextLayout>(body, DiagramLayoutJsonOptions());
+            }
+            catch (JsonException)
+            {
+                return Results.BadRequest("Invalid JSON");
+            }
+
+            if (layout is null)
+                return Results.BadRequest("Invalid layout");
+
+            var safeFileName = EncodeDiagramLayoutFileName(contextKey);
+            var path = Path.Combine(diagramLayoutDir, safeFileName + ".json");
+            Directory.CreateDirectory(diagramLayoutDir);
+
+            var toWrite = JsonSerializer.Serialize(layout, DiagramLayoutJsonOptions());
+            await File.WriteAllTextAsync(path, toWrite);
+
+            return Results.Ok(new { saved = true });
+        })
+        .ExcludeFromDescription()
+        .WithName("DomainModelDiagramLayoutPut");
 
         // GET /domain-model — interactive HTML UI
         endpoints.MapGet(routePrefix, (HttpContext ctx) =>
@@ -675,6 +755,12 @@ public static class DomainModelEndpointExtensions
             return false;
         }
     }
+
+    private static string EncodeDiagramLayoutFileName(string contextKey) =>
+        Uri.EscapeDataString(contextKey);
+
+    private static bool TryDecodeDiagramLayoutFileName(string fileName, out string contextKey) =>
+        TryDecodeMetadataFileName(fileName, out contextKey);
 
     private static bool IsFeatureReadOnly(string featureJson)
     {
