@@ -4,6 +4,7 @@
  * Reuses the diagram node/edge rendering style. Users can:
  *  - Create multiple named features (saved/loaded via API)
  *  - Add types from the existing domain model or create new ones
+ *  - Add every type from a bounded context in one action (#21)
  *  - Draw relationships by dragging a line from one node to another
  *  - Drag/pan/zoom the canvas
  *  - Optionally run in read-only mode (existing graph items only)
@@ -266,6 +267,19 @@ function renderFeatureListPanel() {
 function renderPalettePanel() {
   let html = '<div class="fe-section">';
   html += `<div class="fe-section-header">${isReadOnlyFeature() ? 'Add Existing Types' : 'Add Types'}</div>`;
+  if (currentFeatureName) {
+    html += '<div class="fe-bulk-bc">';
+    html += '<label class="fe-bulk-bc-label" for="feBulkBcSelect">Add entire context</label>';
+    html += '<div class="fe-bulk-bc-row">';
+    html += '<select class="fe-input fe-bulk-bc-select" id="feBulkBcSelect" title="Add every discovered type from this bounded context to the diagram">';
+    html += '<option value="">Select context…</option>';
+    for (const name of getBoundedContextNames()) {
+      html += `<option value="${escAttr(name)}">${esc(name)}</option>`;
+    }
+    html += '</select>';
+    html += '<button type="button" class="fe-btn primary fe-bulk-bc-btn" onclick="window.__featureEditor.addAllFromBoundedContext()" title="Place all types from the selected bounded context on the canvas">Add all</button>';
+    html += '</div></div>';
+  }
   html += '<input type="text" class="fe-input fe-search" id="fePaletteSearch" placeholder="Search types…" oninput="window.__featureEditor.filterPalette()" />';
   html += '<div class="fe-palette" id="fePalette">';
   html += renderPaletteItems('');
@@ -712,22 +726,23 @@ function getGlobalTypeMetadata(fullName) {
   return { alias, description };
 }
 
-export function addExistingType(fullName, kind) {
-  if (!st) return;
-  if (st.nMap[fullName]) return; // already added
+/**
+ * Builds a feature-editor node from domain graph data. Returns null if the type is already on the canvas or unknown.
+ */
+function buildFeatureNodeFromDomain(fullName, kind) {
+  if (!st || st.nMap[fullName]) return null;
+  const cfg = KIND_CFG[kind];
+  if (!cfg) return null;
 
-  // Find the item in domain data to get properties etc.
   const item = findDomainItem(fullName, kind);
   const globalMeta = getGlobalTypeMetadata(fullName);
 
-    const cfg = KIND_CFG[kind];
   const n = {
     id: fullName,
     name: item ? item.name : shortName(fullName),
     kind,
     isCustom: false,
     alias: globalMeta.alias,
-    // Explorer metadata overrides description from the domain graph when present
     description: globalMeta.description || (item && item.description) || null,
     boundedContext: findDomainContext(fullName) || '',
     layer: (item && item.layer) || '',
@@ -735,24 +750,84 @@ export function addExistingType(fullName, kind) {
     structuredProps: item ? (item.properties || []).map(p => ({ name: p.name, type: p.typeName })) : [],
     props: item ? (item.properties || []).map(p => p.name + ': ' + p.typeName) : [],
     methods: item ? (item.methods || []).map(m => m.name + '(' + (m.parameters || []).map(p => p.typeName).join(', ') + ')') : [],
-    events: [], // emitted events are derived dynamically from Emits edges
+    events: [],
     x: 0, y: 0, vx: 0, vy: 0, w: NODE_W, h: 0,
   };
   n.h = nodeHeight(n);
+  return n;
+}
 
-  // Place near center of viewport
+export function addExistingType(fullName, kind) {
+  if (!st) return;
+  const n = buildFeatureNodeFromDomain(fullName, kind);
+  if (!n) return;
+
   placeNewNode(n);
-
   st.nodes.push(n);
   st.nMap[n.id] = n;
 
-  // Also import relevant relationships from domain data
-  importRelationshipsFor(fullName);
+  importAllRelationshipsFromDomain();
 
   markDirty();
   renderSvg();
   refreshPalette();
   refreshPanel();
+}
+
+/** Places nodes in a grid when adding many types at once (issue #21 — bounded context bulk add). */
+function placeNewNodeAtBulkIndex(n, index) {
+  if (!st) return;
+  const canvas = document.getElementById('feCanvas');
+  const cols = 4;
+  const row = Math.floor(index / cols);
+  const col = index % cols;
+  if (canvas) {
+    const cx = (canvas.clientWidth / 2 - st.panX) / st.zoom;
+    const cy = (canvas.clientHeight / 2 - st.panY) / st.zoom;
+    const sx = 270;
+    const sy = 220;
+    n.x = cx - n.w / 2 + (col - (cols - 1) / 2) * sx;
+    n.y = cy - n.h / 2 + row * sy;
+  }
+}
+
+/**
+ * Adds every discovered DDD type from the selected bounded context to the current feature diagram.
+ * Relationships are synced once from the domain graph for any pair of types now on the canvas.
+ */
+export function addAllFromBoundedContext() {
+  if (!st || !domainData) return;
+  const sel = document.getElementById('feBulkBcSelect');
+  const ctxName = (sel && sel.value) ? String(sel.value).trim() : '';
+  if (!ctxName) return;
+
+  const ctx = (domainData.boundedContexts || []).find(c => c.name === ctxName);
+  if (!ctx) return;
+
+  let bulkIndex = 0;
+  let added = 0;
+  for (const sec of ALL_SECTIONS) {
+    const kind = SECTION_TO_KIND[sec];
+    if (!kind) continue;
+    for (const item of (ctx[sec] || [])) {
+      const n = buildFeatureNodeFromDomain(item.fullName, kind);
+      if (!n) continue;
+      placeNewNodeAtBulkIndex(n, bulkIndex++);
+      st.nodes.push(n);
+      st.nMap[n.id] = n;
+      added++;
+    }
+  }
+
+  if (added === 0) return;
+
+  importAllRelationshipsFromDomain();
+  recalcNodeHeights();
+  markDirty();
+  renderSvg();
+  refreshPalette();
+  refreshPanel();
+  fitToView();
 }
 
 export function addNewType() {
@@ -1084,14 +1159,14 @@ function recalcNodeHeights() {
 
 // ── Import relationships from domain data ────────────
 
-function importRelationshipsFor(fullName) {
-  if (!domainData) return;
-  for (const ctx of (domainData.boundedContexts || [])) {
-    for (const rel of (ctx.relationships || [])) {
+/** Add edges for every domain relationship whose endpoints are both on the feature canvas. */
+function importAllRelationshipsFromDomain() {
+  if (!st || !domainData) return;
+  for (const c of (domainData.boundedContexts || [])) {
+    for (const rel of (c.relationships || [])) {
       const hasSource = st.nMap[rel.sourceType];
       const hasTarget = st.nMap[rel.targetType];
       if (!hasSource || !hasTarget) continue;
-      // Check if already exists
       if (st.edges.some(e => e.source === rel.sourceType && e.target === rel.targetType && e.kind === rel.kind)) continue;
       st.edges.push({ source: rel.sourceType, target: rel.targetType, kind: rel.kind, label: rel.label || '' });
     }
