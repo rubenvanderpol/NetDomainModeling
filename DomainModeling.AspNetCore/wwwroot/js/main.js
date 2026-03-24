@@ -152,7 +152,7 @@ function toggleContext(name) {
   saveSelection();
   currentCtx = mergeContexts();
   currentDetail = null;
-  render();
+  render({ preserveFeatureMain: true });
 }
 
 // ── Sidebar collapse ─────────────────────────────────
@@ -181,8 +181,16 @@ function initSidebarToggle() {
 
 // ── Render ───────────────────────────────────────────
 
-function render() {
+/**
+ * @param {{ preserveFeatureMain?: boolean }} [options] When true and the Features tab is
+ *   active, only the sidebar is refreshed so bounded-context checkbox toggles do not
+ *   remount the feature editor (which would reset the bulk-context dropdown and palette).
+ */
+function render(options = {}) {
   renderSidebar();
+  if (options.preserveFeatureMain && currentView === 'features' && FEATURE_EDITOR_MODE) {
+    return;
+  }
   renderMain();
 }
 
