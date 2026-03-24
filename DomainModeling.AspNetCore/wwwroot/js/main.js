@@ -3,8 +3,7 @@
  */
 import {
   esc, escAttr, shortName, ALL_SECTIONS, SECTION_META,
-  mergeBoundedContextNodes, renderBoundedContextMultiDropdownInner, toggleDropdownMenu,
-  restoreOpenDropdown,
+  mergeBoundedContextNodes,
 } from './helpers.js';
 import { renderDetailView } from './views.js';
 import {
@@ -237,62 +236,6 @@ function mergeContexts() {
   return mergeBoundedContextNodes(selected);
 }
 
-function toggleExplorerBoundedContext(event, name) {
-  if (event) {
-    event.stopPropagation();
-    event.preventDefault();
-  }
-  if (explorerContextNames.has(name)) {
-    if (explorerContextNames.size > 1) explorerContextNames.delete(name);
-  } else {
-    explorerContextNames.add(name);
-  }
-  persistUiBoundedContexts();
-  currentCtx = mergeContexts();
-  currentDetail = null;
-  renderSidebar();
-  // Diagram / Features / Testing main panes do not depend on explorer merge; skip renderMain to avoid resetting them.
-  if (currentView === 'diagram' || currentView === 'features' || currentView === 'testing') return;
-  renderMain();
-}
-
-function explorerBoundedContextsShowAll() {
-  for (const c of (data?.boundedContexts || [])) explorerContextNames.add(c.name);
-  persistUiBoundedContexts();
-  currentCtx = mergeContexts();
-  currentDetail = null;
-  renderSidebar();
-  if (currentView === 'diagram' || currentView === 'features' || currentView === 'testing') return;
-  renderMain();
-}
-
-function toggleExplorerBcFilter() {
-  toggleDropdownMenu('explorerBcFilterMenu', 'explorerBcFilterTrigger');
-}
-
-function renderExplorerBcDropdownInner() {
-  return renderBoundedContextMultiDropdownInner({
-    allContexts: data?.boundedContexts || [],
-    selectedSet: explorerContextNames,
-    triggerId: 'explorerBcFilterTrigger',
-    menuId: 'explorerBcFilterMenu',
-    toggleMenuCall: 'window.__nav.toggleExplorerBcFilter()',
-    toggleContextCall: 'window.__nav.toggleExplorerBoundedContext',
-    showAllCall: 'window.__nav.explorerBoundedContextsShowAll()',
-    triggerTitle: 'Bounded contexts in the explorer list',
-  });
-}
-
-function refreshExplorerBcDropdown() {
-  const el = document.getElementById('explorerBcWrap');
-  if (!el) return;
-  const wasOpen = document.getElementById('explorerBcFilterMenu')?.classList.contains('visible');
-  el.innerHTML = renderExplorerBcDropdownInner();
-  if (wasOpen) {
-    restoreOpenDropdown('explorerBcFilterMenu', 'explorerBcFilterTrigger');
-  }
-}
-
 function refreshDiagramView() {
   if (currentView !== 'diagram') return;
   renderMain();
@@ -387,7 +330,6 @@ function renderSidebar() {
   html += `</div>`;
 
   nav.innerHTML = html;
-  refreshExplorerBcDropdown();
 }
 
 function isActive(key, item) {
@@ -491,9 +433,6 @@ window.__nav = {
   showDetail,
   navigateTo,
   toggleSection,
-  toggleExplorerBoundedContext,
-  explorerBoundedContextsShowAll,
-  toggleExplorerBcFilter,
   refreshDiagramView,
   persistUiBoundedContexts,
 };

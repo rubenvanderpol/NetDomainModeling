@@ -173,6 +173,57 @@ export function mergeDiagramBoundedContexts(data) {
   };
 }
 
+/** Stable localStorage key for layout/viewport/filters; does not depend on merged ctx.name order. */
+function diagramStorageKeyFromSelection(boundedContexts) {
+  if (!boundedContexts || boundedContexts.length === 0) return '__empty';
+  const names = boundedContexts.map((c) => c.name).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+  return JSON.stringify(names);
+}
+
+function loadPositionsWithLegacy(key, legacyKey) {
+  let v = loadPositions(key);
+  if (v) return v;
+  if (legacyKey && legacyKey !== key) return loadPositions(legacyKey);
+  return null;
+}
+
+function loadViewportWithLegacy(key, legacyKey) {
+  let v = loadViewport(key);
+  if (v) return v;
+  if (legacyKey && legacyKey !== key) return loadViewport(legacyKey);
+  return null;
+}
+
+function loadHiddenKindsWithLegacy(key, legacyKey) {
+  try {
+    const raw = localStorage.getItem(HIDDEN_KINDS_KEY);
+    if (!raw) return new Set();
+    const all = JSON.parse(raw);
+    if (Object.prototype.hasOwnProperty.call(all, key)) {
+      return new Set(all[key] || []);
+    }
+    if (legacyKey && legacyKey !== key && Object.prototype.hasOwnProperty.call(all, legacyKey)) {
+      return new Set(all[legacyKey] || []);
+    }
+    return new Set();
+  } catch { return new Set(); }
+}
+
+function loadHiddenEdgeKindsWithLegacy(key, legacyKey) {
+  try {
+    const raw = localStorage.getItem(HIDDEN_EDGE_KINDS_KEY);
+    if (!raw) return new Set();
+    const all = JSON.parse(raw);
+    if (Object.prototype.hasOwnProperty.call(all, key)) {
+      return new Set(all[key] || []);
+    }
+    if (legacyKey && legacyKey !== key && Object.prototype.hasOwnProperty.call(all, legacyKey)) {
+      return new Set(all[legacyKey] || []);
+    }
+    return new Set();
+  } catch { return new Set(); }
+}
+
 function renderDiagramBoundedContextDropdownInner() {
   const data = window.__domainData;
   const all = data?.boundedContexts || [];
@@ -412,6 +463,9 @@ export function initDiagram(ctx, boundedContexts, options = {}) {
 
   teardownDiagramInteraction();
 
+  const storageKey = diagramStorageKeyFromSelection(boundedContexts);
+  const legacyStorageKey = ctx.name;
+
   const nodes = [];
   const edges = [];
   const nMap = {};
@@ -475,8 +529,8 @@ export function initDiagram(ctx, boundedContexts, options = {}) {
     }
   }
 
-  // Restore saved positions or run force layout
-  const saved = loadPositions(ctx.name);
+  // Restore saved positions or run force layout (stable key + legacy merged-name key)
+  const saved = loadPositionsWithLegacy(storageKey, legacyStorageKey);
   let hasSaved = false;
   if (saved) {
     let allFound = true;
@@ -491,7 +545,14 @@ export function initDiagram(ctx, boundedContexts, options = {}) {
     applyAutoLayout(nodes, edges, nMap);
   }
 
-  dgState = { nodes, edges, nMap, allNodes: nodes, allEdges: edges, zoom: 1, panX: 0, panY: 0, contextName: ctx.name, hiddenKinds: loadHiddenKinds(ctx.name), hiddenEdgeKinds: loadHiddenEdgeKinds(ctx.name) };
+  dgState = {
+    nodes, edges, nMap, allNodes: nodes, allEdges: edges,
+    zoom: 1, panX: 0, panY: 0,
+    contextName: ctx.name,
+    storageKey,
+    hiddenKinds: loadHiddenKindsWithLegacy(storageKey, legacyStorageKey),
+    hiddenEdgeKinds: loadHiddenEdgeKindsWithLegacy(storageKey, legacyStorageKey),
+  };
   applyDiagramVisibility();
 
   if (preserveViewport) {
@@ -499,7 +560,7 @@ export function initDiagram(ctx, boundedContexts, options = {}) {
     dgState.panX = typeof options.prevPanX === 'number' ? options.prevPanX : 0;
     dgState.panY = typeof options.prevPanY === 'number' ? options.prevPanY : 0;
   } else {
-    const savedViewport = loadViewport(ctx.name);
+    const savedViewport = loadViewportWithLegacy(storageKey, legacyStorageKey);
     if (hasSaved && savedViewport) {
       dgState.zoom = savedViewport.zoom;
       dgState.panX = savedViewport.panX;
@@ -512,10 +573,10 @@ export function initDiagram(ctx, boundedContexts, options = {}) {
   refreshDiagramKindFilters();
 
   if (!skipFit) {
-    const savedViewport = loadViewport(ctx.name);
+    const savedViewport = loadViewportWithLegacy(storageKey, legacyStorageKey);
     if (!hasSaved || !savedViewport) {
       fitToView();
-      saveViewport(ctx.name, dgState.zoom, dgState.panX, dgState.panY);
+      saveViewport(storageKey, dgState.zoom, dgState.panX, dgState.panY);
     }
   }
 
@@ -981,10 +1042,10 @@ function setupInteraction() {
   function endDrag() {
     if (dragNode || dragCtx) {
       // Persist ALL node positions (including hidden) after drop
-      savePositions(dgState.contextName, dgState.allNodes);
+      savePositions(dgState.storageKey, dgState.allNodes);
     }
     if (dragNode || dragCtx || panning) {
-      saveViewport(dgState.contextName, dgState.zoom, dgState.panX, dgState.panY);
+      saveViewport(dgState.storageKey, dgState.zoom, dgState.panX, dgState.panY);
     }
     dragNode = null;
     dragCtx = null; dragCtxNodeStarts = null;
@@ -1001,7 +1062,7 @@ function setupInteraction() {
     dgState.panY = my - (my - dgState.panY) * factor;
     dgState.zoom *= factor;
     renderSvg();
-    saveViewport(dgState.contextName, dgState.zoom, dgState.panX, dgState.panY);
+    saveViewport(dgState.storageKey, dgState.zoom, dgState.panX, dgState.panY);
   }
 
   function onDblClick(ev) {
@@ -1038,24 +1099,25 @@ export function diagramZoom(factor) {
   dgState.panY = cy - (cy - dgState.panY) * factor;
   dgState.zoom *= factor;
   renderSvg();
-  saveViewport(dgState.contextName, dgState.zoom, dgState.panX, dgState.panY);
+  saveViewport(dgState.storageKey, dgState.zoom, dgState.panX, dgState.panY);
 }
 
 export function diagramFit() {
   fitToView();
-  if (dgState) saveViewport(dgState.contextName, dgState.zoom, dgState.panX, dgState.panY);
+  if (dgState) saveViewport(dgState.storageKey, dgState.zoom, dgState.panX, dgState.panY);
 }
 
 export function diagramResetLayout(ctx) {
   if (!dgState || !ctx) return;
-  clearPositions(ctx.name);
-  clearViewport(ctx.name);
+  const sk = dgState.storageKey;
+  clearPositions(sk);
+  clearViewport(sk);
   applyAutoLayout(dgState.allNodes, dgState.allEdges, dgState.nMap);
   applyDiagramVisibility();
   renderSvg();
   fitToView();
-  savePositions(ctx.name, dgState.allNodes);
-  saveViewport(ctx.name, dgState.zoom, dgState.panX, dgState.panY);
+  savePositions(sk, dgState.allNodes);
+  saveViewport(sk, dgState.zoom, dgState.panX, dgState.panY);
 }
 
 export function diagramToggleKind(eventOrKind, maybeKind) {
@@ -1072,7 +1134,7 @@ export function diagramToggleKind(eventOrKind, maybeKind) {
   } else {
     dgState.hiddenKinds.add(kind);
   }
-  saveHiddenKinds(dgState.contextName, dgState.hiddenKinds);
+  saveHiddenKinds(dgState.storageKey, dgState.hiddenKinds);
   applyDiagramVisibility();
   renderSvg();
   syncDiagramKindFilterUi();
@@ -1088,7 +1150,7 @@ function setAllKindVisibility(visible) {
       dgState.hiddenKinds.add(kind);
     }
   }
-  saveHiddenKinds(dgState.contextName, dgState.hiddenKinds);
+  saveHiddenKinds(dgState.storageKey, dgState.hiddenKinds);
   applyDiagramVisibility();
   renderSvg();
   syncDiagramKindFilterUi();
@@ -1106,8 +1168,8 @@ export function diagramShowAll() {
   if (!dgState) return;
   dgState.hiddenKinds.clear();
   dgState.hiddenEdgeKinds.clear();
-  saveHiddenKinds(dgState.contextName, dgState.hiddenKinds);
-  saveHiddenEdgeKinds(dgState.contextName, dgState.hiddenEdgeKinds);
+  saveHiddenKinds(dgState.storageKey, dgState.hiddenKinds);
+  saveHiddenEdgeKinds(dgState.storageKey, dgState.hiddenEdgeKinds);
   applyDiagramVisibility();
   renderSvg();
   refreshDiagramKindFilters();
@@ -1127,7 +1189,7 @@ export function diagramToggleEdgeKind(eventOrKind, maybeKind) {
   } else {
     dgState.hiddenEdgeKinds.add(kind);
   }
-  saveHiddenEdgeKinds(dgState.contextName, dgState.hiddenEdgeKinds);
+  saveHiddenEdgeKinds(dgState.storageKey, dgState.hiddenEdgeKinds);
   applyDiagramVisibility();
   renderSvg();
   refreshDiagramEdgeFilter();

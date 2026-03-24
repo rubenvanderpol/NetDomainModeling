@@ -241,18 +241,6 @@ body {
   font-size: 13px;
 }
 
-.sidebar-bc-wrap {
-  margin-top: 8px;
-}
-.sidebar-bc-wrap .rel-dropdown {
-  width: 100%;
-}
-.sidebar-bc-wrap .rel-dropdown-trigger {
-  width: 100%;
-  box-sizing: border-box;
-  justify-content: space-between;
-}
-
 /* ── Main ───────────────────────────────────────────── */
 .main {
   flex: 1;
