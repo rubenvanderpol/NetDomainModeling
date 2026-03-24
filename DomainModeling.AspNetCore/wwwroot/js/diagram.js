@@ -1,15 +1,30 @@
 /**
- * Interactive SVG diagram with force layout and localStorage persistence.
+ * Interactive SVG diagram with force layout.
+ * Layout (positions, viewport, filters) syncs to server disk when available, with localStorage fallback.
  */
 import { esc, escAttr, shortName } from './helpers.js';
 import { renderTabBar } from './tabs.js';
 
-const STORAGE_KEY = 'domain-model-diagram-positions';
-const HIDDEN_KINDS_KEY = 'domain-model-diagram-hidden-kinds';
-const HIDDEN_EDGE_KINDS_KEY = 'domain-model-diagram-hidden-edge-kinds';
-const VIEWPORT_KEY = 'domain-model-diagram-viewport';
+// Global layout (not scoped by bounded-context selection)
+const STORAGE_KEY = 'domain-model-diagram-positions-global';
+const HIDDEN_KINDS_KEY = 'domain-model-diagram-hidden-kinds-global';
+const HIDDEN_EDGE_KINDS_KEY = 'domain-model-diagram-hidden-edge-kinds-global';
+const VIEWPORT_KEY = 'domain-model-diagram-viewport-global';
 const SHOW_ALIASES_KEY = 'domain-model-diagram-show-aliases';
 const SHOW_LAYERS_KEY = 'domain-model-diagram-show-layers';
+// Legacy per-context keys (one-time migration)
+const LEGACY_POSITIONS_KEY = 'domain-model-diagram-positions';
+const LEGACY_HIDDEN_KINDS_KEY = 'domain-model-diagram-hidden-kinds';
+const LEGACY_HIDDEN_EDGE_KINDS_KEY = 'domain-model-diagram-hidden-edge-kinds';
+const LEGACY_VIEWPORT_KEY = 'domain-model-diagram-viewport';
+
+const FLUSH_MS = 450;
+let diagramLayoutBaseUrl = null;
+/** @type {object | null} */
+let serverLayoutDoc = null;
+let diagramLayoutFlushTimer = null;
+let suppressDiagramLayoutFlush = false;
+let diagramLocalStorageMigrated = false;
 
 const EDGE_CFG = {
   Contains:      { label: 'Contains',          color: '#60a5fa', dashed: false },
@@ -38,102 +53,207 @@ const KIND_CFG = {
   service:          { label: 'Services',             color: '#bda0ff', bg: '#1e1828', border: '#7860b0', stereotype: '\xABService\xBB' },
 };
 
-// ── Persistence ──────────────────────────────────────
+// ── Persistence (localStorage + optional server file storage) ──
 
-function loadPositions(contextName) {
+export function setDiagramLayoutBaseUrl(baseUrl) {
+  diagramLayoutBaseUrl = baseUrl && baseUrl.length ? baseUrl.replace(/\/$/, '') : null;
+}
+
+export function setServerDiagramLayoutCache(doc) {
+  serverLayoutDoc = doc && typeof doc === 'object' && !Array.isArray(doc) ? doc : null;
+}
+
+function migrateLegacyDiagramLocalStorage() {
+  if (diagramLocalStorageMigrated) return;
+  diagramLocalStorageMigrated = true;
+  try {
+    if (!localStorage.getItem(STORAGE_KEY) && localStorage.getItem(LEGACY_POSITIONS_KEY)) {
+      const raw = localStorage.getItem(LEGACY_POSITIONS_KEY);
+      const all = raw ? JSON.parse(raw) : {};
+      const merged = {};
+      for (const bucket of Object.values(all || {})) {
+        if (bucket && typeof bucket === 'object' && !Array.isArray(bucket)) {
+          Object.assign(merged, bucket);
+        }
+      }
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+      localStorage.removeItem(LEGACY_POSITIONS_KEY);
+    }
+  } catch { /* ignore */ }
+
+  try {
+    if (!localStorage.getItem(HIDDEN_KINDS_KEY) && localStorage.getItem(LEGACY_HIDDEN_KINDS_KEY)) {
+      const raw = localStorage.getItem(LEGACY_HIDDEN_KINDS_KEY);
+      const all = raw ? JSON.parse(raw) : {};
+      const set = new Set();
+      for (const arr of Object.values(all || {})) {
+        if (Array.isArray(arr)) for (const k of arr) set.add(k);
+      }
+      localStorage.setItem(HIDDEN_KINDS_KEY, JSON.stringify([...set]));
+      localStorage.removeItem(LEGACY_HIDDEN_KINDS_KEY);
+    }
+  } catch { /* ignore */ }
+
+  try {
+    if (!localStorage.getItem(HIDDEN_EDGE_KINDS_KEY) && localStorage.getItem(LEGACY_HIDDEN_EDGE_KINDS_KEY)) {
+      const raw = localStorage.getItem(LEGACY_HIDDEN_EDGE_KINDS_KEY);
+      const all = raw ? JSON.parse(raw) : {};
+      const set = new Set();
+      for (const arr of Object.values(all || {})) {
+        if (Array.isArray(arr)) for (const k of arr) set.add(k);
+      }
+      localStorage.setItem(HIDDEN_EDGE_KINDS_KEY, JSON.stringify([...set]));
+      localStorage.removeItem(LEGACY_HIDDEN_EDGE_KINDS_KEY);
+    }
+  } catch { /* ignore */ }
+
+  try {
+    if (!localStorage.getItem(VIEWPORT_KEY) && localStorage.getItem(LEGACY_VIEWPORT_KEY)) {
+      const raw = localStorage.getItem(LEGACY_VIEWPORT_KEY);
+      const all = raw ? JSON.parse(raw) : {};
+      let picked = null;
+      for (const v of Object.values(all || {})) {
+        if (v && typeof v.zoom === 'number') picked = v;
+      }
+      if (picked) {
+        localStorage.setItem(VIEWPORT_KEY, JSON.stringify(picked));
+      }
+      localStorage.removeItem(LEGACY_VIEWPORT_KEY);
+    }
+  } catch { /* ignore */ }
+}
+
+function buildLayoutPayloadFromState() {
+  if (!dgState) return null;
+  const positions = {};
+  for (const n of dgState.allNodes) {
+    positions[n.id] = { x: Math.round(n.x * 10) / 10, y: Math.round(n.y * 10) / 10 };
+  }
+  return {
+    positions,
+    viewport: {
+      zoom: Math.round(dgState.zoom * 1000) / 1000,
+      panX: Math.round(dgState.panX * 10) / 10,
+      panY: Math.round(dgState.panY * 10) / 10,
+    },
+    hiddenKinds: [...dgState.hiddenKinds],
+    hiddenEdgeKinds: [...dgState.hiddenEdgeKinds],
+    showAliases,
+    showLayers,
+  };
+}
+
+function scheduleFlushDiagramLayout() {
+  if (suppressDiagramLayoutFlush) return;
+  if (!diagramLayoutBaseUrl) return;
+  if (diagramLayoutFlushTimer) clearTimeout(diagramLayoutFlushTimer);
+  diagramLayoutFlushTimer = setTimeout(() => {
+    diagramLayoutFlushTimer = null;
+    void flushDiagramLayoutToServer();
+  }, FLUSH_MS);
+}
+
+async function flushDiagramLayoutToServer() {
+  if (!diagramLayoutBaseUrl || !dgState) return;
+  const payload = buildLayoutPayloadFromState();
+  if (!payload) return;
+  try {
+    const res = await fetch(`${diagramLayoutBaseUrl}/diagram-layout`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (res.ok) serverLayoutDoc = payload;
+  } catch { /* ignore network errors */ }
+}
+
+function syncDiagramToolbarToggles() {
+  const aliasBtn = document.getElementById('diagramAliasToggle');
+  if (aliasBtn) aliasBtn.style.background = showAliases ? 'var(--bg-hover)' : '';
+  const layerBtn = document.getElementById('diagramLayerToggle');
+  if (layerBtn) layerBtn.style.background = showLayers ? 'var(--bg-hover)' : '';
+}
+
+function loadPositions() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
-    const all = JSON.parse(raw);
-    return all[contextName] || null;
+    const o = JSON.parse(raw);
+    return o && typeof o === 'object' && !Array.isArray(o) ? o : null;
   } catch { return null; }
 }
 
-function savePositions(contextName, nodes) {
+function savePositions(nodes) {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    const all = raw ? JSON.parse(raw) : {};
     const positions = {};
     for (const n of nodes) {
       positions[n.id] = { x: Math.round(n.x * 10) / 10, y: Math.round(n.y * 10) / 10 };
     }
-    all[contextName] = positions;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(positions));
   } catch { /* quota exceeded or private mode */ }
+  scheduleFlushDiagramLayout();
 }
 
-function clearPositions(contextName) {
+function clearPositions() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return;
-    const all = JSON.parse(raw);
-    delete all[contextName];
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
+    localStorage.removeItem(STORAGE_KEY);
   } catch { /* ignore */ }
+  scheduleFlushDiagramLayout();
 }
 
-function loadHiddenKinds(contextName) {
+function loadHiddenKinds() {
   try {
     const raw = localStorage.getItem(HIDDEN_KINDS_KEY);
     if (!raw) return new Set();
-    const all = JSON.parse(raw);
-    return new Set(all[contextName] || []);
+    const arr = JSON.parse(raw);
+    return new Set(Array.isArray(arr) ? arr : []);
   } catch { return new Set(); }
 }
 
-function saveHiddenKinds(contextName, hiddenKinds) {
+function saveHiddenKinds(hiddenKinds) {
   try {
-    const raw = localStorage.getItem(HIDDEN_KINDS_KEY);
-    const all = raw ? JSON.parse(raw) : {};
-    all[contextName] = [...hiddenKinds];
-    localStorage.setItem(HIDDEN_KINDS_KEY, JSON.stringify(all));
+    localStorage.setItem(HIDDEN_KINDS_KEY, JSON.stringify([...hiddenKinds]));
   } catch { /* quota exceeded or private mode */ }
+  scheduleFlushDiagramLayout();
 }
 
-function loadHiddenEdgeKinds(contextName) {
+function loadHiddenEdgeKinds() {
   try {
     const raw = localStorage.getItem(HIDDEN_EDGE_KINDS_KEY);
     if (!raw) return new Set();
-    const all = JSON.parse(raw);
-    return new Set(all[contextName] || []);
+    const arr = JSON.parse(raw);
+    return new Set(Array.isArray(arr) ? arr : []);
   } catch { return new Set(); }
 }
 
-function saveHiddenEdgeKinds(contextName, hiddenEdgeKinds) {
+function saveHiddenEdgeKinds(hiddenEdgeKinds) {
   try {
-    const raw = localStorage.getItem(HIDDEN_EDGE_KINDS_KEY);
-    const all = raw ? JSON.parse(raw) : {};
-    all[contextName] = [...hiddenEdgeKinds];
-    localStorage.setItem(HIDDEN_EDGE_KINDS_KEY, JSON.stringify(all));
+    localStorage.setItem(HIDDEN_EDGE_KINDS_KEY, JSON.stringify([...hiddenEdgeKinds]));
   } catch { /* quota exceeded or private mode */ }
+  scheduleFlushDiagramLayout();
 }
 
-function loadViewport(contextName) {
+function loadViewport() {
   try {
     const raw = localStorage.getItem(VIEWPORT_KEY);
     if (!raw) return null;
-    const all = JSON.parse(raw);
-    return all[contextName] || null;
+    return JSON.parse(raw);
   } catch { return null; }
 }
 
-function saveViewport(contextName, zoom, panX, panY) {
+function saveViewport(zoom, panX, panY) {
   try {
-    const raw = localStorage.getItem(VIEWPORT_KEY);
-    const all = raw ? JSON.parse(raw) : {};
-    all[contextName] = { zoom: Math.round(zoom * 1000) / 1000, panX: Math.round(panX * 10) / 10, panY: Math.round(panY * 10) / 10 };
-    localStorage.setItem(VIEWPORT_KEY, JSON.stringify(all));
+    const v = { zoom: Math.round(zoom * 1000) / 1000, panX: Math.round(panX * 10) / 10, panY: Math.round(panY * 10) / 10 };
+    localStorage.setItem(VIEWPORT_KEY, JSON.stringify(v));
   } catch { /* quota exceeded or private mode */ }
+  scheduleFlushDiagramLayout();
 }
 
-function clearViewport(contextName) {
+function clearViewport() {
   try {
-    const raw = localStorage.getItem(VIEWPORT_KEY);
-    if (!raw) return;
-    const all = JSON.parse(raw);
-    delete all[contextName];
-    localStorage.setItem(VIEWPORT_KEY, JSON.stringify(all));
+    localStorage.removeItem(VIEWPORT_KEY);
   } catch { /* ignore */ }
+  scheduleFlushDiagramLayout();
 }
 
 // ── Module state ─────────────────────────────────────
@@ -298,6 +418,8 @@ export function renderDiagramView() {
 export function initDiagram(ctx, boundedContexts) {
   if (!ctx) return;
 
+  migrateLegacyDiagramLocalStorage();
+
   const nodes = [];
   const edges = [];
   const nMap = {};
@@ -361,39 +483,132 @@ export function initDiagram(ctx, boundedContexts) {
     }
   }
 
-  // Restore saved positions or run force layout
-  const saved = loadPositions(ctx.name);
-  let hasSaved = false;
-  if (saved) {
-    let allFound = true;
-    for (const n of nodes) {
-      if (saved[n.id]) { n.x = saved[n.id].x; n.y = saved[n.id].y; }
-      else { allFound = false; }
+  const contextName = ctx.name;
+  let posSource = 'none';
+
+  suppressDiagramLayoutFlush = true;
+  try {
+    const serverLayout = diagramLayoutBaseUrl ? serverLayoutDoc : null;
+
+    const lsPos = loadPositions();
+    let saved = null;
+    if (serverLayout?.positions && typeof serverLayout.positions === 'object' && Object.keys(serverLayout.positions).length > 0) {
+      saved = serverLayout.positions;
+      posSource = 'server';
+    } else if (lsPos && Object.keys(lsPos).length > 0) {
+      saved = lsPos;
+      posSource = 'local';
     }
-    hasSaved = allFound;
+
+    let hasSaved = false;
+    if (saved) {
+      let allFound = true;
+      for (const n of nodes) {
+        if (saved[n.id]) { n.x = saved[n.id].x; n.y = saved[n.id].y; }
+        else { allFound = false; }
+      }
+      hasSaved = allFound;
+    }
+
+    if (!hasSaved) {
+      applyAutoLayout(nodes, edges, nMap);
+    }
+
+    let hiddenKinds;
+    if (serverLayout && Array.isArray(serverLayout.hiddenKinds)) {
+      hiddenKinds = new Set(serverLayout.hiddenKinds);
+    } else {
+      hiddenKinds = loadHiddenKinds();
+    }
+
+    let hiddenEdgeKinds;
+    if (serverLayout && Array.isArray(serverLayout.hiddenEdgeKinds)) {
+      hiddenEdgeKinds = new Set(serverLayout.hiddenEdgeKinds);
+    } else {
+      hiddenEdgeKinds = loadHiddenEdgeKinds();
+    }
+
+    if (serverLayout && typeof serverLayout.showAliases === 'boolean') {
+      showAliases = serverLayout.showAliases;
+      try { localStorage.setItem(SHOW_ALIASES_KEY, showAliases ? 'true' : 'false'); } catch { /* ignore */ }
+    }
+    if (serverLayout && typeof serverLayout.showLayers === 'boolean') {
+      showLayers = serverLayout.showLayers;
+      try { localStorage.setItem(SHOW_LAYERS_KEY, showLayers); } catch { /* ignore */ }
+    }
+
+    dgState = {
+      nodes, edges, nMap, allNodes: nodes, allEdges: edges,
+      zoom: 1, panX: 0, panY: 0, contextName,
+      hiddenKinds, hiddenEdgeKinds,
+    };
+    applyDiagramVisibility();
+
+    const lsViewport = loadViewport();
+    let savedViewport = null;
+    if (hasSaved) {
+      if (serverLayout?.viewport && typeof serverLayout.viewport.zoom === 'number') {
+        savedViewport = serverLayout.viewport;
+      } else {
+        savedViewport = lsViewport;
+      }
+    }
+    if (hasSaved && savedViewport) {
+      dgState.zoom = savedViewport.zoom;
+      dgState.panX = savedViewport.panX;
+      dgState.panY = savedViewport.panY;
+    }
+
+    renderSvg();
+    refreshDiagramKindFilters();
+    syncDiagramToolbarToggles();
+
+    if (!hasSaved || !savedViewport) {
+      fitToView();
+      saveViewport(dgState.zoom, dgState.panX, dgState.panY);
+    }
+
+    if (posSource === 'server') {
+      const positions = {};
+      for (const n of nodes) {
+        positions[n.id] = { x: Math.round(n.x * 10) / 10, y: Math.round(n.y * 10) / 10 };
+      }
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(positions));
+      } catch { /* ignore */ }
+      try {
+        localStorage.setItem(HIDDEN_KINDS_KEY, JSON.stringify([...hiddenKinds]));
+      } catch { /* ignore */ }
+      try {
+        localStorage.setItem(HIDDEN_EDGE_KINDS_KEY, JSON.stringify([...hiddenEdgeKinds]));
+      } catch { /* ignore */ }
+      if (savedViewport) {
+        try {
+          localStorage.setItem(VIEWPORT_KEY, JSON.stringify({
+            zoom: Math.round(savedViewport.zoom * 1000) / 1000,
+            panX: Math.round(savedViewport.panX * 10) / 10,
+            panY: Math.round(savedViewport.panY * 10) / 10,
+          }));
+        } catch { /* ignore */ }
+      }
+    }
+  } finally {
+    suppressDiagramLayoutFlush = false;
   }
 
-  if (!hasSaved) {
-    applyAutoLayout(nodes, edges, nMap);
-  }
-
-  dgState = { nodes, edges, nMap, allNodes: nodes, allEdges: edges, zoom: 1, panX: 0, panY: 0, contextName: ctx.name, hiddenKinds: loadHiddenKinds(ctx.name), hiddenEdgeKinds: loadHiddenEdgeKinds(ctx.name) };
-  applyDiagramVisibility();
-
-  // Restore saved viewport or fit to view on first load
-  const savedViewport = loadViewport(ctx.name);
-  if (hasSaved && savedViewport) {
-    dgState.zoom = savedViewport.zoom;
-    dgState.panX = savedViewport.panX;
-    dgState.panY = savedViewport.panY;
-  }
-
-  renderSvg();
-  refreshDiagramKindFilters();
-
-  if (!hasSaved || !savedViewport) {
-    fitToView();
-    saveViewport(ctx.name, dgState.zoom, dgState.panX, dgState.panY);
+  if (posSource === 'local' && diagramLayoutBaseUrl && dgState) {
+    void (async () => {
+      const payload = buildLayoutPayloadFromState();
+      if (!payload) return;
+      try {
+        const res = await fetch(`${diagramLayoutBaseUrl}/diagram-layout`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (res.ok) serverLayoutDoc = payload;
+      } catch { /* ignore */ }
+    })();
   }
 
   setupInteraction();
@@ -844,10 +1059,10 @@ function setupInteraction() {
   function endDrag() {
     if (dragNode || dragCtx) {
       // Persist ALL node positions (including hidden) after drop
-      savePositions(dgState.contextName, dgState.allNodes);
+      savePositions(dgState.allNodes);
     }
     if (dragNode || dragCtx || panning) {
-      saveViewport(dgState.contextName, dgState.zoom, dgState.panX, dgState.panY);
+      saveViewport(dgState.zoom, dgState.panX, dgState.panY);
     }
     dragNode = null;
     dragCtx = null; dragCtxNodeStarts = null;
@@ -866,7 +1081,7 @@ function setupInteraction() {
     dgState.panY = my - (my - dgState.panY) * factor;
     dgState.zoom *= factor;
     renderSvg();
-    saveViewport(dgState.contextName, dgState.zoom, dgState.panX, dgState.panY);
+    saveViewport(dgState.zoom, dgState.panX, dgState.panY);
   }, { passive: false });
 
   svg.addEventListener('dblclick', function(ev) {
@@ -893,24 +1108,24 @@ export function diagramZoom(factor) {
   dgState.panY = cy - (cy - dgState.panY) * factor;
   dgState.zoom *= factor;
   renderSvg();
-  saveViewport(dgState.contextName, dgState.zoom, dgState.panX, dgState.panY);
+  saveViewport(dgState.zoom, dgState.panX, dgState.panY);
 }
 
 export function diagramFit() {
   fitToView();
-  if (dgState) saveViewport(dgState.contextName, dgState.zoom, dgState.panX, dgState.panY);
+  if (dgState) saveViewport(dgState.zoom, dgState.panX, dgState.panY);
 }
 
 export function diagramResetLayout(ctx) {
   if (!dgState || !ctx) return;
-  clearPositions(ctx.name);
-  clearViewport(ctx.name);
+  clearPositions();
+  clearViewport();
   applyAutoLayout(dgState.allNodes, dgState.allEdges, dgState.nMap);
   applyDiagramVisibility();
   renderSvg();
   fitToView();
-  savePositions(ctx.name, dgState.allNodes);
-  saveViewport(ctx.name, dgState.zoom, dgState.panX, dgState.panY);
+  savePositions(dgState.allNodes);
+  saveViewport(dgState.zoom, dgState.panX, dgState.panY);
 }
 
 export function diagramToggleKind(eventOrKind, maybeKind) {
@@ -927,7 +1142,7 @@ export function diagramToggleKind(eventOrKind, maybeKind) {
   } else {
     dgState.hiddenKinds.add(kind);
   }
-  saveHiddenKinds(dgState.contextName, dgState.hiddenKinds);
+  saveHiddenKinds(dgState.hiddenKinds);
   applyDiagramVisibility();
   renderSvg();
   syncDiagramKindFilterUi();
@@ -943,7 +1158,7 @@ function setAllKindVisibility(visible) {
       dgState.hiddenKinds.add(kind);
     }
   }
-  saveHiddenKinds(dgState.contextName, dgState.hiddenKinds);
+  saveHiddenKinds(dgState.hiddenKinds);
   applyDiagramVisibility();
   renderSvg();
   syncDiagramKindFilterUi();
@@ -961,8 +1176,8 @@ export function diagramShowAll() {
   if (!dgState) return;
   dgState.hiddenKinds.clear();
   dgState.hiddenEdgeKinds.clear();
-  saveHiddenKinds(dgState.contextName, dgState.hiddenKinds);
-  saveHiddenEdgeKinds(dgState.contextName, dgState.hiddenEdgeKinds);
+  saveHiddenKinds(dgState.hiddenKinds);
+  saveHiddenEdgeKinds(dgState.hiddenEdgeKinds);
   applyDiagramVisibility();
   renderSvg();
   refreshDiagramKindFilters();
@@ -982,7 +1197,7 @@ export function diagramToggleEdgeKind(eventOrKind, maybeKind) {
   } else {
     dgState.hiddenEdgeKinds.add(kind);
   }
-  saveHiddenEdgeKinds(dgState.contextName, dgState.hiddenEdgeKinds);
+  saveHiddenEdgeKinds(dgState.hiddenEdgeKinds);
   applyDiagramVisibility();
   renderSvg();
   refreshDiagramEdgeFilter();
@@ -1036,9 +1251,9 @@ export function diagramDownloadSvg() {
 export function diagramToggleAliases() {
   showAliases = !showAliases;
   try { localStorage.setItem(SHOW_ALIASES_KEY, showAliases ? 'true' : 'false'); } catch { /* ignore */ }
-  const btn = document.getElementById('diagramAliasToggle');
-  if (btn) btn.style.background = showAliases ? 'var(--bg-hover)' : '';
+  syncDiagramToolbarToggles();
   if (dgState) {
+    scheduleFlushDiagramLayout();
     for (const n of dgState.allNodes) n.h = nodeHeight(n);
     renderSvg();
   }
@@ -1047,9 +1262,11 @@ export function diagramToggleAliases() {
 export function diagramToggleLayers() {
   showLayers = !showLayers;
   try { localStorage.setItem(SHOW_LAYERS_KEY, showLayers); } catch { /* ignore */ }
-  const btn = document.getElementById('diagramLayerToggle');
-  if (btn) btn.style.background = showLayers ? 'var(--bg-hover)' : '';
-  if (dgState) renderSvg();
+  syncDiagramToolbarToggles();
+  if (dgState) {
+    scheduleFlushDiagramLayout();
+    renderSvg();
+  }
 }
 
 function diagramDisplayName(n) {

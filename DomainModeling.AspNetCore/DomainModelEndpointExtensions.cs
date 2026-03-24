@@ -49,6 +49,12 @@ public sealed class DomainModelOptions
     public string MetadataStoragePath { get; set; } = "./metadata";
 
     /// <summary>
+    /// Directory path where the main diagram layout file <c>diagram-layout.json</c> is stored.
+    /// Defaults to <c>./diagram-layout</c> relative to the application root.
+    /// </summary>
+    public string DiagramLayoutStoragePath { get; set; } = "./diagram-layout";
+
+    /// <summary>
     /// Configuration for the aggregate testing feature.
     /// </summary>
     public DomainModelTestingOptions Testing { get; } = new();
@@ -158,6 +164,11 @@ public static class DomainModelEndpointExtensions
         // Cache the JSON — mutable so it can be updated when developer view saves
         var json = graph.ToJson();
 
+        // Main diagram layout — single JSON file under this directory
+        var diagramLayoutDir = Path.GetFullPath(options.DiagramLayoutStoragePath);
+        const string diagramLayoutFileName = "diagram-layout.json";
+        var diagramLayoutFilePath = Path.Combine(diagramLayoutDir, diagramLayoutFileName);
+
         // Custom metadata store (alias / description per type) persisted as JSON files on disk
         var metadataDir = Path.GetFullPath(options.MetadataStoragePath);
         var metadata = new System.Collections.Concurrent.ConcurrentDictionary<string, TypeMetadata>();
@@ -266,6 +277,65 @@ public static class DomainModelEndpointExtensions
         })
         .ExcludeFromDescription()
         .WithName("DomainModelMetadataUpdate");
+
+        static JsonSerializerOptions DiagramLayoutJsonOptions() => new()
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            WriteIndented = true,
+            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+        };
+
+        ConsolidateLegacyDiagramLayoutFiles(diagramLayoutDir, diagramLayoutFilePath, DiagramLayoutJsonOptions());
+
+        // GET /domain-model/diagram-layout — single global diagram layout document
+        endpoints.MapGet($"{routePrefix}/diagram-layout", () =>
+        {
+            if (!File.Exists(diagramLayoutFilePath))
+                return Results.Json(new DiagramLayoutDocument(), DiagramLayoutJsonOptions());
+
+            try
+            {
+                var jsonText = File.ReadAllText(diagramLayoutFilePath);
+                var layout = JsonSerializer.Deserialize<DiagramLayoutDocument>(jsonText, DiagramLayoutJsonOptions());
+                return Results.Json(layout ?? new DiagramLayoutDocument(), DiagramLayoutJsonOptions());
+            }
+            catch (JsonException)
+            {
+                return Results.Json(new DiagramLayoutDocument(), DiagramLayoutJsonOptions());
+            }
+        })
+        .ExcludeFromDescription()
+        .WithName("DomainModelDiagramLayoutGet");
+
+        // PUT /domain-model/diagram-layout — save the single global diagram layout file
+        endpoints.MapPut($"{routePrefix}/diagram-layout", async (HttpContext ctx) =>
+        {
+            using var reader = new StreamReader(ctx.Request.Body);
+            var body = await reader.ReadToEndAsync();
+            DiagramLayoutDocument? layout;
+            try
+            {
+                layout = JsonSerializer.Deserialize<DiagramLayoutDocument>(body, DiagramLayoutJsonOptions());
+            }
+            catch (JsonException)
+            {
+                return Results.BadRequest("Invalid JSON");
+            }
+
+            if (layout is null)
+                return Results.BadRequest("Invalid layout");
+
+            Directory.CreateDirectory(diagramLayoutDir);
+
+            var toWrite = JsonSerializer.Serialize(layout, DiagramLayoutJsonOptions());
+            await File.WriteAllTextAsync(diagramLayoutFilePath, toWrite);
+
+            DeleteStrayDiagramLayoutJsonFiles(diagramLayoutDir, diagramLayoutFilePath);
+
+            return Results.Ok(new { saved = true });
+        })
+        .ExcludeFromDescription()
+        .WithName("DomainModelDiagramLayoutPut");
 
         // GET /domain-model — interactive HTML UI
         endpoints.MapGet(routePrefix, (HttpContext ctx) =>
@@ -673,6 +743,82 @@ public static class DomainModelEndpointExtensions
         catch
         {
             return false;
+        }
+    }
+
+    /// <summary>
+    /// One-time migration: merge legacy per-context <c>*.json</c> files into <c>diagram-layout.json</c>.
+    /// </summary>
+    private static void ConsolidateLegacyDiagramLayoutFiles(string diagramLayoutDir, string diagramLayoutFilePath, JsonSerializerOptions jsonOptions)
+    {
+        const string diagramLayoutFileName = "diagram-layout.json";
+        if (File.Exists(diagramLayoutFilePath))
+        {
+            DeleteStrayDiagramLayoutJsonFiles(diagramLayoutDir, diagramLayoutFilePath);
+            return;
+        }
+
+        if (!Directory.Exists(diagramLayoutDir))
+            return;
+
+        DiagramLayoutDocument? best = null;
+        var bestPositionCount = -1;
+
+        foreach (var file in Directory.GetFiles(diagramLayoutDir, "*.json"))
+        {
+            var name = Path.GetFileName(file);
+            if (string.Equals(name, diagramLayoutFileName, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var stem = Path.GetFileNameWithoutExtension(file);
+            if (!TryDecodeMetadataFileName(stem, out _))
+                continue;
+
+            try
+            {
+                var text = File.ReadAllText(file);
+                var layout = JsonSerializer.Deserialize<DiagramLayoutDocument>(text, jsonOptions);
+                if (layout is null)
+                    continue;
+
+                var count = layout.Positions.Count;
+                if (count > bestPositionCount)
+                {
+                    bestPositionCount = count;
+                    best = layout;
+                }
+            }
+            catch (JsonException)
+            {
+                // Skip corrupt legacy file
+            }
+        }
+
+        if (best is null)
+            return;
+
+        Directory.CreateDirectory(diagramLayoutDir);
+        File.WriteAllText(diagramLayoutFilePath, JsonSerializer.Serialize(best, jsonOptions));
+        DeleteStrayDiagramLayoutJsonFiles(diagramLayoutDir, diagramLayoutFilePath);
+    }
+
+    private static void DeleteStrayDiagramLayoutJsonFiles(string diagramLayoutDir, string diagramLayoutFilePath)
+    {
+        if (!Directory.Exists(diagramLayoutDir))
+            return;
+
+        foreach (var file in Directory.GetFiles(diagramLayoutDir, "*.json"))
+        {
+            if (string.Equals(file, diagramLayoutFilePath, StringComparison.OrdinalIgnoreCase))
+                continue;
+            try
+            {
+                File.Delete(file);
+            }
+            catch
+            {
+                // Ignore locked files
+            }
         }
     }
 
