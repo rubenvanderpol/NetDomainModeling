@@ -9,10 +9,7 @@
  *  - Drag/pan/zoom the canvas
  *  - Optionally run in read-only mode (existing graph items only)
  */
-import {
-  esc, escAttr, shortName, ALL_SECTIONS, SECTION_META,
-  renderBoundedContextMultiDropdownInner, toggleDropdownMenu,
-} from './helpers.js';
+import { esc, escAttr, shortName, ALL_SECTIONS, SECTION_META } from './helpers.js';
 import { renderTabBar } from './tabs.js';
 
 // ── Constants ────────────────────────────────────────
@@ -69,78 +66,6 @@ const KIND_LABELS = {
 const LAYERS = ['Domain', 'Application', 'Infrastructure'];
 const LAYER_COLORS = { Domain: '#a78bfa', Application: '#60a5fa', Infrastructure: '#fb923c' };
 
-let fePaletteBoundedContextNames = new Set();
-
-export function applyFePaletteBoundedContextSelection(boundedContexts, selectedNames) {
-  const valid = new Set((boundedContexts || []).map((c) => c.name));
-  let next;
-  if (!selectedNames?.length) {
-    next = new Set(valid);
-  } else {
-    next = new Set(selectedNames.filter((n) => valid.has(n)));
-    if (next.size === 0) next = new Set(valid);
-  }
-  fePaletteBoundedContextNames = next;
-}
-
-export function getFePaletteBoundedContextNames() {
-  return [...fePaletteBoundedContextNames];
-}
-
-function renderFePaletteBcDropdownInner() {
-  const all = domainData?.boundedContexts || [];
-  return renderBoundedContextMultiDropdownInner({
-    allContexts: all,
-    selectedSet: fePaletteBoundedContextNames,
-    triggerId: 'fePaletteBcFilterTrigger',
-    menuId: 'fePaletteBcFilterMenu',
-    toggleMenuCall: 'window.__featureEditor.toggleFePaletteBcFilter()',
-    toggleContextCall: 'window.__featureEditor.toggleFePaletteBoundedContext',
-    showAllCall: 'window.__featureEditor.fePaletteBoundedContextsShowAll()',
-    triggerTitle: 'Palette: which bounded contexts to pick types from',
-  });
-}
-
-export function refreshFeatureEditorBoundedContextDropdown() {
-  const el = document.getElementById('fePaletteBcFilterWrap');
-  if (!el) return;
-  el.innerHTML = renderFePaletteBcDropdownInner();
-}
-
-export function toggleFePaletteBcFilter() {
-  toggleDropdownMenu('fePaletteBcFilterMenu', 'fePaletteBcFilterTrigger');
-}
-
-export function toggleFePaletteBoundedContext(event, name) {
-  if (event) {
-    event.stopPropagation();
-    event.preventDefault();
-  }
-  if (fePaletteBoundedContextNames.has(name)) {
-    if (fePaletteBoundedContextNames.size > 1) fePaletteBoundedContextNames.delete(name);
-  } else {
-    fePaletteBoundedContextNames.add(name);
-  }
-  window.__nav?.persistUiBoundedContexts?.();
-  refreshFeatureEditorBoundedContextDropdown();
-  const pal = document.getElementById('fePalette');
-  if (pal) {
-    const search = document.getElementById('fePaletteSearch');
-    pal.innerHTML = renderPaletteItems(search ? search.value : '');
-  }
-}
-
-export function fePaletteBoundedContextsShowAll() {
-  for (const c of (domainData?.boundedContexts || [])) fePaletteBoundedContextNames.add(c.name);
-  window.__nav?.persistUiBoundedContexts?.();
-  refreshFeatureEditorBoundedContextDropdown();
-  const pal = document.getElementById('fePalette');
-  if (pal) {
-    const search = document.getElementById('fePaletteSearch');
-    pal.innerHTML = renderPaletteItems(search ? search.value : '');
-  }
-}
-
 // ── Module state ─────────────────────────────────────
 let baseUrl = '';
 let domainData = null;   // full domain graph
@@ -172,8 +97,6 @@ export function renderFeatureEditorView() {
 
   // ── Left: Feature list + type palette ──
   html += '<div class="fe-sidebar" id="feSidebar">';
-  const multiBc = (domainData?.boundedContexts || []).length > 1;
-  html += `<div class="fe-section fe-palette-bc" style="display:${multiBc ? 'block' : 'none'}"><div class="rel-dropdown" id="fePaletteBcFilterWrap"></div></div>`;
   html += renderFeatureListPanel();
   html += renderPalettePanel();
   html += '</div>';
@@ -222,8 +145,6 @@ export function renderFeatureEditorView() {
 }
 
 export function mountFeatureEditor() {
-  // Always repopulate bounded-context dropdown after DOM is replaced (save, load, create, etc.).
-  refreshFeatureEditorBoundedContextDropdown();
   if (!st || !currentFeatureName) return;
   renderSvg();
   fitToView();
@@ -313,7 +234,6 @@ function renderPaletteItems(filter) {
   let html = '';
 
   for (const ctx of (domainData.boundedContexts || [])) {
-    if (!fePaletteBoundedContextNames.has(ctx.name)) continue;
     for (const sec of ALL_SECTIONS) {
       const kind = SECTION_TO_KIND[sec];
       if (!kind) continue;

@@ -35,15 +35,6 @@
   margin-bottom: 8px;
 }
 
-.fe-palette-bc .rel-dropdown {
-  width: 100%;
-}
-.fe-palette-bc .rel-dropdown-trigger {
-  width: 100%;
-  box-sizing: border-box;
-  justify-content: space-between;
-}
-
 /* Bulk add: entire bounded context (feature diagram) */
 .fe-bulk-bc {
   margin-bottom: 10px;

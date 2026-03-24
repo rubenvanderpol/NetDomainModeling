@@ -106,13 +106,11 @@ async function migrateLocalStorageUiBoundedContexts(validNames, serverUi) {
 
 async function saveBoundedContextUiToServer() {
   try {
-    const fe = FEATURE_EDITOR_MODE && featureEditorModule?.getFePaletteBoundedContextNames
-      ? featureEditorModule.getFePaletteBoundedContextNames()
-      : uiBoundedContextCache.featureEditorPalette;
+    const allCtxNames = (data?.boundedContexts || []).map((c) => c.name);
     const body = {
       explorer: [...explorerContextNames],
       diagram: getDiagramBoundedContextNames(),
-      featureEditorPalette: [...fe],
+      featureEditorPalette: [...allCtxNames],
     };
     const res = await fetch(`${BASE_URL}/ui/bounded-contexts`, {
       method: 'PUT',
@@ -146,24 +144,13 @@ async function bootstrapBoundedContextUi(graphData) {
   uiBoundedContextCache = {
     explorer: [...explorerContextNames],
     diagram: getDiagramBoundedContextNames(),
-    featureEditorPalette: Array.isArray(ui.featureEditorPalette) && ui.featureEditorPalette.length > 0
-      ? [...ui.featureEditorPalette]
-      : [...validNames],
+    featureEditorPalette: [...validNames],
   };
 
   if (FEATURE_EDITOR_MODE) {
     featureEditorModule = await import('./feature-editor.js');
-    featureEditorModule.applyFePaletteBoundedContextSelection(
-      graphData.boundedContexts,
-      ui.featureEditorPalette,
-    );
     await featureEditorModule.initFeatureEditor(BASE_URL, graphData);
     wireFeatureEditorGlobals();
-    uiBoundedContextCache = {
-      explorer: [...explorerContextNames],
-      diagram: getDiagramBoundedContextNames(),
-      featureEditorPalette: featureEditorModule.getFePaletteBoundedContextNames(),
-    };
   }
 }
 
@@ -589,9 +576,6 @@ function wireFeatureEditorGlobals() {
     toggleBcDropdown: featureEditorModule.toggleBcDropdown,
     changeLayer: featureEditorModule.changeLayer,
     toggleLayerDropdown: featureEditorModule.toggleLayerDropdown,
-    toggleFePaletteBcFilter: featureEditorModule.toggleFePaletteBcFilter,
-    toggleFePaletteBoundedContext: featureEditorModule.toggleFePaletteBoundedContext,
-    fePaletteBoundedContextsShowAll: featureEditorModule.fePaletteBoundedContextsShowAll,
   };
 }
 // ── Go! ──────────────────────────────────────────────
