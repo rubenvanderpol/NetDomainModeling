@@ -222,6 +222,8 @@ export function renderFeatureEditorView() {
 }
 
 export function mountFeatureEditor() {
+  // Always repopulate bounded-context dropdown after DOM is replaced (save, load, create, etc.).
+  refreshFeatureEditorBoundedContextDropdown();
   if (!st || !currentFeatureName) return;
   renderSvg();
   fitToView();
@@ -633,7 +635,9 @@ function rerender() {
   const main = document.getElementById('mainContent');
   if (!main) return;
   main.innerHTML = renderFeatureEditorView();
-  requestAnimationFrame(() => mountFeatureEditor());
+  requestAnimationFrame(() => {
+    mountFeatureEditor();
+  });
 }
 
 // ── Feature state serialization ──────────────────────

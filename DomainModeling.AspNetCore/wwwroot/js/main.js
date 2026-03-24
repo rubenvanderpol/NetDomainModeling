@@ -410,10 +410,7 @@ function renderMain() {
 
   if (currentView === 'features' && FEATURE_EDITOR_MODE && featureEditorModule) {
     main.innerHTML = featureEditorModule.renderFeatureEditorView();
-    requestAnimationFrame(() => {
-      featureEditorModule.refreshFeatureEditorBoundedContextDropdown();
-      featureEditorModule.mountFeatureEditor();
-    });
+    requestAnimationFrame(() => featureEditorModule.mountFeatureEditor());
     return;
   }
 
