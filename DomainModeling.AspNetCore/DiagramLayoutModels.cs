@@ -3,10 +3,10 @@ using System.Text.Json.Serialization;
 namespace DomainModeling.AspNetCore;
 
 /// <summary>
-/// Persisted diagram layout for one bounded context (or merged context view).
-/// Serialized to JSON under <see cref="DomainModelOptions.DiagramLayoutStoragePath"/>.
+/// Persisted main diagram layout (single document for the explorer diagram).
+/// Stored as <c>diagram-layout.json</c> under <see cref="DomainModelOptions.DiagramLayoutStoragePath"/>.
 /// </summary>
-internal sealed class DiagramContextLayout
+internal sealed class DiagramLayoutDocument
 {
     [JsonPropertyName("positions")]
     public Dictionary<string, DiagramNodePosition> Positions { get; set; } = [];
