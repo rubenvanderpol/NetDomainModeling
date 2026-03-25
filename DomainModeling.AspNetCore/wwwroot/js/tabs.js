@@ -15,6 +15,10 @@ export function renderTabBar(activeTab) {
     tabs.push({ id: 'testing', label: '🧪 Testing' });
   }
 
+  if (window.__config?.traceViewMode) {
+    tabs.push({ id: 'trace', label: 'Trace' });
+  }
+
   let html = '<div class="tab-bar">';
   for (const t of tabs) {
     const cls = t.id === activeTab ? ' active' : '';

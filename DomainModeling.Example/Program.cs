@@ -37,6 +37,7 @@ var domainGraph = DDDBuilder.Create(ctx => ctx
     .Build();
 
 builder.Services.AddDomainModel(domainGraph);
+builder.Services.AddDomainModelTracing();
 
 // Register in-memory repositories
 builder.Services.AddSingleton<IRepository<Order>, OrderRepository>();
@@ -52,6 +53,7 @@ app.MapDomainModel(domainGraph, configure: opts =>
 {
     opts.EnableDeveloperView = true;
     opts.EnableFeatureEditor = true;
+    opts.EnableTraceView = true;
     opts.Testing.RepositoryInterfaceType = typeof(IRepository<>);
     opts.Testing.Repository(repo => repo
         .Add()
@@ -119,6 +121,13 @@ app.MapDomainModel(domainGraph, configure: opts =>
         }
         return string.Join(Environment.NewLine, lines);
     });
+});
+
+// Demo: push a sample trace row to the Trace tab (POST with empty body)
+app.MapPost("/domain-model/trace/demo", async (IServiceProvider sp) =>
+{
+    await DomainModelTracing.NotifyAsync(sp, typeof(OrderPlacedEvent), new { demo = true, at = DateTime.UtcNow });
+    return Results.Ok(new { traced = typeof(OrderPlacedEvent).FullName });
 });
 
 app.MapGet("/", () => Results.Redirect("/domain-model"));

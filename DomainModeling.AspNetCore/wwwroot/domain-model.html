@@ -8,6 +8,8 @@
 <link rel="stylesheet" href="{{ASSETS_URL}}/css/diagram.css" />
 <link rel="stylesheet" href="{{ASSETS_URL}}/css/feature-editor.css" />
 <link rel="stylesheet" href="{{ASSETS_URL}}/css/testing.css" />
+<link rel="stylesheet" href="{{ASSETS_URL}}/css/trace.css" />
+{{TRACE_SIGNALR_SCRIPT}}
 </head>
 <body>
 
@@ -28,7 +30,7 @@
   </main>
 </div>
 
-<script>window.__config = { apiUrl: '{{API_URL}}', developerMode: {{DEVELOPER_MODE}}, testingMode: {{TESTING_MODE}}, featureEditorMode: {{FEATURE_EDITOR_MODE}} };</script>
+<script>window.__config = { apiUrl: '{{API_URL}}', developerMode: {{DEVELOPER_MODE}}, testingMode: {{TESTING_MODE}}, featureEditorMode: {{FEATURE_EDITOR_MODE}}, traceViewMode: {{TRACE_VIEW_MODE}}, traceHubUrl: '{{TRACE_HUB_URL}}' };</script>
 <script type="module" src="{{ASSETS_URL}}/js/main.js"></script>
 
 </body>
