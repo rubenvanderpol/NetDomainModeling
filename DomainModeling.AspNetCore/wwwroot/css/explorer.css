@@ -241,6 +241,12 @@ body {
   font-size: 13px;
 }
 
+/* Feature editor view mode: same usable width as Diagram (no domain explorer sidebar) */
+body.feature-editor-view-mode .sidebar,
+body.feature-editor-view-mode .sidebar-toggle {
+  display: none;
+}
+
 /* ── Main ───────────────────────────────────────────── */
 .main {
   flex: 1;

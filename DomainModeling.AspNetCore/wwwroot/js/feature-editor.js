@@ -117,6 +117,11 @@ export function toggleFeatureEditorViewMode() {
   rerender();
 }
 
+/** True when Features tab should use diagram-like chrome (no explorer sidebar, no feature side panels). */
+export function isFeatureEditorViewModeLayoutActive() {
+  return isViewModeOnly() === true && !!currentFeatureName;
+}
+
 function isReadOnlyFeature() {
   return currentFeatureReadOnly === true;
 }
@@ -124,7 +129,14 @@ function isReadOnlyFeature() {
 export function renderFeatureEditorView() {
   let html = renderTabBar('features');
 
-  const vm = isViewModeOnly();
+  let vm = isViewModeOnly();
+  // View mode needs a loaded feature (no sidebars → nowhere to pick one).
+  if (vm && !currentFeatureName) {
+    viewModeOnly = false;
+    try { sessionStorage.removeItem(FEATURE_EDITOR_VIEW_MODE_KEY); } catch { /* ignore */ }
+    vm = false;
+  }
+
   html += `<div class="fe-layout${vm ? ' fe-view-mode' : ''}">`;
 
   // ── Left: Feature list + type palette ──
@@ -600,7 +612,12 @@ function rerender() {
   const main = document.getElementById('mainContent');
   if (!main) return;
   main.innerHTML = renderFeatureEditorView();
-  requestAnimationFrame(() => mountFeatureEditor());
+  requestAnimationFrame(() => {
+    mountFeatureEditor();
+    if (typeof window.__syncFeatureEditorViewBodyClass === 'function') {
+      window.__syncFeatureEditorViewBodyClass();
+    }
+  });
 }
 
 // ── Feature state serialization ──────────────────────

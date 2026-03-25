@@ -192,7 +192,20 @@ function initSidebarToggle() {
 function render() {
   renderSidebar();
   renderMain();
+  syncFeatureEditorViewBodyClass();
 }
+
+/** Hide explorer sidebar in feature editor view mode so canvas matches Diagram tab width. */
+function syncFeatureEditorViewBodyClass() {
+  try {
+    const active = FEATURE_EDITOR_MODE && featureEditorModule && currentView === 'features'
+      && featureEditorModule.isFeatureEditorViewModeLayoutActive();
+    document.body.classList.toggle('feature-editor-view-mode', !!active);
+  } catch {
+    document.body.classList.remove('feature-editor-view-mode');
+  }
+}
+window.__syncFeatureEditorViewBodyClass = syncFeatureEditorViewBodyClass;
 
 function renderSidebar() {
   const nav = document.getElementById('sidebarNav');

@@ -7,6 +7,11 @@
 }
 
 /* Full-width canvas like the main Diagram tab (issue #28) */
+.fe-layout.fe-view-mode {
+  /* Align with `.diagram-wrap` (tab bar + main padding) */
+  height: calc(100vh - 120px);
+}
+
 .fe-layout.fe-view-mode .fe-canvas-wrap {
   flex: 1;
   min-width: 0;
