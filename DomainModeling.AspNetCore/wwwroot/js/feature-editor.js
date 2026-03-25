@@ -6,7 +6,7 @@
  *  - Add types from the existing domain model or create new ones
  *  - Add every type from a bounded context in one action (#21)
  *  - Draw relationships by dragging a line from one node to another
- *  - Drag/pan/zoom the canvas
+ *  - Drag/pan/zoom the canvas; drag a bounded-context frame to move its types (#24)
  *  - Optionally run in read-only mode (existing graph items only)
  */
 import { esc, escAttr, shortName, ALL_SECTIONS, SECTION_META } from './helpers.js';
@@ -1268,7 +1268,7 @@ function renderSvg() {
   // Bounded context boundaries (drawn first, behind everything)
   const ctxBounds = computeFeatureContextBounds(st.nodes);
   for (const b of ctxBounds) {
-    s += `<g class="dg-ctx-boundary">`;
+    s += `<g class="dg-ctx-boundary" data-ctx="${escAttr(b.name)}" style="cursor:move">`;
     s += `<rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="12" fill="rgba(255,255,255,.10)" stroke="${b.color}" stroke-width="1.5" stroke-dasharray="8,5" opacity="0.8" />`;
     s += `<text x="${b.x + 14}" y="${b.y + 24}" fill="${b.color}" font-size="20" font-weight="700" font-family="-apple-system,sans-serif" opacity="0.85">${esc(b.name)}</text>`;
     s += '</g>';
@@ -1418,6 +1418,7 @@ function setupInteraction() {
   if (!svg || !st) return;
 
   let dragNode = null, dragOffX = 0, dragOffY = 0;
+  let dragCtx = null, dragCtxStartX = 0, dragCtxStartY = 0, dragCtxNodeStarts = null;
   let panning = false, panStartX = 0, panStartY = 0, panOrigX = 0, panOrigY = 0;
   let portDrag = false; // dragging from a connector port
 
@@ -1425,6 +1426,7 @@ function setupInteraction() {
     const portEl = ev.target.closest('.fe-port');
     const nodeEl = ev.target.closest('.fe-node');
     const edgeEl = ev.target.closest('.fe-edge');
+    const ctxEl = ev.target.closest('.dg-ctx-boundary');
 
     if (!isReadOnlyFeature() && portEl && nodeEl) {
       // Start connection from port
@@ -1476,6 +1478,20 @@ function setupInteraction() {
       st.selectedNode = null;
       renderSvg();
       refreshPanel();
+    } else if (ctxEl) {
+      ev.preventDefault();
+      const ctxName = ctxEl.dataset.ctx;
+      dragCtx = ctxName;
+      const pt = svgPoint(svg, ev);
+      dragCtxStartX = pt.x;
+      dragCtxStartY = pt.y;
+      dragCtxNodeStarts = new Map();
+      for (const n of st.nodes) {
+        if (n.boundedContext === ctxName) {
+          dragCtxNodeStarts.set(n.id, { x: n.x, y: n.y });
+        }
+      }
+      svg.classList.add('dragging-node');
     } else {
       // Deselect + start pan
       if (st.selectedNode || st.selectedEdge !== null) {
@@ -1505,6 +1521,15 @@ function setupInteraction() {
       dragNode.y = pt.y - dragOffY;
       markDirty();
       renderSvg();
+    } else if (dragCtx) {
+      const pt = svgPoint(svg, ev);
+      const dx = pt.x - dragCtxStartX, dy = pt.y - dragCtxStartY;
+      for (const [id, start] of dragCtxNodeStarts) {
+        const n = st.nMap[id];
+        if (n) { n.x = start.x + dx; n.y = start.y + dy; }
+      }
+      markDirty();
+      renderSvg();
     } else if (panning) {
       st.panX = panOrigX + (ev.clientX - panStartX);
       st.panY = panOrigY + (ev.clientY - panStartY);
@@ -1524,7 +1549,10 @@ function setupInteraction() {
       svg.style.cursor = '';
       renderSvg();
     }
+    if (dragCtx) markDirty();
     dragNode = null;
+    dragCtx = null;
+    dragCtxNodeStarts = null;
     panning = false;
     svg.classList.remove('dragging', 'dragging-node');
   }
@@ -1536,7 +1564,10 @@ function setupInteraction() {
       svg.style.cursor = '';
       renderSvg();
     }
+    if (dragCtx) markDirty();
     dragNode = null;
+    dragCtx = null;
+    dragCtxNodeStarts = null;
     panning = false;
     svg.classList.remove('dragging', 'dragging-node');
   });
