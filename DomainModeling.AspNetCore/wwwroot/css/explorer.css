@@ -505,7 +505,8 @@ body {
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  overflow: hidden;
+  /* visible so .rel-more-tip popovers are not clipped (was overflow: hidden) */
+  overflow: visible;
 }
 
 .rel-table th { text-align: left; padding: 8px 12px; color: var(--text-muted); font-weight: 500; background: var(--bg-card); border-bottom: 1px solid var(--border); }

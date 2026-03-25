@@ -91,6 +91,20 @@ export function relLinkDisplayText(r) {
   return t || String(r.kind || '');
 }
 
+/** First distinct display string + remaining distinct strings (order preserved, skips duplicates). */
+export function uniqueOrderedLinkTexts(strings) {
+  const seen = new Set();
+  const order = [];
+  for (const raw of strings || []) {
+    const s = String(raw || '').trim();
+    if (!s) continue;
+    if (seen.has(s)) continue;
+    seen.add(s);
+    order.push(s);
+  }
+  return { primary: order[0] || '', more: order.slice(1) };
+}
+
 /** Groups relationships that share the same source, target, and kind (order preserved). */
 export function groupDuplicateRelationships(rels) {
   const map = new Map();
@@ -132,13 +146,14 @@ export function mergeRelationshipsToDisplayEdges(relationships, nMap) {
   const out = [];
   for (const list of map.values()) {
     const first = list[0];
+    const { primary, more } = uniqueOrderedLinkTexts(list.map(relLinkDisplayText));
     out.push({
       source: first.sourceType,
       target: first.targetType,
       kind: first.kind,
       label: first.label || '',
-      primaryDisplay: relLinkDisplayText(first),
-      moreDisplay: list.slice(1).map(relLinkDisplayText),
+      primaryDisplay: primary,
+      moreDisplay: more,
     });
   }
   return out;
@@ -146,11 +161,17 @@ export function mergeRelationshipsToDisplayEdges(relationships, nMap) {
 
 /** HTML for relationship label column: first link + (more…) with bullet tooltip. */
 export function formatRelLabelMoreHtml(primaryText, moreTexts) {
-  const primary = primaryText || '';
-  if (!moreTexts || moreTexts.length === 0) {
-    if (!primary) return '<span style="color:var(--text-dim)">—</span>';
+  const { primary, more } = uniqueOrderedLinkTexts([
+    ...(primaryText != null && String(primaryText).trim() ? [primaryText] : []),
+    ...(moreTexts || []),
+  ]);
+  if (!primary && more.length === 0) {
+    return '<span style="color:var(--text-dim)">—</span>';
+  }
+  if (more.length === 0) {
     return esc(primary);
   }
-  const bullets = moreTexts.map(t => `<li>${esc(t)}</li>`).join('');
-  return `<span class="rel-primary">${esc(primary)}</span><span class="rel-more-wrap" tabindex="0"><span class="rel-more-trigger">(more…)</span><span class="rel-more-tip" role="tooltip"><ul class="rel-more-list">${bullets}</ul></span></span>`;
+  const bullets = more.map(t => `<li>${esc(t)}</li>`).join('');
+  const titleTip = more.map(t => `• ${t}`).join('\n');
+  return `<span class="rel-primary">${esc(primary)}</span><span class="rel-more-wrap" tabindex="0" title="${escAttr(titleTip)}"><span class="rel-more-trigger">(more…)</span><span class="rel-more-tip" role="tooltip"><ul class="rel-more-list">${bullets}</ul></span></span>`;
 }
