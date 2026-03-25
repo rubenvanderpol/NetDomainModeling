@@ -456,6 +456,7 @@ function wireFeatureEditorGlobals() {
     toggleBcDropdown: featureEditorModule.toggleBcDropdown,
     changeLayer: featureEditorModule.changeLayer,
     toggleLayerDropdown: featureEditorModule.toggleLayerDropdown,
+    toggleViewMode: featureEditorModule.toggleFeatureEditorViewMode,
   };
 }
 // ── Go! ──────────────────────────────────────────────

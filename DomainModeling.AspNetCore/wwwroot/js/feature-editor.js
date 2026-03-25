@@ -8,6 +8,7 @@
  *  - Draw relationships by dragging a line from one node to another
  *  - Drag/pan/zoom the canvas; drag a bounded-context frame to move its types (#24)
  *  - Optionally run in read-only mode (existing graph items only)
+ *  - View mode (#28): full-width canvas like the main diagram (pan/zoom only, no editing chrome)
  */
 import { esc, escAttr, shortName, ALL_SECTIONS, SECTION_META } from './helpers.js';
 import { renderTabBar } from './tabs.js';
@@ -66,6 +67,8 @@ const KIND_LABELS = {
 const LAYERS = ['Domain', 'Application', 'Infrastructure'];
 const LAYER_COLORS = { Domain: '#a78bfa', Application: '#60a5fa', Infrastructure: '#fb923c' };
 
+const FEATURE_EDITOR_VIEW_MODE_KEY = 'domain-model-feature-editor-view-mode';
+
 // ── Module state ─────────────────────────────────────
 let baseUrl = '';
 let domainData = null;   // full domain graph
@@ -76,6 +79,19 @@ let st = null;            // current feature editor state
 let dirty = false;
 let connecting = null;    // { sourceId, mouseX, mouseY } when drawing a relation line
 let featureExports = [];  // available export registrations from server
+/** When true, show canvas full-width like the main diagram (no sidebars / property editing). */
+let viewModeOnly = false;
+
+/** Abort previous SVG/document listeners so re-mount does not stack handlers. */
+let feInteractionAbort = null;
+
+try {
+  viewModeOnly = sessionStorage.getItem(FEATURE_EDITOR_VIEW_MODE_KEY) === '1';
+} catch { viewModeOnly = false; }
+
+function isViewModeOnly() {
+  return viewModeOnly === true;
+}
 
 // ── Public API ───────────────────────────────────────
 
@@ -86,6 +102,21 @@ export async function initFeatureEditor(apiBaseUrl, data) {
   await loadFeatureExports();
 }
 
+/** Toggle diagram-style view mode (issue #28). Persists for the browser tab session. */
+export function toggleFeatureEditorViewMode() {
+  viewModeOnly = !viewModeOnly;
+  try {
+    if (viewModeOnly) sessionStorage.setItem(FEATURE_EDITOR_VIEW_MODE_KEY, '1');
+    else sessionStorage.removeItem(FEATURE_EDITOR_VIEW_MODE_KEY);
+  } catch { /* ignore */ }
+  connecting = null;
+  if (st) {
+    st.selectedNode = null;
+    st.selectedEdge = null;
+  }
+  rerender();
+}
+
 function isReadOnlyFeature() {
   return currentFeatureReadOnly === true;
 }
@@ -93,13 +124,16 @@ function isReadOnlyFeature() {
 export function renderFeatureEditorView() {
   let html = renderTabBar('features');
 
-  html += '<div class="fe-layout">';
+  const vm = isViewModeOnly();
+  html += `<div class="fe-layout${vm ? ' fe-view-mode' : ''}">`;
 
   // ── Left: Feature list + type palette ──
-  html += '<div class="fe-sidebar" id="feSidebar">';
-  html += renderFeatureListPanel();
-  html += renderPalettePanel();
-  html += '</div>';
+  if (!vm) {
+    html += '<div class="fe-sidebar" id="feSidebar">';
+    html += renderFeatureListPanel();
+    html += renderPalettePanel();
+    html += '</div>';
+  }
 
   // ── Center: Canvas ──
   html += '<div class="fe-canvas-wrap" id="feCanvasWrap">';
@@ -111,19 +145,27 @@ export function renderFeatureEditorView() {
     if (isReadOnlyFeature()) {
       html += '<span class="fe-mode-badge" title="Only existing domain items can be included">read-only feature mode</span>';
     }
-    html += `<span class="fe-dirty-indicator" id="feDirtyIndicator" style="display:${dirty ? 'inline' : 'none'}">● unsaved</span>`;
+    if (vm) {
+      html += '<span class="fe-mode-badge fe-view-badge" title="Pan and zoom only; exit to edit">view mode</span>';
+    }
+    html += `<span class="fe-dirty-indicator" id="feDirtyIndicator" style="display:${dirty && !vm ? 'inline' : 'none'}">● unsaved</span>`;
     html += '<span class="fe-toolbar-spacer"></span>';
-    html += '<button class="fe-btn" onclick="window.__featureEditor.fit()" title="Fit to view">⊡ Fit</button>';
-    if (featureExports.length > 0) {
-      html += '<label class="fe-export-opt" title="Append command-handler DI scaffold (ICommandHandler&lt;T&gt;) to text exports">';
-      html += '<input type="checkbox" id="feRegisterCommands" /> Register commands';
-      html += '</label>';
+    html += `<button type="button" class="fe-btn${vm ? ' primary' : ''}" onclick="window.__featureEditor.toggleViewMode()" title="${vm ? 'Show sidebars and editing tools' : 'Full-width canvas like the main diagram'}">${vm ? '✎ Edit' : '👁 View'}</button>`;
+    if (!vm) {
+      html += '<button class="fe-btn" onclick="window.__featureEditor.fit()" title="Fit to view">⊡ Fit</button>';
+      if (featureExports.length > 0) {
+        html += '<label class="fe-export-opt" title="Append command-handler DI scaffold (ICommandHandler&lt;T&gt;) to text exports">';
+        html += '<input type="checkbox" id="feRegisterCommands" /> Register commands';
+        html += '</label>';
+      }
+      for (const exp of featureExports) {
+        html += `<button class="fe-btn" onclick="window.__featureEditor.downloadExport('${escAttr(exp.name)}')" title="Download ${esc(exp.name)}">⬇ ${esc(exp.name)}</button>`;
+      }
+      html += `<button class="fe-btn primary" onclick="window.__featureEditor.save()" title="Save feature" id="feSaveBtn">Save</button>`;
+      html += `<button class="fe-btn danger" onclick="window.__featureEditor.deleteFeature()" title="Delete feature">Delete</button>`;
+    } else {
+      html += '<button class="fe-btn" onclick="window.__featureEditor.fit()" title="Fit to view">⊡ Fit</button>';
     }
-    for (const exp of featureExports) {
-      html += `<button class="fe-btn" onclick="window.__featureEditor.downloadExport('${escAttr(exp.name)}')" title="Download ${esc(exp.name)}">⬇ ${esc(exp.name)}</button>`;
-    }
-    html += `<button class="fe-btn primary" onclick="window.__featureEditor.save()" title="Save feature" id="feSaveBtn">Save</button>`;
-    html += `<button class="fe-btn danger" onclick="window.__featureEditor.deleteFeature()" title="Delete feature">Delete</button>`;
     html += '</div>';
     html += '<div class="fe-canvas" id="feCanvas">';
     html += '<div class="diagram-controls">';
@@ -136,9 +178,11 @@ export function renderFeatureEditorView() {
   html += '</div>';
 
   // ── Right: Properties panel ──
-  html += '<div class="fe-panel" id="fePanel">';
-  html += renderPropertiesPanel();
-  html += '</div>';
+  if (!vm) {
+    html += '<div class="fe-panel" id="fePanel">';
+    html += renderPropertiesPanel();
+    html += '</div>';
+  }
 
   html += '</div>';
   return html;
@@ -148,7 +192,8 @@ export function mountFeatureEditor() {
   if (!st || !currentFeatureName) return;
   renderSvg();
   fitToView();
-  setupInteraction();
+  if (isViewModeOnly()) setupViewModeInteraction();
+  else setupInteraction();
 }
 
 // ── Feature list management ──────────────────────────
@@ -1267,8 +1312,9 @@ function renderSvg() {
 
   // Bounded context boundaries (drawn first, behind everything)
   const ctxBounds = computeFeatureContextBounds(st.nodes);
+  const ctxDragCursor = isViewModeOnly() ? 'default' : 'move';
   for (const b of ctxBounds) {
-    s += `<g class="dg-ctx-boundary" data-ctx="${escAttr(b.name)}" style="cursor:move">`;
+    s += `<g class="dg-ctx-boundary" data-ctx="${escAttr(b.name)}" style="cursor:${ctxDragCursor}">`;
     s += `<rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="12" fill="rgba(255,255,255,.10)" stroke="${b.color}" stroke-width="1.5" stroke-dasharray="8,5" opacity="0.8" />`;
     s += `<text x="${b.x + 14}" y="${b.y + 24}" fill="${b.color}" font-size="20" font-weight="700" font-family="-apple-system,sans-serif" opacity="0.85">${esc(b.name)}</text>`;
     s += '</g>';
@@ -1296,11 +1342,13 @@ function renderSvg() {
     const dashed = (e.kind === 'Emits' || e.kind === 'Handles' || e.kind === 'Publishes' || e.kind === 'References' || e.kind === 'ReferencesById') ? ' stroke-dasharray="6,4"' : '';
     const markerStart = (e.kind === 'Contains' || e.kind === 'Has' || e.kind === 'HasMany') ? ' marker-start="url(#fe-diamond)"' : '';
     const markerEnd = (e.kind === 'References' || e.kind === 'ReferencesById') ? '' : ` marker-end="url(#fe-arrow-${e.kind})"`;
-    const selected = st.selectedEdge === ei;
+    const selected = !isViewModeOnly() && st.selectedEdge === ei;
     const sw = selected ? 3 : 1.5;
-    const op = selected ? 1 : 0.65;
-    // Invisible hit area
-    s += `<line class="fe-edge" data-idx="${ei}" x1="${p1.x}" y1="${p1.y}" x2="${p2.x}" y2="${p2.y}" stroke="transparent" stroke-width="12" style="cursor:pointer" />`;
+    const op = selected ? 1 : (isViewModeOnly() ? 0.88 : 0.65);
+    // Invisible hit area (skipped in view mode — edges are display-only)
+    if (!isViewModeOnly()) {
+      s += `<line class="fe-edge" data-idx="${ei}" x1="${p1.x}" y1="${p1.y}" x2="${p2.x}" y2="${p2.y}" stroke="transparent" stroke-width="12" style="cursor:pointer" />`;
+    }
     s += `<line class="fe-edge-vis" data-idx="${ei}" x1="${p1.x}" y1="${p1.y}" x2="${p2.x}" y2="${p2.y}" stroke="${color}" stroke-width="${sw}"${dashed}${markerStart}${markerEnd} opacity="${op}" style="pointer-events:none" />`;
     const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
     s += `<text x="${mx}" y="${my - 6}" text-anchor="middle" fill="${color}" font-size="9" font-family="-apple-system,sans-serif" opacity="0.7" style="pointer-events:none">${esc(e.label || e.kind)}</text>`;
@@ -1317,15 +1365,16 @@ function renderSvg() {
   // Nodes
   for (const n of st.nodes) {
     const c = n.cfg;
-    const selected = st.selectedNode === n.id;
+    const selected = !isViewModeOnly() && st.selectedNode === n.id;
     const strokeW = selected ? 2.5 : 1.5;
     const stroke = selected ? '#6366f1' : c.border;
-    s += `<g class="fe-node" data-id="${escAttr(n.id)}" transform="translate(${n.x},${n.y})" style="cursor:pointer">`;
+    const nodeCursor = isViewModeOnly() ? 'default' : 'pointer';
+    s += `<g class="fe-node" data-id="${escAttr(n.id)}" transform="translate(${n.x},${n.y})" style="cursor:${nodeCursor}">`;
     s += `<rect x="3" y="3" width="${n.w}" height="${n.h}" rx="8" fill="rgba(0,0,0,.3)" />`;
     s += `<rect width="${n.w}" height="${n.h}" rx="8" fill="${c.bg}" stroke="${stroke}" stroke-width="${strokeW}" />`;
 
     // Connector port (top-right circle for drag-to-connect)
-    if (!isReadOnlyFeature()) {
+    if (!isReadOnlyFeature() && !isViewModeOnly()) {
       s += `<circle class="fe-port" cx="${n.w - 8}" cy="12" r="5" fill="${c.color}" opacity="0.6" style="cursor:crosshair" />`;
     }
 
@@ -1411,11 +1460,66 @@ export function featureEditorZoom(factor) {
 
 export function featureEditorFit() { fitToView(); }
 
+// ── Interaction: view mode (diagram-like: pan / zoom only) ──
+
+function setupViewModeInteraction() {
+  const svg = document.getElementById('feSvg');
+  if (!svg || !st) return;
+
+  if (feInteractionAbort) feInteractionAbort.abort();
+  feInteractionAbort = new AbortController();
+  const sig = feInteractionAbort.signal;
+
+  let panning = false, panStartX = 0, panStartY = 0, panOrigX = 0, panOrigY = 0;
+
+  svg.addEventListener('mousedown', function viewModeMouseDown(ev) {
+    if (!document.getElementById('feSvg') || !isViewModeOnly()) return;
+    ev.preventDefault();
+    panning = true;
+    panStartX = ev.clientX;
+    panStartY = ev.clientY;
+    panOrigX = st.panX;
+    panOrigY = st.panY;
+    svg.classList.add('dragging');
+  }, { signal: sig });
+
+  svg.addEventListener('mousemove', function viewModeMouseMove(ev) {
+    if (!document.getElementById('feSvg') || !isViewModeOnly()) return;
+    if (!panning) return;
+    st.panX = panOrigX + (ev.clientX - panStartX);
+    st.panY = panOrigY + (ev.clientY - panStartY);
+    renderSvg();
+  }, { signal: sig });
+
+  function endViewPan() {
+    panning = false;
+    svg.classList.remove('dragging');
+  }
+  svg.addEventListener('mouseup', endViewPan, { signal: sig });
+  svg.addEventListener('mouseleave', endViewPan, { signal: sig });
+
+  svg.addEventListener('wheel', function viewModeWheel(ev) {
+    if (!document.getElementById('feSvg') || !isViewModeOnly()) return;
+    ev.preventDefault();
+    const factor = ev.deltaY < 0 ? 1.1 : 0.9;
+    const rect = svg.getBoundingClientRect();
+    const mx = ev.clientX - rect.left, my = ev.clientY - rect.top;
+    st.panX = mx - (mx - st.panX) * factor;
+    st.panY = my - (my - st.panY) * factor;
+    st.zoom *= factor;
+    renderSvg();
+  }, { passive: false, signal: sig });
+}
+
 // ── Interaction: drag nodes, pan, zoom, select, connect ──
 
 function setupInteraction() {
   const svg = document.getElementById('feSvg');
   if (!svg || !st) return;
+
+  if (feInteractionAbort) feInteractionAbort.abort();
+  feInteractionAbort = new AbortController();
+  const sig = feInteractionAbort.signal;
 
   let dragNode = null, dragOffX = 0, dragOffY = 0;
   let dragCtx = null, dragCtxStartX = 0, dragCtxStartY = 0, dragCtxNodeStarts = null;
@@ -1507,7 +1611,7 @@ function setupInteraction() {
       panOrigY = st.panY;
       svg.classList.add('dragging');
     }
-  });
+  }, { signal: sig });
 
   svg.addEventListener('mousemove', function (ev) {
     if (connecting && portDrag) {
@@ -1535,7 +1639,7 @@ function setupInteraction() {
       st.panY = panOrigY + (ev.clientY - panStartY);
       renderSvg();
     }
-  });
+  }, { signal: sig });
 
   function endDrag(ev) {
     if (portDrag && connecting) {
@@ -1556,7 +1660,7 @@ function setupInteraction() {
     panning = false;
     svg.classList.remove('dragging', 'dragging-node');
   }
-  svg.addEventListener('mouseup', endDrag);
+  svg.addEventListener('mouseup', endDrag, { signal: sig });
   svg.addEventListener('mouseleave', function() {
     if (portDrag) {
       connecting = null;
@@ -1570,7 +1674,7 @@ function setupInteraction() {
     dragCtxNodeStarts = null;
     panning = false;
     svg.classList.remove('dragging', 'dragging-node');
-  });
+  }, { signal: sig });
 
   svg.addEventListener('wheel', function (ev) {
     ev.preventDefault();
@@ -1581,7 +1685,7 @@ function setupInteraction() {
     st.panY = my - (my - st.panY) * factor;
     st.zoom *= factor;
     renderSvg();
-  }, { passive: false });
+  }, { passive: false, signal: sig });
 
   // Keyboard: Escape to cancel connection / deselect, Delete to remove
   document.addEventListener('keydown', function handler(ev) {
@@ -1611,7 +1715,7 @@ function setupInteraction() {
         removeEdge(st.selectedEdge);
       }
     }
-  });
+  }, { signal: sig });
 }
 
 function svgPoint(svg, ev) {
