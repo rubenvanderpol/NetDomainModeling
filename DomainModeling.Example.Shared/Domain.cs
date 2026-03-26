@@ -35,6 +35,7 @@ public interface ICommandHandler<in TCommand>
 
 public interface IRepository<T> where T : AggregateRoot
 {
+    Task<T?> GetByIdAsync(Guid id, CancellationToken ct = default);
     Task AddAsync(T aggregate, CancellationToken ct = default);
     Task UpdateAsync(T aggregate, CancellationToken ct = default);
     Task DeleteAsync(T aggregate, CancellationToken ct = default);
@@ -75,6 +76,12 @@ public sealed class EmailAddress : ValueObject
 public class InMemoryRepository<T> : IRepository<T> where T : AggregateRoot
 {
     private readonly Dictionary<Guid, T> _store = new();
+
+    public Task<T?> GetByIdAsync(Guid id, CancellationToken ct = default)
+    {
+        _store.TryGetValue(id, out var aggregate);
+        return Task.FromResult(aggregate);
+    }
 
     public Task AddAsync(T aggregate, CancellationToken ct = default)
     {
