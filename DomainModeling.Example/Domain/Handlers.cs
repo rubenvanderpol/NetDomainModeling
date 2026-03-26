@@ -34,11 +34,11 @@ public class WelcomeEmailHandler : IEventHandler<CustomerRegisteredEvent>
 
 public record PlaceOrderCommand(Guid CustomerId, List<string> Products);
 
-public class PlaceOrderCommandHandler(InMemoryRepository<Order> Orders) : ICommandHandler<PlaceOrderCommand>
+public class PlaceOrderCommandHandler(IRepository<Order> orders) : ICommandHandler<PlaceOrderCommand>
 {
     public async Task HandleAsync(PlaceOrderCommand command, CancellationToken ct = default)
     {
-        ArgumentNullException.ThrowIfNull(Orders);
+        ArgumentNullException.ThrowIfNull(orders);
 
         var order = new Order
         {
@@ -46,7 +46,7 @@ public class PlaceOrderCommandHandler(InMemoryRepository<Order> Orders) : IComma
         };
 
         order.Place();
-        await Task.CompletedTask;
+        await orders.AddAsync(order, ct).ConfigureAwait(false);
     }
 }
 

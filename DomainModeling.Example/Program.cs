@@ -1,9 +1,11 @@
 using System.Reflection;
 using DomainModeling.AspNetCore;
 using DomainModeling.Builder;
+using DomainModeling.Example.Application;
 using DomainModeling.Example.Domain;
 using DomainModeling.Example.IntegrationEvents;
 using DomainModeling.Example.Shipping.Domain;
+using MediatR;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -37,6 +39,9 @@ var domainGraph = DDDBuilder.Create(ctx => ctx
     .Build();
 
 builder.Services.AddDomainModel(domainGraph);
+
+builder.Services.AddMediatR(cfg =>
+    cfg.RegisterServicesFromAssemblyContaining<ShipOrderCommandHandler>());
 
 // Register in-memory repositories
 builder.Services.AddSingleton<IRepository<Order>, OrderRepository>();
@@ -123,5 +128,13 @@ app.MapDomainModel(domainGraph, configure: opts =>
 
 app.MapGet("/", () => Results.Redirect("/domain-model"));
 app.MapGet("/favicon.ico", () => Results.NoContent());
+
+app.MapPost("/api/orders/{orderId:guid}/ship", async (Guid orderId, ISender mediator, CancellationToken ct) =>
+{
+    var result = await mediator.Send(new ShipOrderCommand(orderId), ct).ConfigureAwait(false);
+    return result.Success
+        ? Results.Ok(new { orderId, shipped = true })
+        : Results.NotFound(new { error = result.Error });
+});
 
 app.Run();
