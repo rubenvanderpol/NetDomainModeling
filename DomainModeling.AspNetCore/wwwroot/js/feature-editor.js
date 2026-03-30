@@ -430,8 +430,13 @@ export function renderFeatureEditorView() {
     }
     html += '</div>';
     html += `<div class="fe-canvas${vm ? ' fe-view-canvas' : ''}" id="feCanvas">`;
+    html += '<div class="diagram-controls">';
+    html += '<button onclick="window.__featureEditor.zoom(1.25)" title="Zoom in">+</button>';
+    html += '<button onclick="window.__featureEditor.zoom(0.8)" title="Zoom out">−</button>';
+    html += '</div>';
     if (vm) {
-      html += '<div class="diagram-edge-legend fe-view-edge-legend">';
+      // Same DOM order and classes as diagram.js so diagram.css positions (bottom-right, compact column) apply.
+      html += '<div class="diagram-edge-legend">';
       html += '<div class="diagram-edge-legend-item"><span class="diagram-edge-legend-line" style="color:#60a5fa"></span>Contains</div>';
       html += '<div class="diagram-edge-legend-item"><span class="diagram-edge-legend-line dashed" style="color:#34d399"></span>References</div>';
       html += '<div class="diagram-edge-legend-item"><span class="diagram-edge-legend-line dashed" style="color:#34d399"></span>References (by Id)</div>';
@@ -443,10 +448,6 @@ export function renderFeatureEditorView() {
       html += '<div class="diagram-edge-legend-item"><span class="diagram-edge-legend-line" style="color:#fb923c"></span>Manages</div>';
       html += '</div>';
     }
-    html += '<div class="diagram-controls">';
-    html += '<button onclick="window.__featureEditor.zoom(1.25)" title="Zoom in">+</button>';
-    html += '<button onclick="window.__featureEditor.zoom(0.8)" title="Zoom out">−</button>';
-    html += '</div>';
     html += '<svg id="feSvg"></svg>';
     html += '</div>';
   }
