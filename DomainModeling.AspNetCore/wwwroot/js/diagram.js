@@ -167,11 +167,51 @@ async function flushDiagramLayoutToServer() {
   } catch { /* ignore network errors */ }
 }
 
-function syncDiagramToolbarToggles() {
+export function syncDiagramToolbarToggles() {
+  const aliasBg = showAliases ? 'var(--bg-hover)' : '';
+  const layerBg = showLayers ? 'var(--bg-hover)' : '';
   const aliasBtn = document.getElementById('diagramAliasToggle');
-  if (aliasBtn) aliasBtn.style.background = showAliases ? 'var(--bg-hover)' : '';
+  if (aliasBtn) aliasBtn.style.background = aliasBg;
   const layerBtn = document.getElementById('diagramLayerToggle');
-  if (layerBtn) layerBtn.style.background = showLayers ? 'var(--bg-hover)' : '';
+  if (layerBtn) layerBtn.style.background = layerBg;
+  const feAlias = document.getElementById('feAliasToggle');
+  if (feAlias) feAlias.style.background = aliasBg;
+  const feLayer = document.getElementById('feLayerToggle');
+  if (feLayer) feLayer.style.background = layerBg;
+}
+
+/** Read alias/layer toggles from localStorage (e.g. after feature editor view toolbar changed them). */
+export function reloadDiagramViewFlagsFromStorage() {
+  try {
+    showAliases = localStorage.getItem(SHOW_ALIASES_KEY) === 'true';
+  } catch { showAliases = false; }
+  try {
+    showLayers = localStorage.getItem(SHOW_LAYERS_KEY) === 'true';
+  } catch { showLayers = false; }
+}
+
+export function getDiagramShowAliases() {
+  return showAliases;
+}
+
+export function getDiagramShowLayers() {
+  return showLayers;
+}
+
+export function loadDiagramHiddenKindsSet() {
+  return new Set(loadHiddenKinds());
+}
+
+export function loadDiagramHiddenEdgeKindsSet() {
+  return new Set(loadHiddenEdgeKinds());
+}
+
+export function saveDiagramHiddenKindsSet(hiddenKinds) {
+  saveHiddenKinds(hiddenKinds instanceof Set ? hiddenKinds : new Set(hiddenKinds || []));
+}
+
+export function saveDiagramHiddenEdgeKindsSet(hiddenEdgeKinds) {
+  saveHiddenEdgeKinds(hiddenEdgeKinds instanceof Set ? hiddenEdgeKinds : new Set(hiddenEdgeKinds || []));
 }
 
 function loadPositions() {
@@ -1252,6 +1292,9 @@ export function diagramToggleAliases() {
   showAliases = !showAliases;
   try { localStorage.setItem(SHOW_ALIASES_KEY, showAliases ? 'true' : 'false'); } catch { /* ignore */ }
   syncDiagramToolbarToggles();
+  if (typeof window.__featureEditor?.onDiagramViewFlagsChanged === 'function') {
+    window.__featureEditor.onDiagramViewFlagsChanged();
+  }
   if (dgState) {
     scheduleFlushDiagramLayout();
     for (const n of dgState.allNodes) n.h = nodeHeight(n);
@@ -1263,6 +1306,9 @@ export function diagramToggleLayers() {
   showLayers = !showLayers;
   try { localStorage.setItem(SHOW_LAYERS_KEY, showLayers); } catch { /* ignore */ }
   syncDiagramToolbarToggles();
+  if (typeof window.__featureEditor?.onDiagramViewFlagsChanged === 'function') {
+    window.__featureEditor.onDiagramViewFlagsChanged();
+  }
   if (dgState) {
     scheduleFlushDiagramLayout();
     renderSvg();

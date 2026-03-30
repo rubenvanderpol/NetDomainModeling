@@ -10,8 +10,20 @@
  *  - Optionally run in read-only mode (existing graph items only)
  *  - View mode (#28): full-width canvas like the main diagram (pan/zoom only, no editing chrome)
  */
-import { esc, escAttr, shortName, ALL_SECTIONS, SECTION_META } from './helpers.js';
+import { esc, escAttr, shortName, ALL_SECTIONS } from './helpers.js';
 import { renderTabBar } from './tabs.js';
+import {
+  getDiagramShowAliases,
+  getDiagramShowLayers,
+  reloadDiagramViewFlagsFromStorage,
+  loadDiagramHiddenKindsSet,
+  loadDiagramHiddenEdgeKindsSet,
+  saveDiagramHiddenKindsSet,
+  saveDiagramHiddenEdgeKindsSet,
+  diagramToggleAliases,
+  diagramToggleLayers,
+  syncDiagramToolbarToggles,
+} from './diagram.js';
 
 // ── Constants ────────────────────────────────────────
 const NODE_W = 200;
@@ -66,6 +78,28 @@ const KIND_LABELS = {
 
 const LAYERS = ['Domain', 'Application', 'Infrastructure'];
 const LAYER_COLORS = { Domain: '#a78bfa', Application: '#60a5fa', Infrastructure: '#fb923c' };
+
+/** Labels / styles for relation filter dropdown (aligned with main diagram). */
+const FE_EDGE_CFG = {
+  Contains: { label: 'Contains', color: '#60a5fa', dashed: false },
+  References: { label: 'References', color: '#34d399', dashed: true },
+  ReferencesById: { label: 'References (by Id)', color: '#34d399', dashed: true },
+  Has: { label: 'Has', color: '#60a5fa', dashed: false },
+  HasMany: { label: 'Has Many', color: '#60a5fa', dashed: false },
+  Emits: { label: 'Emits', color: '#fbbf24', dashed: true },
+  Handles: { label: 'Handles', color: '#f472b6', dashed: true },
+  Manages: { label: 'Manages', color: '#fb923c', dashed: false },
+  Publishes: { label: 'Publishes', color: '#2dd4bf', dashed: true },
+};
+
+const FE_KIND_DROPDOWN_LABEL = {
+  aggregate: 'Aggregates', entity: 'Entities', valueObject: 'Value Objects',
+  subType: 'Sub Types',
+  event: 'Domain Events', integrationEvent: 'Integration Events',
+  commandHandlerTarget: 'Cmd handler targets', eventHandler: 'Event Handlers',
+  commandHandler: 'Command Handlers', queryHandler: 'Query Handlers',
+  repository: 'Repositories', service: 'Services',
+};
 
 const FEATURE_EDITOR_VIEW_MODE_KEY = 'domain-model-feature-editor-view-mode';
 
@@ -122,6 +156,213 @@ export function isFeatureEditorViewModeLayoutActive() {
   return isViewModeOnly() === true && !!currentFeatureName;
 }
 
+/** Called from diagram.js when Aliases/Layers toggles change shared localStorage. */
+export function onDiagramViewFlagsChanged() {
+  if (!isViewModeOnly() || !st) return;
+  reloadDiagramViewFlagsFromStorage();
+  syncDiagramToolbarToggles();
+  for (const n of st.nodes) n.h = nodeHeight(n);
+  renderSvg();
+}
+
+function feToggleDropdown(menuId, triggerId) {
+  const menu = document.getElementById(menuId);
+  const trigger = document.getElementById(triggerId);
+  if (!menu) return;
+  const open = menu.classList.toggle('visible');
+  if (trigger) trigger.classList.toggle('open', open);
+  if (!open) return;
+  const close = (ev) => {
+    const clickedTrigger = trigger && (ev.target === trigger || trigger.contains(ev.target));
+    if (!menu.contains(ev.target) && !clickedTrigger) {
+      menu.classList.remove('visible');
+      if (trigger) trigger.classList.remove('open');
+      document.removeEventListener('click', close);
+    }
+  };
+  setTimeout(() => document.addEventListener('click', close), 0);
+}
+
+function renderFeKindFilters() {
+  if (!st) return '';
+  const presentKinds = new Set(st.nodes.map(n => n.kind));
+  if (presentKinds.size === 0) return '';
+
+  const visibleKinds = [...presentKinds].filter(k => !st.hiddenKinds.has(k)).length;
+  let html = `<button type="button" class="rel-dropdown-trigger" id="feKindFilterTrigger" onclick="window.__featureEditor.toggleFeKindFilter()" title="Filter node types">`;
+  html += '<span style="font-size:10px;opacity:.7">◈</span>';
+  html += '<span>Node Types</span>';
+  html += `<span class="rel-hidden-count">${visibleKinds}/${presentKinds.size}</span>`;
+  html += '<span class="rel-chevron">▾</span>';
+  html += '</button>';
+  html += '<div class="rel-dropdown-menu" id="feKindFilterMenu">';
+  html += '<div class="rel-dropdown-actions">';
+  html += '<button type="button" onclick="window.__featureEditor.showAllFeKinds()">Show all</button>';
+  html += '<button type="button" onclick="window.__featureEditor.hideAllFeKinds()">Hide all</button>';
+  html += '</div>';
+  for (const kind of Object.keys(KIND_CFG)) {
+    if (!presentKinds.has(kind)) continue;
+    const cfg = KIND_CFG[kind];
+    const visible = !st.hiddenKinds.has(kind);
+    const count = st.nodes.filter(n => n.kind === kind).length;
+    const label = FE_KIND_DROPDOWN_LABEL[kind] || kind;
+    html += `<div class="rel-dropdown-item${visible ? ' checked' : ''}" onclick="window.__featureEditor.toggleFeKind(event, '${kind}')" data-node-kind="${escAttr(kind)}">`;
+    html += `<span class="rel-check">${visible ? '✓' : ''}</span>`;
+    html += `<span class="diagram-kind-dot" style="background:${cfg.color}"></span>`;
+    html += `<span class="rel-kind-label">${esc(label)}</span>`;
+    html += `<span class="diagram-kind-count">${count}</span>`;
+    html += '</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function renderFeEdgeFilter() {
+  if (!st) return '';
+  const present = new Set(st.edges.map(e => e.kind));
+  if (present.size === 0) return '';
+
+  const hiddenCount = st.hiddenEdgeKinds.size;
+  let h = `<button type="button" class="rel-dropdown-trigger" id="feEdgeFilterTrigger" onclick="window.__featureEditor.toggleFeEdgeFilter()" title="Filter relation types">`;
+  h += '<span style="font-size:10px;opacity:.7">⟜</span>';
+  h += '<span>Relations</span>';
+  if (hiddenCount > 0) h += `<span class="rel-hidden-count">${hiddenCount}</span>`;
+  h += '<span class="rel-chevron">▾</span>';
+  h += '</button>';
+  h += '<div class="rel-dropdown-menu" id="feEdgeFilterMenu">';
+  for (const kind of Object.keys(FE_EDGE_CFG)) {
+    if (!present.has(kind)) continue;
+    const cfg = FE_EDGE_CFG[kind];
+    const visible = !st.hiddenEdgeKinds.has(kind);
+    h += `<div class="rel-dropdown-item${visible ? ' checked' : ''}" onclick="window.__featureEditor.toggleFeEdgeKind(event, '${kind}')" data-edge-kind="${escAttr(kind)}">`;
+    h += `<span class="rel-check">${visible ? '✓' : ''}</span>`;
+    h += `<span class="rel-line-sample${cfg.dashed ? ' dashed' : ''}" style="color:${cfg.color}"></span>`;
+    h += `<span class="rel-kind-label">${esc(cfg.label)}</span>`;
+    h += '</div>';
+  }
+  h += '</div>';
+  return h;
+}
+
+function refreshFeViewFilters() {
+  if (!isViewModeOnly() || !st) return;
+  const kindEl = document.getElementById('feKindFilterWrap');
+  const prevMenu = document.getElementById('feKindFilterMenu');
+  const prevTrigger = document.getElementById('feKindFilterTrigger');
+  const wasVisible = !!prevMenu?.classList.contains('visible');
+  const wasOpen = !!prevTrigger?.classList.contains('open');
+  if (kindEl) kindEl.innerHTML = renderFeKindFilters();
+  if (wasVisible || wasOpen) {
+    document.getElementById('feKindFilterMenu')?.classList.add('visible');
+    document.getElementById('feKindFilterTrigger')?.classList.add('open');
+  }
+  refreshFeEdgeFilterOnly();
+}
+
+function refreshFeEdgeFilterOnly() {
+  if (!isViewModeOnly() || !st) return;
+  const edgeEl = document.getElementById('feEdgeFilterWrap');
+  if (edgeEl) edgeEl.innerHTML = renderFeEdgeFilter();
+}
+
+function syncFeKindFilterUi() {
+  if (!st) return;
+  const trigger = document.getElementById('feKindFilterTrigger');
+  const menu = document.getElementById('feKindFilterMenu');
+  if (!trigger || !menu) {
+    refreshFeViewFilters();
+    return;
+  }
+  const presentKinds = new Set(st.nodes.map(n => n.kind));
+  const visibleKinds = [...presentKinds].filter(k => !st.hiddenKinds.has(k)).length;
+  const badge = trigger.querySelector('.rel-hidden-count');
+  if (badge) badge.textContent = `${visibleKinds}/${presentKinds.size}`;
+  for (const row of menu.querySelectorAll('[data-node-kind]')) {
+    const kind = row.getAttribute('data-node-kind');
+    if (!kind) continue;
+    const visible = !st.hiddenKinds.has(kind);
+    row.classList.toggle('checked', visible);
+    const check = row.querySelector('.rel-check');
+    if (check) check.textContent = visible ? '✓' : '';
+  }
+}
+
+function clearFeSelectionIfHidden() {
+  if (!st || !isViewModeOnly()) return;
+  if (st.selectedNode && st.hiddenKinds.has(st.nMap[st.selectedNode]?.kind)) {
+    st.selectedNode = null;
+  }
+  if (st.selectedEdge !== null) {
+    const e = st.edges[st.selectedEdge];
+    if (!e || st.hiddenEdgeKinds.has(e.kind)) st.selectedEdge = null;
+    else {
+      const a = st.nMap[e.source], b = st.nMap[e.target];
+      if (!a || !b || st.hiddenKinds.has(a.kind) || st.hiddenKinds.has(b.kind)) st.selectedEdge = null;
+    }
+  }
+}
+
+export function toggleFeatureEditorAliases() {
+  diagramToggleAliases();
+}
+
+export function toggleFeatureEditorLayers() {
+  diagramToggleLayers();
+}
+
+export function toggleFeKindFilter() {
+  feToggleDropdown('feKindFilterMenu', 'feKindFilterTrigger');
+}
+
+export function toggleFeEdgeFilter() {
+  feToggleDropdown('feEdgeFilterMenu', 'feEdgeFilterTrigger');
+}
+
+export function toggleFeKind(ev, kind) {
+  if (ev) { ev.stopPropagation(); ev.preventDefault(); }
+  if (!st || !isViewModeOnly()) return;
+  if (st.hiddenKinds.has(kind)) st.hiddenKinds.delete(kind);
+  else st.hiddenKinds.add(kind);
+  saveDiagramHiddenKindsSet(st.hiddenKinds);
+  clearFeSelectionIfHidden();
+  for (const n of st.nodes) n.h = nodeHeight(n);
+  renderSvg();
+  syncFeKindFilterUi();
+}
+
+export function showAllFeKinds() {
+  if (!st || !isViewModeOnly()) return;
+  st.hiddenKinds.clear();
+  saveDiagramHiddenKindsSet(st.hiddenKinds);
+  clearFeSelectionIfHidden();
+  for (const n of st.nodes) n.h = nodeHeight(n);
+  renderSvg();
+  syncFeKindFilterUi();
+}
+
+export function hideAllFeKinds() {
+  if (!st || !isViewModeOnly()) return;
+  st.hiddenKinds.clear();
+  for (const n of st.nodes) st.hiddenKinds.add(n.kind);
+  saveDiagramHiddenKindsSet(st.hiddenKinds);
+  clearFeSelectionIfHidden();
+  for (const n of st.nodes) n.h = nodeHeight(n);
+  renderSvg();
+  syncFeKindFilterUi();
+}
+
+export function toggleFeEdgeKind(ev, kind) {
+  if (ev) { ev.stopPropagation(); ev.preventDefault(); }
+  if (!st || !isViewModeOnly()) return;
+  if (st.hiddenEdgeKinds.has(kind)) st.hiddenEdgeKinds.delete(kind);
+  else st.hiddenEdgeKinds.add(kind);
+  saveDiagramHiddenEdgeKindsSet(st.hiddenEdgeKinds);
+  clearFeSelectionIfHidden();
+  for (const n of st.nodes) n.h = nodeHeight(n);
+  renderSvg();
+  refreshFeEdgeFilterOnly();
+}
+
 function isReadOnlyFeature() {
   return currentFeatureReadOnly === true;
 }
@@ -176,10 +417,32 @@ export function renderFeatureEditorView() {
       html += `<button class="fe-btn primary" onclick="window.__featureEditor.save()" title="Save feature" id="feSaveBtn">Save</button>`;
       html += `<button class="fe-btn danger" onclick="window.__featureEditor.deleteFeature()" title="Delete feature">Delete</button>`;
     } else {
+      html += '<span class="fe-toolbar-sep fe-toolbar-sep-bar"></span>';
+      html += `<button type="button" class="fe-btn" id="feAliasToggle" onclick="window.__featureEditor.toggleAliases()" title="Show aliases instead of original names (same as Diagram)" style="${getDiagramShowAliases() ? 'background:var(--bg-hover)' : ''}">Aa Aliases</button>`;
+      html += '<span class="fe-toolbar-sep fe-toolbar-sep-bar"></span>';
+      html += `<button type="button" class="fe-btn" id="feLayerToggle" onclick="window.__featureEditor.toggleLayers()" title="Show architectural layers (same as Diagram)" style="${getDiagramShowLayers() ? 'background:var(--bg-hover)' : ''}">⊞ Layers</button>`;
+      html += '<span class="fe-toolbar-sep fe-toolbar-sep-bar"></span>';
+      html += '<div class="rel-dropdown" id="feKindFilterWrap"></div>';
+      html += '<span class="fe-toolbar-sep fe-toolbar-sep-bar"></span>';
+      html += '<div class="rel-dropdown" id="feEdgeFilterWrap"></div>';
+      html += '<span class="fe-toolbar-spacer"></span>';
       html += '<button class="fe-btn" onclick="window.__featureEditor.fit()" title="Fit to view">⊡ Fit</button>';
     }
     html += '</div>';
-    html += '<div class="fe-canvas" id="feCanvas">';
+    html += `<div class="fe-canvas${vm ? ' fe-view-canvas' : ''}" id="feCanvas">`;
+    if (vm) {
+      html += '<div class="diagram-edge-legend fe-view-edge-legend">';
+      html += '<div class="diagram-edge-legend-item"><span class="diagram-edge-legend-line" style="color:#60a5fa"></span>Contains</div>';
+      html += '<div class="diagram-edge-legend-item"><span class="diagram-edge-legend-line dashed" style="color:#34d399"></span>References</div>';
+      html += '<div class="diagram-edge-legend-item"><span class="diagram-edge-legend-line dashed" style="color:#34d399"></span>References (by Id)</div>';
+      html += '<div class="diagram-edge-legend-item"><span class="diagram-edge-legend-line" style="color:#60a5fa"></span>Has</div>';
+      html += '<div class="diagram-edge-legend-item"><span class="diagram-edge-legend-line" style="color:#60a5fa"></span>Has Many</div>';
+      html += '<div class="diagram-edge-legend-item"><span class="diagram-edge-legend-line dashed" style="color:#fbbf24"></span>Emits</div>';
+      html += '<div class="diagram-edge-legend-item"><span class="diagram-edge-legend-line dashed" style="color:#f472b6"></span>Handles</div>';
+      html += '<div class="diagram-edge-legend-item"><span class="diagram-edge-legend-line dashed" style="color:#2dd4bf"></span>Publishes</div>';
+      html += '<div class="diagram-edge-legend-item"><span class="diagram-edge-legend-line" style="color:#fb923c"></span>Manages</div>';
+      html += '</div>';
+    }
     html += '<div class="diagram-controls">';
     html += '<button onclick="window.__featureEditor.zoom(1.25)" title="Zoom in">+</button>';
     html += '<button onclick="window.__featureEditor.zoom(0.8)" title="Zoom out">−</button>';
@@ -202,7 +465,16 @@ export function renderFeatureEditorView() {
 
 export function mountFeatureEditor() {
   if (!st || !currentFeatureName) return;
+  if (isViewModeOnly()) {
+    st.hiddenKinds = loadDiagramHiddenKindsSet();
+    st.hiddenEdgeKinds = loadDiagramHiddenEdgeKindsSet();
+    reloadDiagramViewFlagsFromStorage();
+  }
   renderSvg();
+  if (isViewModeOnly()) {
+    refreshFeViewFilters();
+    syncDiagramToolbarToggles();
+  }
   fitToView();
   if (isViewModeOnly()) setupViewModeInteraction();
   else setupInteraction();
@@ -463,11 +735,26 @@ function refreshPanel() {
 function getEmittedEventsForNode(nodeId) {
   if (!st) return [];
   return st.edges
-    .filter(e => e.source === nodeId && e.kind === 'Emits')
+    .filter(e => {
+      if (e.source !== nodeId || e.kind !== 'Emits') return false;
+      if (!isViewModeOnly()) return true;
+      if (st.hiddenEdgeKinds.has('Emits')) return false;
+      const tgt = st.nMap[e.target];
+      if (!tgt || st.hiddenKinds.has(tgt.kind)) return false;
+      return true;
+    })
     .map(e => {
       const tgt = st.nMap[e.target];
       return tgt ? tgt.name : shortName(e.target);
     });
+}
+
+function feDisplayName(n) {
+  if (!getDiagramShowAliases()) return n.name;
+  const meta = (typeof window !== 'undefined' && window.__metadata) ? window.__metadata[n.id] : null;
+  if (meta && meta.alias && String(meta.alias).trim()) return String(meta.alias).trim();
+  if (n.alias && String(n.alias).trim()) return String(n.alias).trim();
+  return n.name;
 }
 
 // ── Property management ──────────────────────────────
@@ -650,6 +937,8 @@ function loadFeatureState(feature) {
     nodes: [], edges: [], nMap: {},
     zoom: 1, panX: 0, panY: 0,
     selectedNode: null, selectedEdge: null,
+    hiddenKinds: loadDiagramHiddenKindsSet(),
+    hiddenEdgeKinds: loadDiagramHiddenEdgeKindsSet(),
   };
 
   // Rebuild nodes
@@ -754,6 +1043,7 @@ export function addExistingType(fullName, kind) {
 
   markDirty();
   renderSvg();
+  if (isViewModeOnly()) refreshFeViewFilters();
   refreshPalette();
   refreshPanel();
 }
@@ -809,6 +1099,7 @@ export function addAllFromBoundedContext() {
   recalcNodeHeights();
   markDirty();
   renderSvg();
+  if (isViewModeOnly()) refreshFeViewFilters();
   refreshPalette();
   refreshPanel();
   fitToView();
@@ -852,6 +1143,7 @@ export function addNewType() {
   nameInput.value = '';
   markDirty();
   renderSvg();
+  if (isViewModeOnly()) refreshFeViewFilters();
   refreshPanel();
 }
 
@@ -875,6 +1167,7 @@ export function removeNode(id) {
   if (st.selectedNode === id) st.selectedNode = null;
   markDirty();
   renderSvg();
+  if (isViewModeOnly()) refreshFeViewFilters();
   refreshPalette();
   refreshPanel();
 }
@@ -906,6 +1199,7 @@ function finishConnect(targetId) {
     recalcNodeHeights();
     markDirty();
     renderSvg();
+    if (isViewModeOnly()) refreshFeViewFilters();
     refreshPanel();
   });
 }
@@ -1121,6 +1415,7 @@ export function removeEdge(idx) {
   recalcNodeHeights();
   markDirty();
   renderSvg();
+  if (isViewModeOnly()) refreshFeViewFilters();
   refreshPanel();
 }
 
@@ -1131,6 +1426,7 @@ export function changeEdgeKind(idx, kind) {
   recalcNodeHeights();
   markDirty();
   renderSvg();
+  if (isViewModeOnly()) refreshFeViewFilters();
 }
 
 /** Recalculate all node heights (needed when edges change since Emits affects height). */
@@ -1318,6 +1614,16 @@ function renderSvg() {
   const svg = document.getElementById('feSvg');
   if (!svg || !st) return;
 
+  const vm = isViewModeOnly();
+  const visibleNodeIds = new Set();
+  if (vm) {
+    for (const n of st.nodes) {
+      if (!st.hiddenKinds.has(n.kind)) visibleNodeIds.add(n.id);
+    }
+  } else {
+    for (const n of st.nodes) visibleNodeIds.add(n.id);
+  }
+
   let s = '<defs>';
   for (const [kind, color] of Object.entries(EDGE_COLORS)) {
     s += `<marker id="fe-arrow-${kind}" viewBox="0 0 10 6" refX="10" refY="3" markerWidth="8" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,3 L0,6 Z" fill="${color}" /></marker>`;
@@ -1328,8 +1634,9 @@ function renderSvg() {
   s += `<g id="feViewport" transform="translate(${st.panX},${st.panY}) scale(${st.zoom})">`;
 
   // Bounded context boundaries (drawn first, behind everything)
-  const ctxBounds = computeFeatureContextBounds(st.nodes);
-  const ctxDragCursor = isViewModeOnly() ? 'default' : 'move';
+  const ctxNodes = vm ? st.nodes.filter(n => visibleNodeIds.has(n.id)) : st.nodes;
+  const ctxBounds = computeFeatureContextBounds(ctxNodes);
+  const ctxDragCursor = vm ? 'default' : 'move';
   for (const b of ctxBounds) {
     s += `<g class="dg-ctx-boundary" data-ctx="${escAttr(b.name)}" style="cursor:${ctxDragCursor}">`;
     s += `<rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="12" fill="rgba(255,255,255,.10)" stroke="${b.color}" stroke-width="1.5" stroke-dasharray="8,5" opacity="0.8" />`;
@@ -1337,8 +1644,13 @@ function renderSvg() {
     s += '</g>';
   }
 
-  // Layer boundaries (behind nodes, in front of context boundaries)
-  const layerBounds = computeFeatureLayerBounds(st.nodes);
+  // Layer boundaries (edit mode: always; view mode: same as Diagram when Layers is on)
+  let layerBounds = [];
+  if (!vm) {
+    layerBounds = computeFeatureLayerBounds(st.nodes);
+  } else if (getDiagramShowLayers()) {
+    layerBounds = computeFeatureLayerBounds(st.nodes.filter(n => visibleNodeIds.has(n.id)));
+  }
   for (const b of layerBounds) {
     s += `<g class="dg-layer-boundary">`;
     s += `<rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="8" fill="none" stroke="${b.color}" stroke-width="1" stroke-dasharray="4,3" opacity="0.6" />`;
@@ -1351,6 +1663,10 @@ function renderSvg() {
     const e = st.edges[ei];
     const src = st.nMap[e.source], tgt = st.nMap[e.target];
     if (!src || !tgt) continue;
+    if (vm) {
+      if (st.hiddenEdgeKinds.has(e.kind)) continue;
+      if (!visibleNodeIds.has(src.id) || !visibleNodeIds.has(tgt.id)) continue;
+    }
     const srcCx = src.x + src.w / 2, srcCy = src.y + src.h / 2;
     const tgtCx = tgt.x + tgt.w / 2, tgtCy = tgt.y + tgt.h / 2;
     const p1 = rectEdge(srcCx, srcCy, src.w + 8, src.h + 8, tgtCx, tgtCy);
@@ -1381,6 +1697,7 @@ function renderSvg() {
 
   // Nodes
   for (const n of st.nodes) {
+    if (vm && !visibleNodeIds.has(n.id)) continue;
     const c = n.cfg;
     const selected = !isViewModeOnly() && st.selectedNode === n.id;
     const strokeW = selected ? 2.5 : 1.5;
@@ -1403,7 +1720,7 @@ function renderSvg() {
     let ty = 20;
     s += `<text x="${n.w / 2}" y="${ty}" text-anchor="middle" fill="${c.color}" font-size="10" font-family="-apple-system,sans-serif" opacity="0.85">${c.stereotype}</text>`;
     ty += 22;
-    const displayName = (n.alias && n.alias.trim()) ? n.alias.trim() : n.name;
+    const displayName = feDisplayName(n);
     s += `<text class="fe-name" x="${n.w / 2}" y="${ty}" text-anchor="middle" fill="#f0f2f7" font-size="14" font-weight="600" font-family="-apple-system,sans-serif">${esc(displayName)}</text>`;
     if (n.props.length > 0) {
       ty += 8;
@@ -1449,8 +1766,12 @@ function fitToView() {
   if (!st || st.nodes.length === 0) return;
   const wrap = document.getElementById('feCanvas');
   if (!wrap) return;
+  const nodes = isViewModeOnly()
+    ? st.nodes.filter(n => !st.hiddenKinds.has(n.kind))
+    : st.nodes;
+  if (nodes.length === 0) return;
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const n of st.nodes) {
+  for (const n of nodes) {
     minX = Math.min(minX, n.x); minY = Math.min(minY, n.y);
     maxX = Math.max(maxX, n.x + n.w); maxY = Math.max(maxY, n.y + n.h);
   }

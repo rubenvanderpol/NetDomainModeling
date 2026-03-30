@@ -286,6 +286,38 @@
   flex: 1;
 }
 
+.fe-toolbar-sep-bar {
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+  margin: 0 2px;
+  flex-shrink: 0;
+  align-self: center;
+}
+
+.fe-canvas-toolbar {
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+
+.fe-view-canvas {
+  position: relative;
+}
+
+.fe-view-canvas .diagram-controls {
+  z-index: 6;
+}
+
+.fe-view-edge-legend {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  z-index: 5;
+  max-width: min(520px, calc(100% - 24px));
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
 .fe-export-opt {
   display: inline-flex;
   align-items: center;

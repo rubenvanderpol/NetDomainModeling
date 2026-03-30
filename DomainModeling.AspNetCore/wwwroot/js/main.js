@@ -470,6 +470,15 @@ function wireFeatureEditorGlobals() {
     changeLayer: featureEditorModule.changeLayer,
     toggleLayerDropdown: featureEditorModule.toggleLayerDropdown,
     toggleViewMode: featureEditorModule.toggleFeatureEditorViewMode,
+    toggleAliases: featureEditorModule.toggleFeatureEditorAliases,
+    toggleLayers: featureEditorModule.toggleFeatureEditorLayers,
+    toggleFeKindFilter: featureEditorModule.toggleFeKindFilter,
+    toggleFeEdgeFilter: featureEditorModule.toggleFeEdgeFilter,
+    toggleFeKind: featureEditorModule.toggleFeKind,
+    showAllFeKinds: featureEditorModule.showAllFeKinds,
+    hideAllFeKinds: featureEditorModule.hideAllFeKinds,
+    toggleFeEdgeKind: featureEditorModule.toggleFeEdgeKind,
+    onDiagramViewFlagsChanged: featureEditorModule.onDiagramViewFlagsChanged,
   };
 }
 // ── Go! ──────────────────────────────────────────────
