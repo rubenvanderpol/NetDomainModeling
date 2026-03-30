@@ -298,6 +298,9 @@ function clearViewport() {
 
 // ── Module state ─────────────────────────────────────
 let dgState = null;
+
+/** @type {Set<string>} */
+let traceHighlightIds = new Set();
 let showAliases = false;
 let showLayers = false;
 
@@ -409,11 +412,25 @@ try {
 
 export function getDiagramState() { return dgState; }
 
-// ── Render the diagram wrapper HTML ──────────────────
-export function renderDiagramView() {
-  let html = renderTabBar('diagram');
+/**
+ * Highlights diagram nodes by fullName (e.g. event + handler types). Used by the Trace tab.
+ * @param {Iterable<string> | null | undefined} fullNames
+ */
+export function setDiagramTraceHighlights(fullNames) {
+  traceHighlightIds = new Set(fullNames || []);
+  renderSvg();
+}
 
-  html += '<div class="diagram-wrap" id="diagramWrap">';
+// ── Render the diagram wrapper HTML ──────────────────
+/**
+ * @param {{ traceLayout?: boolean }} [opts]
+ */
+export function renderDiagramView(opts = {}) {
+  const traceLayout = opts.traceLayout === true;
+  let html = renderTabBar(traceLayout ? 'trace' : 'diagram');
+
+  const wrapClass = traceLayout ? 'diagram-wrap trace-diagram-inner' : 'diagram-wrap';
+  html += `<div class="${wrapClass}" id="diagramWrap">`;
 
   // Toolbar (top-left)
   html += '<div class="diagram-toolbar">';
@@ -964,7 +981,8 @@ function renderSvg() {
   for (const n of nodes) {
     n.h = nodeHeight(n);
     const c = n.cfg;
-    s += `<g class="dg-node" data-id="${escAttr(n.id)}" transform="translate(${n.x},${n.y})" style="cursor:pointer">`;
+    const traceCls = traceHighlightIds.has(n.id) ? ' dg-node-trace' : '';
+    s += `<g class="dg-node${traceCls}" data-id="${escAttr(n.id)}" transform="translate(${n.x},${n.y})" style="cursor:pointer">`;
     s += `<rect x="3" y="3" width="${n.w}" height="${n.h}" rx="8" fill="rgba(0,0,0,.3)" />`;
     s += `<rect width="${n.w}" height="${n.h}" rx="8" fill="${c.bg}" stroke="${c.border}" stroke-width="1.5" />`;
     let ty = 20;

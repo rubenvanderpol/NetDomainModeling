@@ -37,6 +37,14 @@ public sealed class DomainModelOptions
     public bool EnableFeatureEditor { get; set; }
 
     /// <summary>
+    /// When <c>true</c>, registers a "Trace" tab with a live diagram and tracing panel,
+    /// and maps a SignalR hub at <c>{routePrefix}/trace/hub</c>. Requires
+    /// <see cref="DomainModelServiceCollectionExtensions.AddDomainModelTracing"/> on <see cref="IServiceCollection"/>.
+    /// Defaults to <c>false</c>.
+    /// </summary>
+    public bool EnableTraceView { get; set; }
+
+    /// <summary>
     /// Directory path where feature editor JSON files are stored.
     /// Defaults to <c>./features</c> relative to the application root.
     /// </summary>
@@ -340,11 +348,30 @@ public static class DomainModelEndpointExtensions
         // GET /domain-model — interactive HTML UI
         endpoints.MapGet(routePrefix, (HttpContext ctx) =>
         {
-            var html = GetEmbeddedHtml(routePrefix, assetsPrefix, options);
+            var html = GetEmbeddedHtml(routePrefix, assetsPrefix, options, ctx);
             return Results.Content(html, "text/html");
         })
         .ExcludeFromDescription()
         .WithName("DomainModelExplorer");
+
+        // Trace: SignalR hub + recent messages (when EnableTraceView)
+        if (options.EnableTraceView)
+        {
+            endpoints.MapHub<DomainModelTraceHub>($"{routePrefix}/trace/hub")
+                .ExcludeFromDescription();
+
+            endpoints.MapGet($"{routePrefix}/trace/recent", (int? limit, IServiceProvider sp) =>
+            {
+                var history = sp.GetService<DomainModelTraceLastNotification>();
+                if (history is null)
+                    return Results.Json(Array.Empty<object>());
+
+                var n = Math.Clamp(limit ?? 50, 1, 100);
+                return Results.Json(history.Recent(n), TraceJsonSerializer.Options);
+            })
+            .ExcludeFromDescription()
+            .WithName("DomainModelTraceRecent");
+        }
 
         // GET /domain-model/assets/{**path} — serve CSS/JS from embedded resources
         endpoints.MapGet($"{assetsPrefix}/{{**path}}", (string path) =>
@@ -647,17 +674,7 @@ public static class DomainModelEndpointExtensions
         return endpoints;
     }
 
-    /// <summary>
-    /// Registers a <see cref="DomainGraph"/> in DI so it can be resolved by the endpoints.
-    /// </summary>
-    public static IServiceCollection AddDomainModel(this IServiceCollection services, DomainGraph graph)
-    {
-        ArgumentNullException.ThrowIfNull(graph);
-        services.AddSingleton(graph);
-        return services;
-    }
-
-    private static string GetEmbeddedHtml(string routePrefix, string assetsPrefix, DomainModelOptions options)
+    private static string GetEmbeddedHtml(string routePrefix, string assetsPrefix, DomainModelOptions options, HttpContext http)
     {
         var assembly = Assembly.GetExecutingAssembly();
         var resourceName = assembly.GetManifestResourceNames()
@@ -670,12 +687,33 @@ public static class DomainModelEndpointExtensions
         using var reader = new StreamReader(stream);
         var html = reader.ReadToEnd();
 
+        var traceHubPath = $"{routePrefix}/trace/hub";
+        var traceHubUrl = BuildAbsoluteSignalRUrl(http, traceHubPath);
+        var traceScript = options.EnableTraceView
+            ? "<script src=\"https://cdn.jsdelivr.net/npm/@microsoft/signalr@8.0.7/dist/browser/signalr.min.js\" crossorigin=\"anonymous\"></script>"
+            : "";
+
         return html
             .Replace("{{API_URL}}", $"{routePrefix}/json")
             .Replace("{{ASSETS_URL}}", assetsPrefix)
             .Replace("{{DEVELOPER_MODE}}", options.EnableDeveloperView ? "true" : "false")
             .Replace("{{TESTING_MODE}}", options.EnableTestingView ? "true" : "false")
-            .Replace("{{FEATURE_EDITOR_MODE}}", options.EnableFeatureEditor ? "true" : "false");
+            .Replace("{{FEATURE_EDITOR_MODE}}", options.EnableFeatureEditor ? "true" : "false")
+            .Replace("{{TRACE_VIEW_MODE}}", options.EnableTraceView ? "true" : "false")
+            .Replace("{{TRACE_HUB_URL}}", traceHubUrl)
+            .Replace("{{TRACE_SIGNALR_SCRIPT}}", traceScript);
+    }
+
+    private static string BuildAbsoluteSignalRUrl(HttpContext http, string path)
+    {
+        var req = http.Request;
+        var scheme = req.Scheme;
+        if (req.Headers.TryGetValue("X-Forwarded-Proto", out var fp) && fp.Count > 0 && !string.IsNullOrEmpty(fp[0]))
+            scheme = fp[0]!;
+
+        var host = req.Host.HasValue ? req.Host.Value : "localhost";
+        var baseUrl = $"{scheme}://{host}";
+        return baseUrl.TrimEnd('/') + path;
     }
 
     private static string? GetEmbeddedAsset(string relativePath)

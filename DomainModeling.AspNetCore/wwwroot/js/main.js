@@ -9,9 +9,11 @@ const API_URL = window.__config?.apiUrl || '/domain-model/json';
 const BASE_URL = API_URL.replace(/\/json$/, '');
 const TESTING_MODE = window.__config?.testingMode === true;
 const FEATURE_EDITOR_MODE = window.__config?.featureEditorMode === true;
+const TRACE_VIEW_MODE = window.__config?.traceViewMode === true;
 
 let testingModule = null; // lazy-loaded when testing mode is on
 let featureEditorModule = null; // lazy-loaded when feature editor mode is on
+let traceModule = null; // lazy-loaded when trace view is on
 
 // Custom metadata (alias / description) per fullName
 let metadata = {};
@@ -127,6 +129,11 @@ async function init() {
       featureEditorModule = await import('./feature-editor.js');
       await featureEditorModule.initFeatureEditor(BASE_URL, data);
       wireFeatureEditorGlobals();
+    }
+
+    if (TRACE_VIEW_MODE) {
+      traceModule = await import('./trace.js');
+      wireTraceGlobals();
     }
 
     render();
@@ -284,6 +291,13 @@ function renderSidebar() {
     </div>`;
   }
 
+  if (TRACE_VIEW_MODE) {
+    html += `<div class="nav-item${currentView === 'trace' ? ' active' : ''}" onclick="window.__nav.switchTab('trace')">
+      <span class="nav-dot" style="background:#22d3ee"></span>
+      Trace
+    </div>`;
+  }
+
   html += `</div>`;
 
   nav.innerHTML = html;
@@ -313,6 +327,13 @@ function renderMain() {
   if (currentView === 'testing' && TESTING_MODE && testingModule) {
     main.innerHTML = testingModule.renderTestingView();
     requestAnimationFrame(() => testingModule.mountTesting());
+    return;
+  }
+
+  if (currentView === 'trace' && TRACE_VIEW_MODE && traceModule) {
+    main.innerHTML = traceModule.renderTraceView();
+    const selectedCtxs = (data.boundedContexts || []).filter(c => selectedContextNames.has(c.name));
+    traceModule.mountTrace(currentCtx, selectedCtxs);
     return;
   }
 
@@ -442,6 +463,14 @@ function wireTestingGlobals() {
   };
 }
 // ── Feature editor globals (wired after lazy-load) ───────
+function wireTraceGlobals() {
+  if (!traceModule) return;
+  window.__trace = {
+    clear: () => { traceModule.clearTracePanel(); },
+    reconnect: () => { void traceModule.reconnectTraceHub(); },
+  };
+}
+
 function wireFeatureEditorGlobals() {
   if (!featureEditorModule) return;
   window.__featureEditor = {
