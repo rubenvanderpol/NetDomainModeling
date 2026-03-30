@@ -6,9 +6,12 @@ import { renderDiagramView, initDiagram, setDiagramTraceHighlights } from './dia
 
 const BASE_URL = (window.__config?.apiUrl || '/domain-model/json').replace(/\/json$/, '');
 const HUB_URL = window.__config?.traceHubUrl || '';
+const HIGHLIGHT_DURATION_MS = 5000;
 
 let connection = null;
 let reconnectTimer = null;
+/** @type {ReturnType<typeof setTimeout> | null} */
+let highlightClearTimer = null;
 let manualDisconnect = false;
 /** @type {object | null} */
 let diagramCtx = null;
@@ -30,8 +33,20 @@ function buildHighlightIds(msg) {
   return [...ids];
 }
 
+function clearHighlightTimer() {
+  if (highlightClearTimer) {
+    clearTimeout(highlightClearTimer);
+    highlightClearTimer = null;
+  }
+}
+
 function applyHighlight(msg) {
   setDiagramTraceHighlights(buildHighlightIds(msg));
+  clearHighlightTimer();
+  highlightClearTimer = setTimeout(() => {
+    highlightClearTimer = null;
+    setDiagramTraceHighlights([]);
+  }, HIGHLIGHT_DURATION_MS);
 }
 
 function appendEntry(msg) {
@@ -128,6 +143,8 @@ function scheduleReconnect() {
 
 export async function disconnectTraceHub() {
   manualDisconnect = true;
+  clearHighlightTimer();
+  setDiagramTraceHighlights([]);
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
@@ -149,6 +166,7 @@ export function clearTracePanel() {
   const list = document.getElementById('traceEntries');
   if (!list) return;
   list.innerHTML = '<div class="trace-empty">Waiting for events… Call <code>DomainModelTracing.NotifyAsync</code> from your app or hit the demo endpoint.</div>';
+  clearHighlightTimer();
   setDiagramTraceHighlights([]);
 }
 
