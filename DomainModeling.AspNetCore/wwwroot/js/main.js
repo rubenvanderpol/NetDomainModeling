@@ -192,7 +192,20 @@ function initSidebarToggle() {
 function render() {
   renderSidebar();
   renderMain();
+  syncFeatureEditorViewBodyClass();
 }
+
+/** Hide explorer sidebar in feature editor view mode so canvas matches Diagram tab width. */
+function syncFeatureEditorViewBodyClass() {
+  try {
+    const active = FEATURE_EDITOR_MODE && featureEditorModule && currentView === 'features'
+      && featureEditorModule.isFeatureEditorViewModeLayoutActive();
+    document.body.classList.toggle('feature-editor-view-mode', !!active);
+  } catch {
+    document.body.classList.remove('feature-editor-view-mode');
+  }
+}
+window.__syncFeatureEditorViewBodyClass = syncFeatureEditorViewBodyClass;
 
 function renderSidebar() {
   const nav = document.getElementById('sidebarNav');
@@ -456,6 +469,16 @@ function wireFeatureEditorGlobals() {
     toggleBcDropdown: featureEditorModule.toggleBcDropdown,
     changeLayer: featureEditorModule.changeLayer,
     toggleLayerDropdown: featureEditorModule.toggleLayerDropdown,
+    toggleViewMode: featureEditorModule.toggleFeatureEditorViewMode,
+    toggleAliases: featureEditorModule.toggleFeatureEditorAliases,
+    toggleLayers: featureEditorModule.toggleFeatureEditorLayers,
+    toggleFeKindFilter: featureEditorModule.toggleFeKindFilter,
+    toggleFeEdgeFilter: featureEditorModule.toggleFeEdgeFilter,
+    toggleFeKind: featureEditorModule.toggleFeKind,
+    showAllFeKinds: featureEditorModule.showAllFeKinds,
+    hideAllFeKinds: featureEditorModule.hideAllFeKinds,
+    toggleFeEdgeKind: featureEditorModule.toggleFeEdgeKind,
+    onDiagramViewFlagsChanged: featureEditorModule.onDiagramViewFlagsChanged,
   };
 }
 // ── Go! ──────────────────────────────────────────────

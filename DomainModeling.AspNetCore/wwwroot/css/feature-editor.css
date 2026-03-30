@@ -6,6 +6,17 @@
   gap: 0;
 }
 
+/* Full-width canvas like the main Diagram tab (issue #28) */
+.fe-layout.fe-view-mode {
+  /* Align with `.diagram-wrap` (tab bar + main padding) */
+  height: calc(100vh - 120px);
+}
+
+.fe-layout.fe-view-mode .fe-canvas-wrap {
+  flex: 1;
+  min-width: 0;
+}
+
 /* ── Sidebar (left panel) ─────────────────────────── */
 .fe-sidebar {
   width: 280px;
@@ -260,6 +271,11 @@
   font-weight: 700;
 }
 
+.fe-view-badge {
+  color: #60a5fa;
+  border-color: #60a5fa66;
+}
+
 .fe-dirty-indicator {
   font-size: 11px;
   color: #fbbf24;
@@ -268,6 +284,30 @@
 
 .fe-toolbar-spacer {
   flex: 1;
+}
+
+.fe-toolbar-sep-bar {
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+  margin: 0 2px;
+  flex-shrink: 0;
+  align-self: center;
+}
+
+.fe-canvas-toolbar {
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+
+.fe-view-canvas {
+  position: relative;
+}
+
+/* Match diagram stacking: controls + edge legend use diagram.css (z-index 10, bottom-right column). */
+.fe-view-canvas .diagram-controls,
+.fe-view-canvas .diagram-edge-legend {
+  z-index: 10;
 }
 
 .fe-export-opt {
