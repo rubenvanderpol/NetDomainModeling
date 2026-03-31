@@ -8,6 +8,79 @@ export function shortName(fullName) {
   return parts[parts.length - 1];
 }
 
+/**
+ * Removes the first balanced generic argument list from a type fragment, recursively
+ * (e.g. IReadonlyList<T> → IReadonlyList, Dictionary<K,List<V>> → Dictionary).
+ */
+export function stripGenericTypeArgs(typeName) {
+  if (!typeName) return '';
+  const s = String(typeName);
+  const idx = s.indexOf('<');
+  if (idx < 0) return s;
+  let depth = 0;
+  for (let i = idx; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === '<') depth++;
+    else if (ch === '>') {
+      depth--;
+      if (depth === 0) {
+        return stripGenericTypeArgs(s.slice(0, idx) + s.slice(i + 1));
+      }
+    }
+  }
+  return s;
+}
+
+/** Strip generics anywhere in a diagram line (property types, method params, etc.). */
+export function stripGenericsForDiagramLine(line) {
+  if (!line) return '';
+  let s = String(line);
+  let prev;
+  do {
+    prev = s;
+    s = stripGenericTypeArgs(s);
+  } while (s !== prev);
+  return s;
+}
+
+const ELLIPSIS = '\u2026';
+
+/** Max characters for a single line inside diagram nodes (~200px wide, ~11px mono). */
+export const DIAGRAM_NODE_TEXT_MAX_CHARS = 28;
+
+export function truncateDiagramText(str, maxChars = DIAGRAM_NODE_TEXT_MAX_CHARS) {
+  if (str == null || str === '') return '';
+  const t = String(str);
+  const n = typeof maxChars === 'number' && maxChars > 0 ? maxChars : DIAGRAM_NODE_TEXT_MAX_CHARS;
+  if (t.length <= n) return t;
+  return t.slice(0, Math.max(0, n - 1)) + ELLIPSIS;
+}
+
+/** Display string for a property row on the diagram canvas (frontend only). */
+export function formatDiagramPropertyLine(propName, typeName) {
+  const raw = `${propName || ''}: ${stripGenericTypeArgs(typeName || '')}`;
+  return truncateDiagramText(raw);
+}
+
+/** Display string for a method signature row on the diagram canvas (frontend only). */
+export function formatDiagramMethodLine(method) {
+  if (!method) return '';
+  const params = (method.parameters || []).map(p => stripGenericTypeArgs(p.typeName || '')).join(', ');
+  const raw = `${method.name || ''}(${params})`;
+  return truncateDiagramText(raw);
+}
+
+/** Event row from domain `emittedEvents` full names (shortName + ellipsis). */
+export function formatDiagramEmittedEventLine(eventFullName) {
+  return formatDiagramEventBadgeLine(shortName(eventFullName || ''));
+}
+
+/** Event row when the label is already a display name (feature editor derived events). */
+export function formatDiagramEventBadgeLine(displayLabel) {
+  const raw = '\u26A1 ' + String(displayLabel || '');
+  return truncateDiagramText(raw);
+}
+
 export function esc(str) {
   if (!str) return '';
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');

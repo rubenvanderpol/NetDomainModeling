@@ -10,7 +10,10 @@
  *  - Optionally run in read-only mode (existing graph items only)
  *  - View mode (#28): full-width canvas like the main diagram (pan/zoom only, no editing chrome)
  */
-import { esc, escAttr, shortName, ALL_SECTIONS } from './helpers.js';
+import {
+  esc, escAttr, shortName, ALL_SECTIONS,
+  formatDiagramPropertyLine, formatDiagramMethodLine, formatDiagramEventBadgeLine,
+} from './helpers.js';
 import { renderTabBar } from './tabs.js';
 import {
   getDiagramShowAliases,
@@ -795,7 +798,7 @@ export function removeProperty(nodeId, idx) {
 }
 
 function rebuildDisplayProps(n) {
-  n.props = (n.structuredProps || []).map(p => p.name + ': ' + p.type);
+  n.props = (n.structuredProps || []).map(p => formatDiagramPropertyLine(p.name, p.type));
   n.h = nodeHeight(n);
 }
 
@@ -965,7 +968,7 @@ function loadFeatureState(feature) {
     };
     // If we have structured props, rebuild display props from them
     if (n.structuredProps.length > 0 && n.props.length === 0) {
-      n.props = n.structuredProps.map(p => p.name + ': ' + p.type);
+      n.props = n.structuredProps.map(p => formatDiagramPropertyLine(p.name, p.type));
     }
     n.h = nodeHeight(n);
     // Restore position
@@ -1022,8 +1025,8 @@ function buildFeatureNodeFromDomain(fullName, kind) {
     layer: (item && item.layer) || '',
     cfg,
     structuredProps: item ? (item.properties || []).map(p => ({ name: p.name, type: p.typeName })) : [],
-    props: item ? (item.properties || []).map(p => p.name + ': ' + p.typeName) : [],
-    methods: item ? (item.methods || []).map(m => m.name + '(' + (m.parameters || []).map(p => p.typeName).join(', ') + ')') : [],
+    props: item ? (item.properties || []).map(p => formatDiagramPropertyLine(p.name, p.typeName)) : [],
+    methods: item ? (item.methods || []).map(m => formatDiagramMethodLine(m)) : [],
     events: [],
     x: 0, y: 0, vx: 0, vy: 0, w: NODE_W, h: 0,
   };
@@ -1630,6 +1633,10 @@ function renderSvg() {
     s += `<marker id="fe-arrow-${kind}" viewBox="0 0 10 6" refX="10" refY="3" markerWidth="8" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,3 L0,6 Z" fill="${color}" /></marker>`;
   }
   s += '<marker id="fe-diamond" viewBox="0 0 12 8" refX="0" refY="4" markerWidth="10" markerHeight="8" orient="auto-start-reverse"><path d="M0,4 L6,0 L12,4 L6,8 Z" fill="#60a5fa" /></marker>';
+  const feNodesForClip = vm ? st.nodes.filter(n => visibleNodeIds.has(n.id)) : st.nodes;
+  feNodesForClip.forEach((n, ni) => {
+    s += `<clipPath id="fe-node-clip-${ni}"><rect x="0" y="0" width="${n.w}" height="${n.h}" rx="8" /></clipPath>`;
+  });
   s += '</defs>';
 
   s += `<g id="feViewport" transform="translate(${st.panX},${st.panY}) scale(${st.zoom})">`;
@@ -1697,6 +1704,7 @@ function renderSvg() {
   }
 
   // Nodes
+  let feClipIdx = 0;
   for (const n of st.nodes) {
     if (vm && !visibleNodeIds.has(n.id)) continue;
     const c = n.cfg;
@@ -1704,9 +1712,11 @@ function renderSvg() {
     const strokeW = selected ? 2.5 : 1.5;
     const stroke = selected ? '#6366f1' : c.border;
     const nodeCursor = isViewModeOnly() ? 'default' : 'pointer';
+    const clipId = `fe-node-clip-${feClipIdx++}`;
     s += `<g class="fe-node" data-id="${escAttr(n.id)}" transform="translate(${n.x},${n.y})" style="cursor:${nodeCursor}">`;
     s += `<rect x="3" y="3" width="${n.w}" height="${n.h}" rx="8" fill="rgba(0,0,0,.3)" />`;
     s += `<rect width="${n.w}" height="${n.h}" rx="8" fill="${c.bg}" stroke="${stroke}" stroke-width="${strokeW}" />`;
+    s += `<g clip-path="url(#${clipId})">`;
 
     // Connector port (top-right circle for drag-to-connect)
     if (!isReadOnlyFeature() && !isViewModeOnly()) {
@@ -1741,9 +1751,9 @@ function renderSvg() {
       ty += 8;
       s += `<line x1="12" y1="${ty}" x2="${n.w - 12}" y2="${ty}" stroke="${c.border}" stroke-width="0.5" />`;
       ty += 4;
-      for (const ev of derivedEvents) { ty += 17; s += `<text x="16" y="${ty}" fill="#fbbf24" font-size="11" font-family="'SF Mono','Cascadia Code','Fira Code',monospace">${esc('⚡ ' + ev)}</text>`; }
+      for (const ev of derivedEvents) { ty += 17; s += `<text x="16" y="${ty}" fill="#fbbf24" font-size="11" font-family="'SF Mono','Cascadia Code','Fira Code',monospace">${esc(formatDiagramEventBadgeLine(ev))}</text>`; }
     }
-    s += '</g>';
+    s += '</g></g>';
   }
 
   s += '</g>';
