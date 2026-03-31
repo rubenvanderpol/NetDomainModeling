@@ -297,6 +297,7 @@ internal sealed class AssemblyScanner
             Name = type.Name,
             FullName = type.FullName!,
             Layer = layer,
+            Description = DocumentationCommentReader.TryGetTypeSummary(type),
             Properties = GetProperties(type, knownDomainTypes),
             EmittedEvents = emissions.Select(e => e.EventType).Distinct().ToList(),
             EventEmissions = emissions
@@ -322,6 +323,7 @@ internal sealed class AssemblyScanner
             Name = type.Name,
             FullName = type.FullName!,
             Layer = layer,
+            Description = DocumentationCommentReader.TryGetTypeSummary(type),
             Properties = properties,
             Methods = GetMethods(type),
             ChildEntities = childEntities,
@@ -337,6 +339,7 @@ internal sealed class AssemblyScanner
             Name = type.Name,
             FullName = type.FullName!,
             Layer = layer,
+            Description = DocumentationCommentReader.TryGetTypeSummary(type),
             Properties = GetProperties(type, knownDomainTypes)
         };
     }
@@ -348,6 +351,7 @@ internal sealed class AssemblyScanner
             Name = type.Name,
             FullName = type.FullName!,
             Layer = layer,
+            Description = DocumentationCommentReader.TryGetTypeSummary(type),
             Properties = GetProperties(type, knownDomainTypes)
         };
     }
@@ -386,6 +390,7 @@ internal sealed class AssemblyScanner
             Name = type.Name,
             FullName = type.FullName!,
             Layer = layer,
+            Description = DocumentationCommentReader.TryGetTypeSummary(type),
             Handles = handledTypes.ToList()
         };
     }
@@ -405,6 +410,7 @@ internal sealed class AssemblyScanner
             Name = type.Name,
             FullName = type.FullName!,
             Layer = layer,
+            Description = DocumentationCommentReader.TryGetTypeSummary(type),
             ManagesAggregate = managedAggregate?.FullName
         };
     }
@@ -415,7 +421,8 @@ internal sealed class AssemblyScanner
         {
             Name = type.Name,
             FullName = type.FullName!,
-            Layer = layer
+            Layer = layer,
+            Description = DocumentationCommentReader.TryGetTypeSummary(type)
         };
     }
 
@@ -544,6 +551,7 @@ internal sealed class AssemblyScanner
         Name = type.Name,
         FullName = type.FullName!,
         Layer = _config.GetLayer(type),
+        Description = DocumentationCommentReader.TryGetTypeSummary(type),
         Properties = GetProperties(type, knownDomainTypes)
     };
 
@@ -1160,6 +1168,7 @@ internal sealed class AssemblyScanner
             {
                 Name = type.Name,
                 FullName = fullName,
+                Description = DocumentationCommentReader.TryGetTypeSummary(type),
                 Properties = properties
             });
 
