@@ -10,7 +10,10 @@
  *  - Drag, pan, zoom (positions persisted in localStorage)
  *  - Selection shows read-only properties in a side panel
  */
-import { esc, escAttr, shortName, SECTION_META } from './helpers.js';
+import {
+  esc, escAttr, shortName, SECTION_META,
+  formatDiagramPropertyLine, formatDiagramMethodLine, formatDiagramEmittedEventLine,
+} from './helpers.js';
 import { renderTabBar } from './tabs.js';
 
 // ── Constants ────────────────────────────────────────
@@ -240,9 +243,9 @@ function buildGraph() {
     const cfg = KIND_CFG[kind];
     const n = {
       id: item.fullName, name: item.name, kind, cfg,
-      props: (item.properties || []).slice(0, 5).map(p => p.name + ': ' + p.typeName),
-      methods: (item.methods || []).map(m => m.name + '(' + (m.parameters || []).map(p => p.typeName).join(', ') + ')'),
-      events: (item.emittedEvents || []).map(e => '\u26A1 ' + shortName(e)),
+      props: (item.properties || []).slice(0, 5).map(p => formatDiagramPropertyLine(p.name, p.typeName)),
+      methods: (item.methods || []).map(m => formatDiagramMethodLine(m)),
+      events: (item.emittedEvents || []).map(e => formatDiagramEmittedEventLine(e)),
       x: 0, y: 0, vx: 0, vy: 0, w: NODE_W, h: 0,
     };
     n.h = nodeHeight(n);
@@ -348,6 +351,10 @@ function renderSvg() {
     s += `<marker id="ed-arrow-${kind}" viewBox="0 0 10 6" refX="10" refY="3" markerWidth="8" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,3 L0,6 Z" fill="${color}" /></marker>`;
   }
   s += '<marker id="ed-diamond" viewBox="0 0 12 8" refX="0" refY="4" markerWidth="10" markerHeight="8" orient="auto-start-reverse"><path d="M0,4 L6,0 L12,4 L6,8 Z" fill="#60a5fa" /></marker>';
+  for (let ni = 0; ni < st.nodes.length; ni++) {
+    const n = st.nodes[ni];
+    s += `<clipPath id="ed-node-clip-${ni}"><rect x="0" y="0" width="${n.w}" height="${n.h}" rx="8" /></clipPath>`;
+  }
   s += '</defs>';
 
   s += `<g id="editorViewport" transform="translate(${st.panX},${st.panY}) scale(${st.zoom})">`;
@@ -375,7 +382,7 @@ function renderSvg() {
   }
 
   // Nodes (only visible)
-  for (const n of st.nodes) {
+  st.nodes.forEach((n, ni) => {
     const c = n.cfg;
     const selected = st.selectedNode === n.id;
     const strokeW = selected ? 2.5 : 1.5;
@@ -383,6 +390,7 @@ function renderSvg() {
     s += `<g class="dg-node" data-id="${escAttr(n.id)}" transform="translate(${n.x},${n.y})" style="cursor:pointer">`;
     s += `<rect x="3" y="3" width="${n.w}" height="${n.h}" rx="8" fill="rgba(0,0,0,.3)" />`;
     s += `<rect width="${n.w}" height="${n.h}" rx="8" fill="${c.bg}" stroke="${stroke}" stroke-width="${strokeW}" />`;
+    s += `<g clip-path="url(#ed-node-clip-${ni})">`;
     let ty = 20;
     s += `<text x="${n.w / 2}" y="${ty}" text-anchor="middle" fill="${c.color}" font-size="10" font-family="-apple-system,sans-serif" opacity="0.85">${c.stereotype}</text>`;
     ty += 22;
@@ -405,8 +413,8 @@ function renderSvg() {
       ty += 4;
       for (const ev of n.events) { ty += 17; s += `<text x="16" y="${ty}" fill="#fbbf24" font-size="11" font-family="'SF Mono','Cascadia Code','Fira Code',monospace">${esc(ev)}</text>`; }
     }
-    s += '</g>';
-  }
+    s += '</g></g>';
+  });
 
   s += '</g>';
   svg.innerHTML = s;

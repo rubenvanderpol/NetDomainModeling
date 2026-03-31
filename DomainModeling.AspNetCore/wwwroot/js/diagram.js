@@ -2,7 +2,10 @@
  * Interactive SVG diagram with force layout.
  * Layout (positions, viewport, filters) syncs to server disk when available, with localStorage fallback.
  */
-import { esc, escAttr, shortName } from './helpers.js';
+import {
+  esc, escAttr, shortName,
+  formatDiagramPropertyLine, formatDiagramMethodLine, formatDiagramEmittedEventLine,
+} from './helpers.js';
 import { renderTabBar } from './tabs.js';
 
 // Global layout (not scoped by bounded-context selection)
@@ -511,9 +514,9 @@ export function initDiagram(ctx, boundedContexts) {
       id: item.fullName, name: item.name, kind, cfg,
       contextName: nodeContextMap[item.fullName] || null,
       layerName: nodeLayerMap[item.fullName] || item.layer || null,
-      props: (item.properties || []).slice(0, 5).map(p => p.name + ': ' + p.typeName),
-      methods: (item.methods || []).map(m => m.name + '(' + (m.parameters || []).map(p => p.typeName).join(', ') + ')'),
-      events: (item.emittedEvents || []).map(e => '\u26A1 ' + shortName(e)),
+      props: (item.properties || []).slice(0, 5).map(p => formatDiagramPropertyLine(p.name, p.typeName)),
+      methods: (item.methods || []).map(m => formatDiagramMethodLine(m)),
+      events: (item.emittedEvents || []).map(e => formatDiagramEmittedEventLine(e)),
       x: 0, y: 0, vx: 0, vy: 0, w: NODE_W, h: 0
     };
     n.h = nodeHeight(n);
@@ -921,11 +924,18 @@ function computeLayerBounds(nodes) {
   return bounds;
 }
 
+function ensureDiagramNodeHeights(nodes) {
+  for (const n of nodes) {
+    n.h = nodeHeight(n);
+  }
+}
+
 // ── SVG rendering ────────────────────────────────────
 function renderSvg() {
   const svg = document.getElementById('diagramSvg');
   if (!svg || !dgState) return;
   const { nodes, edges, nMap } = dgState;
+  ensureDiagramNodeHeights(nodes);
 
   const edgeColors = { Contains: '#60a5fa', References: '#34d399', ReferencesById: '#34d399', Has: '#60a5fa', HasMany: '#60a5fa', Emits: '#fbbf24', Handles: '#f472b6', Manages: '#fb923c', Publishes: '#2dd4bf' };
 
@@ -934,6 +944,9 @@ function renderSvg() {
     s += `<marker id="arrow-${kind}" viewBox="0 0 10 6" refX="10" refY="3" markerWidth="8" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,3 L0,6 Z" fill="${color}" /></marker>`;
   }
   s += `<marker id="diamond" viewBox="0 0 12 8" refX="0" refY="4" markerWidth="10" markerHeight="8" orient="auto-start-reverse"><path d="M0,4 L6,0 L12,4 L6,8 Z" fill="#60a5fa" /></marker>`;
+  nodes.forEach((n, ni) => {
+    s += `<clipPath id="dg-node-clip-${ni}"><rect x="0" y="0" width="${n.w}" height="${n.h}" rx="8" /></clipPath>`;
+  });
   s += '</defs>';
 
   s += `<g id="diagramViewport" transform="translate(${dgState.panX},${dgState.panY}) scale(${dgState.zoom})">`;
@@ -978,13 +991,13 @@ function renderSvg() {
   }
 
   // Nodes
-  for (const n of nodes) {
-    n.h = nodeHeight(n);
+  nodes.forEach((n, ni) => {
     const c = n.cfg;
     const traceCls = traceHighlightIds.has(n.id) ? ' dg-node-trace' : '';
     s += `<g class="dg-node${traceCls}" data-id="${escAttr(n.id)}" transform="translate(${n.x},${n.y})" style="cursor:pointer">`;
     s += `<rect x="3" y="3" width="${n.w}" height="${n.h}" rx="8" fill="rgba(0,0,0,.3)" />`;
     s += `<rect width="${n.w}" height="${n.h}" rx="8" fill="${c.bg}" stroke="${c.border}" stroke-width="1.5" />`;
+    s += `<g clip-path="url(#dg-node-clip-${ni})">`;
     let ty = 20;
     s += `<text x="${n.w/2}" y="${ty}" text-anchor="middle" fill="${c.color}" font-size="10" font-family="-apple-system,sans-serif" opacity="0.9">${c.stereotype}</text>`;
     ty += NAME_PAD;
@@ -1013,8 +1026,8 @@ function renderSvg() {
       ty += 4;
       for (const ev of n.events) { ty += 17; s += `<text x="16" y="${ty}" fill="#fbbf24" font-size="11" font-family="'SF Mono','Cascadia Code','Fira Code',monospace">${esc(ev)}</text>`; }
     }
-    s += '</g>';
-  }
+    s += '</g></g>';
+  });
 
   s += '</g>';
   svg.innerHTML = s;
@@ -1315,7 +1328,6 @@ export function diagramToggleAliases() {
   }
   if (dgState) {
     scheduleFlushDiagramLayout();
-    for (const n of dgState.allNodes) n.h = nodeHeight(n);
     renderSvg();
   }
 }
