@@ -613,7 +613,7 @@ public class DDDBuilderTests
     }
 
     [Fact]
-    public void Build_DiscoveredNodesHaveNullDescriptionByDefault()
+    public void Build_LoadsTypeSummaryFromXmlDocumentationWhenPresent()
     {
         var assembly = typeof(Order).Assembly;
 
@@ -624,7 +624,8 @@ public class DDDBuilderTests
             .Build();
 
         var ctx = graph.BoundedContexts.Single();
-        ctx.Aggregates.Should().OnlyContain(a => a.Description == null);
+        var order = ctx.Aggregates.Should().ContainSingle(a => a.Name == "Order").Subject;
+        order.Description.Should().Be("The primary sales order aggregate used in scanner tests.");
     }
 
     // ─── Integration Events ─────────────────────────────────────────

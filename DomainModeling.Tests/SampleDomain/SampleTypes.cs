@@ -127,6 +127,9 @@ public class OrderLine : BaseEntity
 
 // ─── Aggregates ──────────────────────────────────────────────────
 
+/// <summary>
+/// The primary sales order aggregate used in scanner tests.
+/// </summary>
 public class Order : BaseAggregateRoot
 {
     public required Customer Customer { get; init; }
