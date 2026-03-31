@@ -16,8 +16,13 @@ namespace DomainModeling.Discovery;
 internal sealed class AssemblyScanner
 {
     private readonly BoundedContextBuilder _config;
+    private readonly RoslynDocumentationIndexer? _documentationIndexer;
 
-    public AssemblyScanner(BoundedContextBuilder config) => _config = config;
+    public AssemblyScanner(BoundedContextBuilder config)
+    {
+        _config = config;
+        _documentationIndexer = RoslynDocumentationIndexer.TryCreate(_config.DocumentationSourceRoots);
+    }
 
     public BoundedContextNode Scan()
     {
@@ -289,7 +294,7 @@ internal sealed class AssemblyScanner
 
     // ─── Node builders ───────────────────────────────────────────────
 
-    private static EntityNode BuildEntityNode(Type type, List<Type> eventTypes, HashSet<string> knownDomainTypes, string? layer)
+    private EntityNode BuildEntityNode(Type type, List<Type> eventTypes, HashSet<string> knownDomainTypes, string? layer)
     {
         var emissions = DetectEventEmissions(type, eventTypes);
         return new EntityNode
@@ -297,14 +302,14 @@ internal sealed class AssemblyScanner
             Name = type.Name,
             FullName = type.FullName!,
             Layer = layer,
-            Description = DocumentationCommentReader.TryGetTypeSummary(type),
+            Description = _documentationIndexer?.TryGetDomainSummary(type),
             Properties = GetProperties(type, knownDomainTypes),
             EmittedEvents = emissions.Select(e => e.EventType).Distinct().ToList(),
             EventEmissions = emissions
         };
     }
 
-    private static AggregateNode BuildAggregateNode(Type type, List<Type> entityTypes, List<Type> eventTypes, HashSet<string> knownDomainTypes, string? layer)
+    private AggregateNode BuildAggregateNode(Type type, List<Type> entityTypes, List<Type> eventTypes, HashSet<string> knownDomainTypes, string? layer)
     {
         var properties = GetProperties(type, knownDomainTypes);
         var emissions = DetectEventEmissions(type, eventTypes);
@@ -323,7 +328,7 @@ internal sealed class AssemblyScanner
             Name = type.Name,
             FullName = type.FullName!,
             Layer = layer,
-            Description = DocumentationCommentReader.TryGetTypeSummary(type),
+            Description = _documentationIndexer?.TryGetDomainSummary(type),
             Properties = properties,
             Methods = GetMethods(type),
             ChildEntities = childEntities,
@@ -332,31 +337,31 @@ internal sealed class AssemblyScanner
         };
     }
 
-    private static ValueObjectNode BuildValueObjectNode(Type type, HashSet<string> knownDomainTypes, string? layer)
+    private ValueObjectNode BuildValueObjectNode(Type type, HashSet<string> knownDomainTypes, string? layer)
     {
         return new ValueObjectNode
         {
             Name = type.Name,
             FullName = type.FullName!,
             Layer = layer,
-            Description = DocumentationCommentReader.TryGetTypeSummary(type),
+            Description = _documentationIndexer?.TryGetDomainSummary(type),
             Properties = GetProperties(type, knownDomainTypes)
         };
     }
 
-    private static DomainEventNode BuildDomainEventNode(Type type, HashSet<string> knownDomainTypes, string? layer)
+    private DomainEventNode BuildDomainEventNode(Type type, HashSet<string> knownDomainTypes, string? layer)
     {
         return new DomainEventNode
         {
             Name = type.Name,
             FullName = type.FullName!,
             Layer = layer,
-            Description = DocumentationCommentReader.TryGetTypeSummary(type),
+            Description = _documentationIndexer?.TryGetDomainSummary(type),
             Properties = GetProperties(type, knownDomainTypes)
         };
     }
 
-    private static HandlerNode BuildHandlerNode(Type type, HashSet<string> knownDomainTypes, string? layer)
+    private HandlerNode BuildHandlerNode(Type type, HashSet<string> knownDomainTypes, string? layer)
     {
         var handledTypes = new HashSet<string>();
 
@@ -390,12 +395,12 @@ internal sealed class AssemblyScanner
             Name = type.Name,
             FullName = type.FullName!,
             Layer = layer,
-            Description = DocumentationCommentReader.TryGetTypeSummary(type),
+            Description = _documentationIndexer?.TryGetDomainSummary(type),
             Handles = handledTypes.ToList()
         };
     }
 
-    private static RepositoryNode BuildRepositoryNode(Type type, List<Type> aggregateTypes, string? layer)
+    private RepositoryNode BuildRepositoryNode(Type type, List<Type> aggregateTypes, string? layer)
     {
         var aggregateNames = new HashSet<string>(aggregateTypes.Select(a => a.FullName!));
 
@@ -410,19 +415,19 @@ internal sealed class AssemblyScanner
             Name = type.Name,
             FullName = type.FullName!,
             Layer = layer,
-            Description = DocumentationCommentReader.TryGetTypeSummary(type),
+            Description = _documentationIndexer?.TryGetDomainSummary(type),
             ManagesAggregate = managedAggregate?.FullName
         };
     }
 
-    private static DomainServiceNode BuildDomainServiceNode(Type type, string? layer)
+    private DomainServiceNode BuildDomainServiceNode(Type type, string? layer)
     {
         return new DomainServiceNode
         {
             Name = type.Name,
             FullName = type.FullName!,
             Layer = layer,
-            Description = DocumentationCommentReader.TryGetTypeSummary(type)
+            Description = _documentationIndexer?.TryGetDomainSummary(type)
         };
     }
 
@@ -551,7 +556,7 @@ internal sealed class AssemblyScanner
         Name = type.Name,
         FullName = type.FullName!,
         Layer = _config.GetLayer(type),
-        Description = DocumentationCommentReader.TryGetTypeSummary(type),
+        Description = _documentationIndexer?.TryGetDomainSummary(type),
         Properties = GetProperties(type, knownDomainTypes)
     };
 
@@ -1131,7 +1136,7 @@ internal sealed class AssemblyScanner
     /// aggregates, or value objects but are not themselves registered domain types.
     /// Also processes sub-type properties recursively.
     /// </summary>
-    private static List<SubTypeNode> DiscoverSubTypes(
+    private List<SubTypeNode> DiscoverSubTypes(
         List<EntityNode> entityNodes,
         List<AggregateNode> aggregateNodes,
         List<ValueObjectNode> valueObjectNodes,
@@ -1168,7 +1173,7 @@ internal sealed class AssemblyScanner
             {
                 Name = type.Name,
                 FullName = fullName,
-                Description = DocumentationCommentReader.TryGetTypeSummary(type),
+                Description = _documentationIndexer?.TryGetDomainSummary(type),
                 Properties = properties
             });
 
