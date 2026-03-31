@@ -1,3 +1,4 @@
+using System.IO;
 using System.Reflection;
 using System.Text.Json;
 using DomainModeling.Builder;
@@ -10,12 +11,29 @@ namespace DomainModeling.Tests;
 
 public class DDDBuilderTests
 {
+    private static string TestProjectDirectory
+    {
+        get
+        {
+            var dir = Path.GetDirectoryName(typeof(DDDBuilderTests).Assembly.Location);
+            while (!string.IsNullOrEmpty(dir))
+            {
+                if (File.Exists(Path.Combine(dir, "DomainModeling.Tests.csproj")))
+                    return dir;
+                dir = Directory.GetParent(dir)?.FullName;
+            }
+
+            throw new InvalidOperationException("Could not locate DomainModeling.Tests.csproj.");
+        }
+    }
+
     private static DomainGraph BuildSampleGraph()
     {
         var assembly = typeof(Order).Assembly;
 
         return DDDBuilder.Create()
             .WithBoundedContext("Sales", ctx => ctx
+                .WithDocumentationSourceRoot(TestProjectDirectory)
                 .WithDomainAssembly(assembly)
                 .WithApplicationAssembly(assembly)
                 .WithInfrastructureAssembly(assembly)
@@ -613,19 +631,20 @@ public class DDDBuilderTests
     }
 
     [Fact]
-    public void Build_LoadsTypeSummaryFromXmlDocumentationWhenPresent()
+    public void Build_LoadsDomainTagFromRoslynWhenDocumentationSourceConfigured()
     {
         var assembly = typeof(Order).Assembly;
 
         var graph = DDDBuilder.Create()
             .WithBoundedContext("Sales", ctx => ctx
+                .WithDocumentationSourceRoot(TestProjectDirectory)
                 .WithDomainAssembly(assembly)
                 .Aggregates(a => a.InheritsFrom<BaseAggregateRoot>()))
             .Build();
 
         var ctx = graph.BoundedContexts.Single();
         var order = ctx.Aggregates.Should().ContainSingle(a => a.Name == "Order").Subject;
-        order.Description.Should().Be("The primary sales order aggregate used in scanner tests.");
+        order.Description.Should().Be("emits DomainModeling.Tests.SampleDomain.OrderPlacedEvent");
     }
 
     // ─── Integration Events ─────────────────────────────────────────

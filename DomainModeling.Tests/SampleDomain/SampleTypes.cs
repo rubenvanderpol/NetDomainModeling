@@ -129,6 +129,7 @@ public class OrderLine : BaseEntity
 
 /// <summary>
 /// The primary sales order aggregate used in scanner tests.
+/// <domain>emits <see cref="OrderPlacedEvent"/></domain>
 /// </summary>
 public class Order : BaseAggregateRoot
 {
