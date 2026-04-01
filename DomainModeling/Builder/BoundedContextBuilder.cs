@@ -49,9 +49,40 @@ public sealed class BoundedContextBuilder
     /// Sets the assembly containing the domain layer (entities, aggregates, events).
     /// </summary>
     public BoundedContextBuilder WithDomainAssembly(Assembly assembly)
+        => WithDomainAssembly(assembly, scanAssemblyForDocumentation: false);
+
+    /// <summary>
+    /// Sets the domain assembly and optionally registers a documentation source root by searching parent
+    /// directories of the assembly output for a <c>.csproj</c> (see <see cref="AssemblyDocumentationDiscovery"/>).
+    /// </summary>
+    /// <param name="assembly">The domain assembly.</param>
+    /// <param name="scanAssemblyForDocumentation">When <c>true</c>, walks up from <see cref="Assembly.Location"/>
+    /// and calls <see cref="WithDocumentationSourceRoot"/> if exactly one project is found, or one matches the assembly name.</param>
+    public BoundedContextBuilder WithDomainAssembly(Assembly assembly, bool scanAssemblyForDocumentation)
     {
-        DomainAssembly = assembly ?? throw new ArgumentNullException(nameof(assembly));
+        ArgumentNullException.ThrowIfNull(assembly);
+        DomainAssembly = assembly;
+
+        if (scanAssemblyForDocumentation)
+        {
+            var projectPath = AssemblyDocumentationDiscovery.TryFindProjectForDocumentation(assembly);
+            if (projectPath is not null)
+                TryAddDocumentationSourceRoot(projectPath);
+        }
+
         return this;
+    }
+
+    private void TryAddDocumentationSourceRoot(string path)
+    {
+        var full = Path.GetFullPath(path.Trim());
+        foreach (var existing in DocumentationSourceRoots)
+        {
+            if (string.Equals(Path.GetFullPath(existing.Trim()), full, StringComparison.OrdinalIgnoreCase))
+                return;
+        }
+
+        DocumentationSourceRoots.Add(full);
     }
 
     /// <summary>
@@ -88,7 +119,7 @@ public sealed class BoundedContextBuilder
     {
         if (string.IsNullOrWhiteSpace(path))
             throw new ArgumentException("Path must be non-empty.", nameof(path));
-        DocumentationSourceRoots.Add(path);
+        TryAddDocumentationSourceRoot(path);
         return this;
     }
 

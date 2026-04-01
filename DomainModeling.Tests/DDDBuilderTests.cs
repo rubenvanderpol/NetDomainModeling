@@ -1,4 +1,3 @@
-using System.IO;
 using System.Reflection;
 using System.Text.Json;
 using DomainModeling.Builder;
@@ -11,30 +10,13 @@ namespace DomainModeling.Tests;
 
 public class DDDBuilderTests
 {
-    private static string TestProjectDirectory
-    {
-        get
-        {
-            var dir = Path.GetDirectoryName(typeof(DDDBuilderTests).Assembly.Location);
-            while (!string.IsNullOrEmpty(dir))
-            {
-                if (File.Exists(Path.Combine(dir, "DomainModeling.Tests.csproj")))
-                    return dir;
-                dir = Directory.GetParent(dir)?.FullName;
-            }
-
-            throw new InvalidOperationException("Could not locate DomainModeling.Tests.csproj.");
-        }
-    }
-
     private static DomainGraph BuildSampleGraph()
     {
         var assembly = typeof(Order).Assembly;
 
         return DDDBuilder.Create()
             .WithBoundedContext("Sales", ctx => ctx
-                .WithDocumentationSourceRoot(TestProjectDirectory)
-                .WithDomainAssembly(assembly)
+                .WithDomainAssembly(assembly, scanAssemblyForDocumentation: true)
                 .WithApplicationAssembly(assembly)
                 .WithInfrastructureAssembly(assembly)
                 .Entities(e => e.InheritsFrom<BaseEntity>())
@@ -631,14 +613,13 @@ public class DDDBuilderTests
     }
 
     [Fact]
-    public void Build_LoadsDomainTagFromRoslynWhenDocumentationSourceConfigured()
+    public void WithDomainAssembly_ScanForDocs_LoadsDomainTagFromDiscoveredCsproj()
     {
         var assembly = typeof(Order).Assembly;
 
         var graph = DDDBuilder.Create()
             .WithBoundedContext("Sales", ctx => ctx
-                .WithDocumentationSourceRoot(TestProjectDirectory)
-                .WithDomainAssembly(assembly)
+                .WithDomainAssembly(assembly, scanAssemblyForDocumentation: true)
                 .Aggregates(a => a.InheritsFrom<BaseAggregateRoot>()))
             .Build();
 
