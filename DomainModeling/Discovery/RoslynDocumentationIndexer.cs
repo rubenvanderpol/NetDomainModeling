@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using Microsoft.Build.Locator;
@@ -14,15 +15,22 @@ namespace DomainModeling.Discovery;
 /// loaded via Roslyn/MSBuild. Tags may appear anywhere in the type's doc comment (including inside
 /// <c>&lt;summary&gt;</c>). Inner text should start with a link kind (e.g. <c>emits</c>) followed by
 /// the referenced type name.
+/// Method comments with <c>emits</c> and <c>see cref</c> are mapped to CLR type + method keys for emission discovery.
 /// </summary>
 internal sealed partial class RoslynDocumentationIndexer
 {
     private static readonly ConcurrentDictionary<string, Lazy<RoslynDocumentationIndexer?>> Cache = new(StringComparer.Ordinal);
 
     private readonly Dictionary<string, string> _clrFullNameToDomainText;
+    private readonly Dictionary<string, List<string>> _methodKeyToEmittedTypeFullNames;
 
-    private RoslynDocumentationIndexer(Dictionary<string, string> clrFullNameToDomainText) =>
+    private RoslynDocumentationIndexer(
+        Dictionary<string, string> clrFullNameToDomainText,
+        Dictionary<string, List<string>> methodKeyToEmittedTypeFullNames)
+    {
         _clrFullNameToDomainText = clrFullNameToDomainText;
+        _methodKeyToEmittedTypeFullNames = methodKeyToEmittedTypeFullNames;
+    }
 
     /// <summary>
     /// Returns concatenated <c>&lt;domain&gt;</c> inner text for the type, or <c>null</c> if none.
@@ -43,6 +51,21 @@ internal sealed partial class RoslynDocumentationIndexer
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Event types documented as emitted by a method via <c>&lt;domain&gt;emits&lt;/domain&gt;</c>, keyed as
+    /// <c>{declaring type CLR full name}::{method name}</c> (constructors use <c>ctor</c> / <c>cctor</c>).
+    /// </summary>
+    public IReadOnlyList<string> TryGetDocumentedEmissions(Type declaringType, string normalizedMethodName)
+    {
+        if (declaringType.FullName is null)
+            return [];
+
+        var key = declaringType.FullName + "::" + normalizedMethodName;
+        return _methodKeyToEmittedTypeFullNames.TryGetValue(key, out var list)
+            ? list
+            : [];
     }
 
     /// <summary>
@@ -81,7 +104,8 @@ internal sealed partial class RoslynDocumentationIndexer
         MsBuildWorkspaceRegistration.EnsureRegistered();
 
         using var workspace = MSBuildWorkspace.Create();
-        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        var typeMap = new Dictionary<string, string>(StringComparer.Ordinal);
+        var methodMap = new Dictionary<string, List<string>>(StringComparer.Ordinal);
 
         foreach (var projectPath in projectPaths)
         {
@@ -92,7 +116,7 @@ internal sealed partial class RoslynDocumentationIndexer
                 if (compilation is null)
                     continue;
 
-                IndexCompilation(compilation, map);
+                IndexCompilation(compilation, typeMap, methodMap);
             }
             catch
             {
@@ -100,15 +124,18 @@ internal sealed partial class RoslynDocumentationIndexer
             }
         }
 
-        if (map.Count == 0)
-            TryIndexDirectoriesWithAdHocCompilation(normalizedPaths, map);
+        if (typeMap.Count == 0 && methodMap.Count == 0)
+            TryIndexDirectoriesWithAdHocCompilation(normalizedPaths, typeMap, methodMap);
 
-        return map.Count == 0 ? null : new RoslynDocumentationIndexer(map);
+        return typeMap.Count == 0 && methodMap.Count == 0
+            ? null
+            : new RoslynDocumentationIndexer(typeMap, methodMap);
     }
 
     private static void TryIndexDirectoriesWithAdHocCompilation(
         string[] documentationRoots,
-        Dictionary<string, string> map)
+        Dictionary<string, string> typeMap,
+        Dictionary<string, List<string>> methodMap)
     {
         var refs = GetPlatformMetadataReferences();
         if (refs.Count == 0)
@@ -135,7 +162,7 @@ internal sealed partial class RoslynDocumentationIndexer
                 refs,
                 new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
-            IndexCompilation(compilation, map);
+            IndexCompilation(compilation, typeMap, methodMap);
         }
     }
 
@@ -233,7 +260,10 @@ internal sealed partial class RoslynDocumentationIndexer
         }
     }
 
-    private static void IndexCompilation(Compilation compilation, Dictionary<string, string> map)
+    private static void IndexCompilation(
+        Compilation compilation,
+        Dictionary<string, string> typeMap,
+        Dictionary<string, List<string>> methodMap)
     {
         foreach (var tree in compilation.SyntaxTrees)
         {
@@ -242,17 +272,63 @@ internal sealed partial class RoslynDocumentationIndexer
 
             foreach (var node in root.DescendantNodes())
             {
-                INamedTypeSymbol? symbol = node switch
+                switch (node)
                 {
-                    TypeDeclarationSyntax typeDecl => model.GetDeclaredSymbol(typeDecl) as INamedTypeSymbol,
-                    EnumDeclarationSyntax enumDecl => model.GetDeclaredSymbol(enumDecl) as INamedTypeSymbol,
-                    _ => null
-                };
+                    case BaseMethodDeclarationSyntax methodDecl:
+                    {
+                        if (model.GetDeclaredSymbol(methodDecl) is not IMethodSymbol methodSym)
+                            break;
+                        if (methodSym.MethodKind is MethodKind.PropertyGet or MethodKind.PropertySet)
+                            break;
 
-                if (symbol is not null)
-                    TryAddSymbol(map, symbol);
+                        var xml = methodSym.GetDocumentationCommentXml();
+                        var emitted = ExtractEmittedTypesFromDocumentationXml(xml, compilation);
+                        if (emitted.Count == 0)
+                            break;
+
+                        var key = DocumentationMethodKey(methodSym);
+                        if (!methodMap.TryGetValue(key, out var list))
+                        {
+                            list = [];
+                            methodMap[key] = list;
+                        }
+
+                        foreach (var e in emitted)
+                        {
+                            if (!list.Contains(e, StringComparer.Ordinal))
+                                list.Add(e);
+                        }
+
+                        break;
+                    }
+                    default:
+                    {
+                        INamedTypeSymbol? symbol = node switch
+                        {
+                            TypeDeclarationSyntax typeDecl => model.GetDeclaredSymbol(typeDecl) as INamedTypeSymbol,
+                            EnumDeclarationSyntax enumDecl => model.GetDeclaredSymbol(enumDecl) as INamedTypeSymbol,
+                            _ => null
+                        };
+
+                        if (symbol is not null)
+                            TryAddSymbol(typeMap, symbol);
+                        break;
+                    }
+                }
             }
         }
+    }
+
+    private static string DocumentationMethodKey(IMethodSymbol method)
+    {
+        var typeName = ToClrMetadataFullName(method.ContainingType);
+        var name = method.MetadataName switch
+        {
+            WellKnownMemberNames.InstanceConstructorName => "ctor",
+            WellKnownMemberNames.StaticConstructorName => "cctor",
+            var n => n
+        };
+        return typeName + "::" + name;
     }
 
     private static void TryAddSymbol(Dictionary<string, string> map, INamedTypeSymbol symbol)
@@ -295,6 +371,83 @@ internal sealed partial class RoslynDocumentationIndexer
         var ns = symbol.ContainingNamespace;
         var nsPrefix = ns is null || ns.IsGlobalNamespace ? "" : ns.ToDisplayString() + ".";
         return nsPrefix + string.Join("+", parts);
+    }
+
+    /// <summary>
+    /// Parses <c>&lt;domain&gt;</c> blocks with link kind <c>emits</c> and resolves <c>see cref</c> to CLR type full names.
+    /// </summary>
+    private static List<string> ExtractEmittedTypesFromDocumentationXml(string? documentationXml, Compilation compilation)
+    {
+        var result = new List<string>();
+        if (string.IsNullOrWhiteSpace(documentationXml))
+            return result;
+
+        foreach (Match m in DomainTagRegex().Matches(documentationXml))
+        {
+            var inner = m.Groups[1].Value;
+            if (string.IsNullOrWhiteSpace(inner))
+                continue;
+
+            try
+            {
+                var wrapped = "<r>" + inner + "</r>";
+                var el = XElement.Parse(wrapped, LoadOptions.PreserveWhitespace);
+                if (!DomainTagHasEmitsLinkKind(el))
+                    continue;
+
+                foreach (var see in el.Descendants().Where(e => e.Name.LocalName.Equals("see", StringComparison.OrdinalIgnoreCase)))
+                {
+                    var cref = see.Attribute("cref")?.Value;
+                    if (string.IsNullOrWhiteSpace(cref))
+                        continue;
+
+                    var id = cref.Length >= 2 && cref[1] == ':' ? cref : "T:" + cref;
+                    foreach (var sym in DocumentationCommentId.GetSymbolsForReferenceId(id, compilation))
+                    {
+                        if (sym is INamedTypeSymbol nt)
+                        {
+                            var clr = ToClrMetadataFullName(nt);
+                            if (!result.Contains(clr, StringComparer.Ordinal))
+                                result.Add(clr);
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // ignore malformed fragments
+            }
+        }
+
+        return result;
+    }
+
+    private static bool DomainTagHasEmitsLinkKind(XElement domainFragmentRoot)
+    {
+        var sb = new StringBuilder();
+        AppendPlainTextForLinkKind(domainFragmentRoot, sb);
+        var condensed = string.Join(' ', sb.ToString().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        return condensed.StartsWith("emits ", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(condensed, "emits", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void AppendPlainTextForLinkKind(XElement el, StringBuilder sb)
+    {
+        foreach (var node in el.Nodes())
+        {
+            switch (node)
+            {
+                case XText t:
+                    sb.Append(t.Value);
+                    break;
+                case XElement child when child.Name.LocalName.Equals("see", StringComparison.OrdinalIgnoreCase):
+                    sb.Append(' ');
+                    break;
+                case XElement child:
+                    AppendPlainTextForLinkKind(child, sb);
+                    break;
+            }
+        }
     }
 
     private static string? ExtractDomainTags(string? documentationXml)

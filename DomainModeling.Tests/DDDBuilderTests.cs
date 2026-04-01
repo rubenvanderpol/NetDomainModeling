@@ -161,6 +161,9 @@ public class DDDBuilderTests
             e.EventType.Contains("OrderPlacedEvent") &&
             e.MethodName == "Place");
         order.EventEmissions.Should().Contain(e =>
+            e.EventType.Contains("OrderPlacedEvent") &&
+            e.MethodName == "PlaceFromDocumentationOnly");
+        order.EventEmissions.Should().Contain(e =>
             e.EventType.Contains("OrderShippedEvent") &&
             e.MethodName == "Ship");
 

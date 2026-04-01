@@ -296,7 +296,7 @@ internal sealed class AssemblyScanner
 
     private EntityNode BuildEntityNode(Type type, List<Type> eventTypes, HashSet<string> knownDomainTypes, string? layer)
     {
-        var emissions = DetectEventEmissions(type, eventTypes);
+        var emissions = DetectEventEmissions(type, eventTypes, _documentationIndexer);
         return new EntityNode
         {
             Name = type.Name,
@@ -312,7 +312,7 @@ internal sealed class AssemblyScanner
     private AggregateNode BuildAggregateNode(Type type, List<Type> entityTypes, List<Type> eventTypes, HashSet<string> knownDomainTypes, string? layer)
     {
         var properties = GetProperties(type, knownDomainTypes);
-        var emissions = DetectEventEmissions(type, eventTypes);
+        var emissions = DetectEventEmissions(type, eventTypes, _documentationIndexer);
 
         // Detect child entities: properties whose type (or collection element type)
         // is a known entity
@@ -731,7 +731,10 @@ internal sealed class AssemblyScanner
     /// <summary>
     /// Detects emitted domain events and tracks the method that emitted each one.
     /// </summary>
-    private static List<EventEmissionInfo> DetectEventEmissions(Type type, List<Type> eventTypes)
+    private static List<EventEmissionInfo> DetectEventEmissions(
+        Type type,
+        List<Type> eventTypes,
+        RoslynDocumentationIndexer? documentationIndexer)
     {
         var eventFullNames = new HashSet<string>(eventTypes.Select(e => e.FullName!));
         var emittedByMethod = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
@@ -751,6 +754,9 @@ internal sealed class AssemblyScanner
             }
         }
 
+        if (documentationIndexer is not null)
+            MergeDocumentedMethodEmissions(type, eventFullNames, emittedByMethod, documentationIndexer);
+
         return emittedByMethod
             .SelectMany(kvp => kvp.Value.Select(method => new EventEmissionInfo
             {
@@ -760,6 +766,31 @@ internal sealed class AssemblyScanner
             .OrderBy(e => e.EventType)
             .ThenBy(e => e.MethodName)
             .ToList();
+    }
+
+    private static void MergeDocumentedMethodEmissions(
+        Type declaringType,
+        HashSet<string> eventFullNames,
+        Dictionary<string, HashSet<string>> emittedByMethod,
+        RoslynDocumentationIndexer documentationIndexer)
+    {
+        if (declaringType.FullName is null)
+            return;
+
+        var allMethods = declaringType.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly)
+            .Cast<MethodBase>()
+            .Concat(declaringType.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static));
+
+        foreach (var method in allMethods)
+        {
+            var methodName = NormalizeMethodName(method, fallbackMethodName: null);
+            foreach (var documentedEvent in documentationIndexer.TryGetDocumentedEmissions(declaringType, methodName))
+            {
+                var key = ResolveCanonicalEventKey(documentedEvent, eventFullNames);
+                if (key is not null)
+                    AddEventEmission(emittedByMethod, key, methodName);
+            }
+        }
     }
 
     /// <summary>
@@ -999,11 +1030,11 @@ internal sealed class AssemblyScanner
 
     /// <summary>
     /// Detect which integration event types a handler can publish.
-    /// Uses IL scanning similar to <see cref="DetectEventEmissions(Type, List{Type})"/>.
+    /// Uses IL scanning similar to <see cref="DetectEventEmissions(Type, List{Type}, RoslynDocumentationIndexer?)"/>.
     /// </summary>
     private static List<string> DetectPublishedEvents(Type type, List<Type> integrationEventTypes)
     {
-        return DetectEventEmissions(type, integrationEventTypes)
+        return DetectEventEmissions(type, integrationEventTypes, documentationIndexer: null)
             .Select(e => e.EventType)
             .Distinct()
             .ToList();

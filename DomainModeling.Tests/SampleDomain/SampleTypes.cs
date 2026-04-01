@@ -142,6 +142,13 @@ public class Order : BaseAggregateRoot
         Raise(new OrderPlacedEvent { OrderId = Id });
     }
 
+    /// <summary>
+    /// <domain>emits <see cref="OrderPlacedEvent"/></domain>
+    /// </summary>
+    public void PlaceFromDocumentationOnly()
+    {
+    }
+
     public void Ship()
     {
         Raise(new OrderShippedEvent { OrderId = Id });
