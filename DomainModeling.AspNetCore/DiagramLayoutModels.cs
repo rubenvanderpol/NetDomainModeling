@@ -4,7 +4,8 @@ namespace DomainModeling.AspNetCore;
 
 /// <summary>
 /// Persisted main diagram layout (single document for the explorer diagram).
-/// Stored as <c>diagram-layout.json</c> under <see cref="DomainModelOptions.DiagramLayoutStoragePath"/>.
+/// Stored as <c>diagram-layout.json</c> under <see cref="DomainModelOptions.DiagramLayoutStoragePath"/>
+/// (resolved with <see cref="DomainModelOptions.StorageRootPath"/> when set).
 /// </summary>
 internal sealed class DiagramLayoutDocument
 {

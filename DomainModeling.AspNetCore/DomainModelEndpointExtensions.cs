@@ -45,20 +45,29 @@ public sealed class DomainModelOptions
     public bool EnableTraceView { get; set; }
 
     /// <summary>
+    /// Optional base directory for all persisted explorer files (diagram positions, type alias/description
+    /// metadata, and feature editor data). When set, <see cref="DiagramLayoutStoragePath"/>,
+    /// <see cref="MetadataStoragePath"/>, and <see cref="FeatureStoragePath"/> are resolved as paths
+    /// relative to this root unless they are already absolute. When null or whitespace, each storage path
+    /// is resolved on its own (defaults remain relative to the process current directory).
+    /// </summary>
+    public string? StorageRootPath { get; set; }
+
+    /// <summary>
     /// Directory path where feature editor JSON files are stored.
-    /// Defaults to <c>./features</c> relative to the application root.
+    /// Defaults to <c>./features</c>. Relative paths are under <see cref="StorageRootPath"/> when it is set.
     /// </summary>
     public string FeatureStoragePath { get; set; } = "./features";
 
     /// <summary>
     /// Directory path where domain type alias/description metadata is stored.
-    /// Defaults to <c>./metadata</c> relative to the application root.
+    /// Defaults to <c>./metadata</c>. Relative paths are under <see cref="StorageRootPath"/> when it is set.
     /// </summary>
     public string MetadataStoragePath { get; set; } = "./metadata";
 
     /// <summary>
     /// Directory path where the main diagram layout file <c>diagram-layout.json</c> is stored.
-    /// Defaults to <c>./diagram-layout</c> relative to the application root.
+    /// Defaults to <c>./diagram-layout</c>. Relative paths are under <see cref="StorageRootPath"/> when it is set.
     /// </summary>
     public string DiagramLayoutStoragePath { get; set; } = "./diagram-layout";
 
@@ -173,12 +182,12 @@ public static class DomainModelEndpointExtensions
         var json = graph.ToJson();
 
         // Main diagram layout — single JSON file under this directory
-        var diagramLayoutDir = Path.GetFullPath(options.DiagramLayoutStoragePath);
+        var diagramLayoutDir = DomainModelStoragePathResolver.Resolve(options.StorageRootPath, options.DiagramLayoutStoragePath);
         const string diagramLayoutFileName = "diagram-layout.json";
         var diagramLayoutFilePath = Path.Combine(diagramLayoutDir, diagramLayoutFileName);
 
         // Custom metadata store (alias / description per type) persisted as JSON files on disk
-        var metadataDir = Path.GetFullPath(options.MetadataStoragePath);
+        var metadataDir = DomainModelStoragePathResolver.Resolve(options.StorageRootPath, options.MetadataStoragePath);
         var metadata = new System.Collections.Concurrent.ConcurrentDictionary<string, TypeMetadata>();
         if (Directory.Exists(metadataDir))
         {
@@ -497,7 +506,7 @@ public static class DomainModelEndpointExtensions
         // Feature editor endpoints
         if (options.EnableFeatureEditor)
         {
-            var featureDir = Path.GetFullPath(options.FeatureStoragePath);
+            var featureDir = DomainModelStoragePathResolver.Resolve(options.StorageRootPath, options.FeatureStoragePath);
 
             // GET /domain-model/features — list all saved features (folder per feature)
             endpoints.MapGet($"{routePrefix}/features", () =>
