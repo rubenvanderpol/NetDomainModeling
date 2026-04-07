@@ -16,6 +16,15 @@ public sealed class BoundedContextBuilder
     internal List<Assembly> SharedAssemblies { get; } = [];
 
     /// <summary>
+    /// Paths to C# projects (<c>.csproj</c>), solutions (<c>.sln</c>), or directories of source files.
+    /// When non-empty, Roslyn indexes documentation and fills graph node <c>Description</c> from
+    /// <c>&lt;domain&gt;...&lt;/domain&gt;</c> inside XML doc comments (including inside <c>&lt;summary&gt;</c>).
+    /// Projects are opened via MSBuild when possible; otherwise <c>*.cs</c> under a directory root is parsed with
+    /// framework references only (project references may be unresolved).
+    /// </summary>
+    internal List<string> DocumentationSourceRoots { get; } = [];
+
+    /// <summary>
     /// Assemblies scanned for discovery (handlers, IL, references) in this context, but whose
     /// primary building blocks are listed only under the bounded context name passed to
     /// <c>WithSharedAssembly(assembly, boundedContextName)</c> on <see cref="DDDBuilder"/>.
@@ -40,9 +49,40 @@ public sealed class BoundedContextBuilder
     /// Sets the assembly containing the domain layer (entities, aggregates, events).
     /// </summary>
     public BoundedContextBuilder WithDomainAssembly(Assembly assembly)
+        => WithDomainAssembly(assembly, scanAssemblyForDocumentation: false);
+
+    /// <summary>
+    /// Sets the domain assembly and optionally registers a documentation source root by searching parent
+    /// directories of the assembly output for a <c>.csproj</c> (see <see cref="AssemblyDocumentationDiscovery"/>).
+    /// </summary>
+    /// <param name="assembly">The domain assembly.</param>
+    /// <param name="scanAssemblyForDocumentation">When <c>true</c>, walks up from <see cref="Assembly.Location"/>
+    /// and calls <see cref="WithDocumentationSourceRoot"/> if exactly one project is found, or one matches the assembly name.</param>
+    public BoundedContextBuilder WithDomainAssembly(Assembly assembly, bool scanAssemblyForDocumentation)
     {
-        DomainAssembly = assembly ?? throw new ArgumentNullException(nameof(assembly));
+        ArgumentNullException.ThrowIfNull(assembly);
+        DomainAssembly = assembly;
+
+        if (scanAssemblyForDocumentation)
+        {
+            var projectPath = AssemblyDocumentationDiscovery.TryFindProjectForDocumentation(assembly);
+            if (projectPath is not null)
+                TryAddDocumentationSourceRoot(projectPath);
+        }
+
         return this;
+    }
+
+    private void TryAddDocumentationSourceRoot(string path)
+    {
+        var full = Path.GetFullPath(path.Trim());
+        foreach (var existing in DocumentationSourceRoots)
+        {
+            if (string.Equals(Path.GetFullPath(existing.Trim()), full, StringComparison.OrdinalIgnoreCase))
+                return;
+        }
+
+        DocumentationSourceRoots.Add(full);
     }
 
     /// <summary>
@@ -69,6 +109,17 @@ public sealed class BoundedContextBuilder
     public BoundedContextBuilder WithAssembly(Assembly assembly)
     {
         AdditionalAssemblies.Add(assembly ?? throw new ArgumentNullException(nameof(assembly)));
+        return this;
+    }
+
+    /// <summary>
+    /// Adds source roots used to resolve <c>&lt;domain&gt;</c> documentation tags via Roslyn (see <see cref="DocumentationSourceRoots"/>).
+    /// </summary>
+    public BoundedContextBuilder WithDocumentationSourceRoot(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            throw new ArgumentException("Path must be non-empty.", nameof(path));
+        TryAddDocumentationSourceRoot(path);
         return this;
     }
 

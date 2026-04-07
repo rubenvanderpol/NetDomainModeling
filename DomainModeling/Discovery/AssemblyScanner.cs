@@ -16,8 +16,13 @@ namespace DomainModeling.Discovery;
 internal sealed class AssemblyScanner
 {
     private readonly BoundedContextBuilder _config;
+    private readonly RoslynDocumentationIndexer? _documentationIndexer;
 
-    public AssemblyScanner(BoundedContextBuilder config) => _config = config;
+    public AssemblyScanner(BoundedContextBuilder config)
+    {
+        _config = config;
+        _documentationIndexer = RoslynDocumentationIndexer.TryCreate(_config.DocumentationSourceRoots);
+    }
 
     public BoundedContextNode Scan()
     {
@@ -289,24 +294,25 @@ internal sealed class AssemblyScanner
 
     // ─── Node builders ───────────────────────────────────────────────
 
-    private static EntityNode BuildEntityNode(Type type, List<Type> eventTypes, HashSet<string> knownDomainTypes, string? layer)
+    private EntityNode BuildEntityNode(Type type, List<Type> eventTypes, HashSet<string> knownDomainTypes, string? layer)
     {
-        var emissions = DetectEventEmissions(type, eventTypes);
+        var emissions = DetectEventEmissions(type, eventTypes, _documentationIndexer);
         return new EntityNode
         {
             Name = type.Name,
             FullName = type.FullName!,
             Layer = layer,
+            Description = _documentationIndexer?.TryGetDomainSummary(type),
             Properties = GetProperties(type, knownDomainTypes),
             EmittedEvents = emissions.Select(e => e.EventType).Distinct().ToList(),
             EventEmissions = emissions
         };
     }
 
-    private static AggregateNode BuildAggregateNode(Type type, List<Type> entityTypes, List<Type> eventTypes, HashSet<string> knownDomainTypes, string? layer)
+    private AggregateNode BuildAggregateNode(Type type, List<Type> entityTypes, List<Type> eventTypes, HashSet<string> knownDomainTypes, string? layer)
     {
         var properties = GetProperties(type, knownDomainTypes);
-        var emissions = DetectEventEmissions(type, eventTypes);
+        var emissions = DetectEventEmissions(type, eventTypes, _documentationIndexer);
 
         // Detect child entities: properties whose type (or collection element type)
         // is a known entity
@@ -322,6 +328,7 @@ internal sealed class AssemblyScanner
             Name = type.Name,
             FullName = type.FullName!,
             Layer = layer,
+            Description = _documentationIndexer?.TryGetDomainSummary(type),
             Properties = properties,
             Methods = GetMethods(type),
             ChildEntities = childEntities,
@@ -330,29 +337,31 @@ internal sealed class AssemblyScanner
         };
     }
 
-    private static ValueObjectNode BuildValueObjectNode(Type type, HashSet<string> knownDomainTypes, string? layer)
+    private ValueObjectNode BuildValueObjectNode(Type type, HashSet<string> knownDomainTypes, string? layer)
     {
         return new ValueObjectNode
         {
             Name = type.Name,
             FullName = type.FullName!,
             Layer = layer,
+            Description = _documentationIndexer?.TryGetDomainSummary(type),
             Properties = GetProperties(type, knownDomainTypes)
         };
     }
 
-    private static DomainEventNode BuildDomainEventNode(Type type, HashSet<string> knownDomainTypes, string? layer)
+    private DomainEventNode BuildDomainEventNode(Type type, HashSet<string> knownDomainTypes, string? layer)
     {
         return new DomainEventNode
         {
             Name = type.Name,
             FullName = type.FullName!,
             Layer = layer,
+            Description = _documentationIndexer?.TryGetDomainSummary(type),
             Properties = GetProperties(type, knownDomainTypes)
         };
     }
 
-    private static HandlerNode BuildHandlerNode(Type type, HashSet<string> knownDomainTypes, string? layer)
+    private HandlerNode BuildHandlerNode(Type type, HashSet<string> knownDomainTypes, string? layer)
     {
         var handledTypes = new HashSet<string>();
 
@@ -386,11 +395,12 @@ internal sealed class AssemblyScanner
             Name = type.Name,
             FullName = type.FullName!,
             Layer = layer,
+            Description = _documentationIndexer?.TryGetDomainSummary(type),
             Handles = handledTypes.ToList()
         };
     }
 
-    private static RepositoryNode BuildRepositoryNode(Type type, List<Type> aggregateTypes, string? layer)
+    private RepositoryNode BuildRepositoryNode(Type type, List<Type> aggregateTypes, string? layer)
     {
         var aggregateNames = new HashSet<string>(aggregateTypes.Select(a => a.FullName!));
 
@@ -405,17 +415,19 @@ internal sealed class AssemblyScanner
             Name = type.Name,
             FullName = type.FullName!,
             Layer = layer,
+            Description = _documentationIndexer?.TryGetDomainSummary(type),
             ManagesAggregate = managedAggregate?.FullName
         };
     }
 
-    private static DomainServiceNode BuildDomainServiceNode(Type type, string? layer)
+    private DomainServiceNode BuildDomainServiceNode(Type type, string? layer)
     {
         return new DomainServiceNode
         {
             Name = type.Name,
             FullName = type.FullName!,
-            Layer = layer
+            Layer = layer,
+            Description = _documentationIndexer?.TryGetDomainSummary(type)
         };
     }
 
@@ -544,6 +556,7 @@ internal sealed class AssemblyScanner
         Name = type.Name,
         FullName = type.FullName!,
         Layer = _config.GetLayer(type),
+        Description = _documentationIndexer?.TryGetDomainSummary(type),
         Properties = GetProperties(type, knownDomainTypes)
     };
 
@@ -718,7 +731,10 @@ internal sealed class AssemblyScanner
     /// <summary>
     /// Detects emitted domain events and tracks the method that emitted each one.
     /// </summary>
-    private static List<EventEmissionInfo> DetectEventEmissions(Type type, List<Type> eventTypes)
+    private static List<EventEmissionInfo> DetectEventEmissions(
+        Type type,
+        List<Type> eventTypes,
+        RoslynDocumentationIndexer? documentationIndexer)
     {
         var eventFullNames = new HashSet<string>(eventTypes.Select(e => e.FullName!));
         var emittedByMethod = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
@@ -738,6 +754,9 @@ internal sealed class AssemblyScanner
             }
         }
 
+        if (documentationIndexer is not null)
+            MergeDocumentedMethodEmissions(type, eventFullNames, emittedByMethod, documentationIndexer);
+
         return emittedByMethod
             .SelectMany(kvp => kvp.Value.Select(method => new EventEmissionInfo
             {
@@ -747,6 +766,31 @@ internal sealed class AssemblyScanner
             .OrderBy(e => e.EventType)
             .ThenBy(e => e.MethodName)
             .ToList();
+    }
+
+    private static void MergeDocumentedMethodEmissions(
+        Type declaringType,
+        HashSet<string> eventFullNames,
+        Dictionary<string, HashSet<string>> emittedByMethod,
+        RoslynDocumentationIndexer documentationIndexer)
+    {
+        if (declaringType.FullName is null)
+            return;
+
+        var allMethods = declaringType.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly)
+            .Cast<MethodBase>()
+            .Concat(declaringType.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static));
+
+        foreach (var method in allMethods)
+        {
+            var methodName = NormalizeMethodName(method, fallbackMethodName: null);
+            foreach (var documentedEvent in documentationIndexer.TryGetDocumentedEmissions(declaringType, methodName))
+            {
+                var key = ResolveCanonicalEventKey(documentedEvent, eventFullNames);
+                if (key is not null)
+                    AddEventEmission(emittedByMethod, key, methodName);
+            }
+        }
     }
 
     /// <summary>
@@ -986,11 +1030,11 @@ internal sealed class AssemblyScanner
 
     /// <summary>
     /// Detect which integration event types a handler can publish.
-    /// Uses IL scanning similar to <see cref="DetectEventEmissions(Type, List{Type})"/>.
+    /// Uses IL scanning similar to <see cref="DetectEventEmissions(Type, List{Type}, RoslynDocumentationIndexer?)"/>.
     /// </summary>
     private static List<string> DetectPublishedEvents(Type type, List<Type> integrationEventTypes)
     {
-        return DetectEventEmissions(type, integrationEventTypes)
+        return DetectEventEmissions(type, integrationEventTypes, documentationIndexer: null)
             .Select(e => e.EventType)
             .Distinct()
             .ToList();
@@ -1123,7 +1167,7 @@ internal sealed class AssemblyScanner
     /// aggregates, or value objects but are not themselves registered domain types.
     /// Also processes sub-type properties recursively.
     /// </summary>
-    private static List<SubTypeNode> DiscoverSubTypes(
+    private List<SubTypeNode> DiscoverSubTypes(
         List<EntityNode> entityNodes,
         List<AggregateNode> aggregateNodes,
         List<ValueObjectNode> valueObjectNodes,
@@ -1160,6 +1204,7 @@ internal sealed class AssemblyScanner
             {
                 Name = type.Name,
                 FullName = fullName,
+                Description = _documentationIndexer?.TryGetDomainSummary(type),
                 Properties = properties
             });
 

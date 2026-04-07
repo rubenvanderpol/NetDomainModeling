@@ -66,6 +66,53 @@ Useful APIs:
 
 If you omit conventions for a role, nothing is classified for that role (no implicit defaults).
 
+### Optional: C# XML docs and `<domain>` tags
+
+The core library can load **your project’s C# sources** with **Roslyn** and read custom **`<domain>...</domain>`** blocks inside XML documentation comments. That feeds two features:
+
+1. **Node `Description`** on discovered types (aggregates, entities, events, handlers, etc.) — text extracted from `<domain>` on the **type’s** doc comment (often nested in `<summary>`).
+2. **Event emissions in the graph** — a **method** whose summary documents `<domain>emits ...</domain>` with `<see cref="YourEvent"/>` is treated like IL that constructs that event: the same **`EmittedEvents`**, **`EventEmissions`**, and **`Emits`** relationships as `Raise(new YourEvent(...))`, as long as the `cref` type matches your **domain event** convention.
+
+#### Point the builder at your sources
+
+Pick one or both per bounded context:
+
+- **`WithDocumentationSourceRoot(path)`** — add a path to a `.csproj`, a `.sln`, or a directory (searched for solutions and projects). You can call it multiple times.
+- **`WithDomainAssembly(assembly, scanAssemblyForDocumentation: true)`** — after setting the domain assembly, walks **up from `Assembly.Location`** looking for a `.csproj` (single project in a folder, or a file named `{AssemblyName}.csproj`) and registers it like `WithDocumentationSourceRoot`.
+
+If MSBuild cannot open the project, the library may fall back to parsing **`*.cs`** under a directory root using framework references only; for full resolution (including `<see cref>` across projects), prefer a **`.csproj`** path.
+
+#### Type-level example (`Description`)
+
+```csharp
+/// <summary>
+/// Sales order aggregate.
+/// <domain>emits <see cref="OrderPlacedEvent"/></domain>
+/// </summary>
+public class Order : AggregateRoot
+{
+    // ...
+}
+```
+
+#### Method-level example (same as emitting from code)
+
+```csharp
+/// <summary>
+/// <domain>emits <see cref="OrderPlacedEvent"/></domain>
+/// </summary>
+public void Place()
+{
+    // Body may be empty for documentation-driven discovery, or match the comment.
+}
+```
+
+The link word **`emits`** is required for **method** blocks that should create **emissions**; inside the tag, use **`<see cref="EventType"/>`** so the tool resolves the type to the same CLR name the scanner uses for events.
+
+**Not covered by doc tags:** which **integration events** a handler **publishes** is still inferred from **IL** only.
+
+**Dependencies:** using this feature pulls **Microsoft.CodeAnalysis** / **MSBuild**–related packages into `DomainModeling`. **`Assembly.Location`** must be available for **scan-for-docs** heuristics; dynamic or single-file hosts may need an explicit **`WithDocumentationSourceRoot`** instead.
+
 ### 3. Use the graph
 
 - **`graph.ToJson()`** — camelCase JSON suitable for a custom dashboard or documentation pipeline.

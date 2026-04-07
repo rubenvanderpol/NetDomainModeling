@@ -16,7 +16,7 @@ public class DDDBuilderTests
 
         return DDDBuilder.Create()
             .WithBoundedContext("Sales", ctx => ctx
-                .WithDomainAssembly(assembly)
+                .WithDomainAssembly(assembly, scanAssemblyForDocumentation: true)
                 .WithApplicationAssembly(assembly)
                 .WithInfrastructureAssembly(assembly)
                 .Entities(e => e.InheritsFrom<BaseEntity>())
@@ -160,6 +160,9 @@ public class DDDBuilderTests
         order.EventEmissions.Should().Contain(e =>
             e.EventType.Contains("OrderPlacedEvent") &&
             e.MethodName == "Place");
+        order.EventEmissions.Should().Contain(e =>
+            e.EventType.Contains("OrderPlacedEvent") &&
+            e.MethodName == "PlaceFromDocumentationOnly");
         order.EventEmissions.Should().Contain(e =>
             e.EventType.Contains("OrderShippedEvent") &&
             e.MethodName == "Ship");
@@ -613,18 +616,19 @@ public class DDDBuilderTests
     }
 
     [Fact]
-    public void Build_DiscoveredNodesHaveNullDescriptionByDefault()
+    public void WithDomainAssembly_ScanForDocs_LoadsDomainTagFromDiscoveredCsproj()
     {
         var assembly = typeof(Order).Assembly;
 
         var graph = DDDBuilder.Create()
             .WithBoundedContext("Sales", ctx => ctx
-                .WithDomainAssembly(assembly)
+                .WithDomainAssembly(assembly, scanAssemblyForDocumentation: true)
                 .Aggregates(a => a.InheritsFrom<BaseAggregateRoot>()))
             .Build();
 
         var ctx = graph.BoundedContexts.Single();
-        ctx.Aggregates.Should().OnlyContain(a => a.Description == null);
+        var order = ctx.Aggregates.Should().ContainSingle(a => a.Name == "Order").Subject;
+        order.Description.Should().Be("emits DomainModeling.Tests.SampleDomain.OrderPlacedEvent");
     }
 
     // ─── Integration Events ─────────────────────────────────────────
