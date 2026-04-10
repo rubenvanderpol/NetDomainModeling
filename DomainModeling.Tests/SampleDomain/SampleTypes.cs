@@ -125,6 +125,14 @@ public class OrderLine : BaseEntity
     public Money Price { get; init; } = new();
 }
 
+/// <summary>
+/// Non-aggregate entity with a collection of entities — used by tests for <c>HasMany</c> without duplicating <c>Contains</c>.
+/// </summary>
+public class LineBatch : BaseEntity
+{
+    public List<OrderLine> Lines { get; init; } = [];
+}
+
 // ─── Aggregates ──────────────────────────────────────────────────
 
 /// <summary>
