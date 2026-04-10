@@ -1372,55 +1372,43 @@ internal sealed class AssemblyScanner
         RoslynDocumentationIndexer documentationIndexer)
     {
         var eventFullNames = new HashSet<string>(domainEventNodes.Select(e => e.FullName), StringComparer.Ordinal);
+        var addedRelationships = new HashSet<(string Source, string Target)>();
 
-        var entityTypeMap = entityTypes.Where(t => t.FullName is not null).ToDictionary(t => t.FullName!, t => t);
-        var aggTypeMap = aggregateTypes.Where(t => t.FullName is not null).ToDictionary(t => t.FullName!, t => t);
+        var allTypesByFullName = entityTypes.Concat(aggregateTypes)
+            .Where(t => t.FullName is not null)
+            .GroupBy(t => t.FullName!)
+            .ToDictionary(g => g.Key, g => g.First());
+
+        void ProcessEmitter(string emitterFullName, List<string> emittedEvents, List<EventEmissionInfo> eventEmissions)
+        {
+            if (!allTypesByFullName.TryGetValue(emitterFullName, out var type))
+                return;
+            var emissions = documentationIndexer.TryGetTypeDocumentedEmissions(type);
+            foreach (var (canonicalFullName, _) in emissions)
+            {
+                if (!eventFullNames.Contains(canonicalFullName))
+                    continue;
+                if (!emittedEvents.Contains(canonicalFullName))
+                    emittedEvents.Add(canonicalFullName);
+                if (!eventEmissions.Any(e => e.EventType == canonicalFullName))
+                    eventEmissions.Add(new EventEmissionInfo { EventType = canonicalFullName, MethodName = "(documented)" });
+                if (addedRelationships.Add((emitterFullName, canonicalFullName)))
+                {
+                    relationships.Add(new Relationship
+                    {
+                        SourceType = emitterFullName,
+                        TargetType = canonicalFullName,
+                        Kind = RelationshipKind.Emits,
+                        Label = "emits (documented)"
+                    });
+                }
+            }
+        }
 
         foreach (var entity in entityNodes)
-        {
-            if (!entityTypeMap.TryGetValue(entity.FullName, out var type))
-                continue;
-            var emissions = documentationIndexer.TryGetTypeDocumentedEmissions(type);
-            foreach (var (canonicalFullName, _) in emissions)
-            {
-                if (!eventFullNames.Contains(canonicalFullName))
-                    continue;
-                if (!entity.EmittedEvents.Contains(canonicalFullName))
-                    entity.EmittedEvents.Add(canonicalFullName);
-                if (!entity.EventEmissions.Any(e => e.EventType == canonicalFullName))
-                    entity.EventEmissions.Add(new EventEmissionInfo { EventType = canonicalFullName, MethodName = "(documented)" });
-                relationships.Add(new Relationship
-                {
-                    SourceType = entity.FullName,
-                    TargetType = canonicalFullName,
-                    Kind = RelationshipKind.Emits,
-                    Label = "emits (documented)"
-                });
-            }
-        }
-
+            ProcessEmitter(entity.FullName, entity.EmittedEvents, entity.EventEmissions);
         foreach (var agg in aggregateNodes)
-        {
-            if (!aggTypeMap.TryGetValue(agg.FullName, out var type))
-                continue;
-            var emissions = documentationIndexer.TryGetTypeDocumentedEmissions(type);
-            foreach (var (canonicalFullName, _) in emissions)
-            {
-                if (!eventFullNames.Contains(canonicalFullName))
-                    continue;
-                if (!agg.EmittedEvents.Contains(canonicalFullName))
-                    agg.EmittedEvents.Add(canonicalFullName);
-                if (!agg.EventEmissions.Any(e => e.EventType == canonicalFullName))
-                    agg.EventEmissions.Add(new EventEmissionInfo { EventType = canonicalFullName, MethodName = "(documented)" });
-                relationships.Add(new Relationship
-                {
-                    SourceType = agg.FullName,
-                    TargetType = canonicalFullName,
-                    Kind = RelationshipKind.Emits,
-                    Label = "emits (documented)"
-                });
-            }
-        }
+            ProcessEmitter(agg.FullName, agg.EmittedEvents, agg.EventEmissions);
     }
 
     /// <summary>

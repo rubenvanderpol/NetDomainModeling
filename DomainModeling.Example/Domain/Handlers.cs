@@ -30,6 +30,12 @@ public class WelcomeEmailHandler : IEventHandler<CustomerRegisteredEvent>
         => Task.CompletedTask;
 }
 
+public class CustomerDeletedHandler : IEventHandler<EntityDeletedEvent<Customer>>
+{
+    public Task HandleAsync(EntityDeletedEvent<Customer> @event, CancellationToken ct = default)
+        => Task.CompletedTask;
+}
+
 // ─── Command handlers ────────────────────────────────────────────
 
 public record PlaceOrderCommand(Guid CustomerId, List<string> Products);

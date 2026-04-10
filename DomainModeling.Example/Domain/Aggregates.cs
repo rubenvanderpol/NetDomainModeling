@@ -61,6 +61,7 @@ public class Order : AggregateRoot
 
 /// <summary>
 /// A registered customer who can place orders.
+/// <domain>emits <see cref="EntityDeletedEvent{Customer}"/></domain>
 /// </summary>
 public class Customer : AggregateRoot
 {
