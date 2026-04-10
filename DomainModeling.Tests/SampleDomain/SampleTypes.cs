@@ -160,6 +160,9 @@ public class Order : BaseAggregateRoot
     }
 }
 
+/// <summary>
+/// <domain>emits <see cref="EntityDeletedEvent{Customer}"/></domain>
+/// </summary>
 public class Customer : BaseAggregateRoot
 {
     public required string Name { get; init; }
@@ -207,6 +210,12 @@ public class SendShipmentNotificationHandler : IEventHandler<OrderShippedEvent>
 public class OrderDeletedEventHandler : IEventHandler<EntityDeletedEvent<Order>>
 {
     public Task HandleAsync(EntityDeletedEvent<Order> @event, CancellationToken ct = default)
+        => Task.CompletedTask;
+}
+
+public class CustomerDeletedEventHandler : IEventHandler<EntityDeletedEvent<Customer>>
+{
+    public Task HandleAsync(EntityDeletedEvent<Customer> @event, CancellationToken ct = default)
         => Task.CompletedTask;
 }
 

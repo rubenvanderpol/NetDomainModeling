@@ -23,13 +23,16 @@ internal sealed partial class RoslynDocumentationIndexer
 
     private readonly Dictionary<string, string> _clrFullNameToDomainText;
     private readonly Dictionary<string, List<string>> _methodKeyToEmittedTypeFullNames;
+    private readonly Dictionary<string, List<(string CanonicalFullName, string DisplayName)>> _typeDocumentedEmissions;
 
     private RoslynDocumentationIndexer(
         Dictionary<string, string> clrFullNameToDomainText,
-        Dictionary<string, List<string>> methodKeyToEmittedTypeFullNames)
+        Dictionary<string, List<string>> methodKeyToEmittedTypeFullNames,
+        Dictionary<string, List<(string CanonicalFullName, string DisplayName)>> typeDocumentedEmissions)
     {
         _clrFullNameToDomainText = clrFullNameToDomainText;
         _methodKeyToEmittedTypeFullNames = methodKeyToEmittedTypeFullNames;
+        _typeDocumentedEmissions = typeDocumentedEmissions;
     }
 
     /// <summary>
@@ -51,6 +54,26 @@ internal sealed partial class RoslynDocumentationIndexer
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Returns event types documented on a type via <c>&lt;domain&gt;emits&lt;/domain&gt;</c> tags,
+    /// preserving constructed generic type arguments. Each entry has the canonical CLR full name
+    /// and a human-readable display name.
+    /// </summary>
+    public IReadOnlyList<(string CanonicalFullName, string DisplayName)> TryGetTypeDocumentedEmissions(Type type)
+    {
+        if (type.FullName is null)
+            return [];
+        if (_typeDocumentedEmissions.TryGetValue(type.FullName, out var list))
+            return list;
+        if (type.IsGenericType)
+        {
+            var def = type.GetGenericTypeDefinition();
+            if (def.FullName is not null && _typeDocumentedEmissions.TryGetValue(def.FullName, out var defList))
+                return defList;
+        }
+        return [];
     }
 
     /// <summary>
@@ -106,6 +129,7 @@ internal sealed partial class RoslynDocumentationIndexer
         using var workspace = MSBuildWorkspace.Create();
         var typeMap = new Dictionary<string, string>(StringComparer.Ordinal);
         var methodMap = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        var typeEmissions = new Dictionary<string, List<(string, string)>>(StringComparer.Ordinal);
 
         foreach (var projectPath in projectPaths)
         {
@@ -116,7 +140,7 @@ internal sealed partial class RoslynDocumentationIndexer
                 if (compilation is null)
                     continue;
 
-                IndexCompilation(compilation, typeMap, methodMap);
+                IndexCompilation(compilation, typeMap, methodMap, typeEmissions);
             }
             catch
             {
@@ -124,18 +148,19 @@ internal sealed partial class RoslynDocumentationIndexer
             }
         }
 
-        if (typeMap.Count == 0 && methodMap.Count == 0)
-            TryIndexDirectoriesWithAdHocCompilation(normalizedPaths, typeMap, methodMap);
+        if (typeMap.Count == 0 && methodMap.Count == 0 && typeEmissions.Count == 0)
+            TryIndexDirectoriesWithAdHocCompilation(normalizedPaths, typeMap, methodMap, typeEmissions);
 
-        return typeMap.Count == 0 && methodMap.Count == 0
+        return typeMap.Count == 0 && methodMap.Count == 0 && typeEmissions.Count == 0
             ? null
-            : new RoslynDocumentationIndexer(typeMap, methodMap);
+            : new RoslynDocumentationIndexer(typeMap, methodMap, typeEmissions);
     }
 
     private static void TryIndexDirectoriesWithAdHocCompilation(
         string[] documentationRoots,
         Dictionary<string, string> typeMap,
-        Dictionary<string, List<string>> methodMap)
+        Dictionary<string, List<string>> methodMap,
+        Dictionary<string, List<(string, string)>> typeEmissions)
     {
         var refs = GetPlatformMetadataReferences();
         if (refs.Count == 0)
@@ -162,7 +187,7 @@ internal sealed partial class RoslynDocumentationIndexer
                 refs,
                 new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
-            IndexCompilation(compilation, typeMap, methodMap);
+            IndexCompilation(compilation, typeMap, methodMap, typeEmissions);
         }
     }
 
@@ -263,7 +288,8 @@ internal sealed partial class RoslynDocumentationIndexer
     private static void IndexCompilation(
         Compilation compilation,
         Dictionary<string, string> typeMap,
-        Dictionary<string, List<string>> methodMap)
+        Dictionary<string, List<string>> methodMap,
+        Dictionary<string, List<(string, string)>> typeEmissions)
     {
         foreach (var tree in compilation.SyntaxTrees)
         {
@@ -311,7 +337,10 @@ internal sealed partial class RoslynDocumentationIndexer
                         };
 
                         if (symbol is not null)
+                        {
                             TryAddSymbol(typeMap, symbol);
+                            TryAddTypeDocumentedEmissions(typeEmissions, symbol, model, node, compilation);
+                        }
                         break;
                     }
                 }
@@ -342,6 +371,344 @@ internal sealed partial class RoslynDocumentationIndexer
 
         if (symbol is { IsGenericType: true, IsUnboundGenericType: false })
             MergeDomainText(map, ToClrMetadataFullName(symbol.OriginalDefinition), domainText);
+    }
+
+    /// <summary>
+    /// Walks the syntax trivia on a type declaration looking for <c>&lt;domain&gt;emits &lt;see cref="..."/&gt;</c>
+    /// tags, and resolves the <c>cref</c> to a constructed generic CLR full name using the semantic model.
+    /// This preserves type arguments that XML documentation comment IDs lose.
+    /// </summary>
+    private static void TryAddTypeDocumentedEmissions(
+        Dictionary<string, List<(string, string)>> typeEmissions,
+        INamedTypeSymbol symbol,
+        SemanticModel model,
+        SyntaxNode declNode,
+        Compilation compilation)
+    {
+        var xml = symbol.GetDocumentationCommentXml();
+        if (string.IsNullOrWhiteSpace(xml))
+            return;
+
+        var hasDomainEmits = false;
+        foreach (Match m in DomainTagRegex().Matches(xml))
+        {
+            var inner = m.Groups[1].Value;
+            if (string.IsNullOrWhiteSpace(inner))
+                continue;
+            try
+            {
+                var wrapped = "<r>" + inner + "</r>";
+                var el = XElement.Parse(wrapped, LoadOptions.PreserveWhitespace);
+                if (DomainTagHasEmitsLinkKind(el))
+                {
+                    hasDomainEmits = true;
+                    break;
+                }
+            }
+            catch { }
+        }
+
+        if (!hasDomainEmits)
+            return;
+
+        var emitted = ExtractEmittedTypesFromSyntaxCrefs(declNode, model, compilation);
+        if (emitted.Count == 0)
+            return;
+
+        var clrName = ToClrMetadataFullName(symbol);
+        if (!typeEmissions.TryGetValue(clrName, out var list))
+        {
+            list = [];
+            typeEmissions[clrName] = list;
+        }
+
+        foreach (var entry in emitted)
+        {
+            if (!list.Any(e => string.Equals(e.Item1, entry.CanonicalFullName, StringComparison.Ordinal)))
+                list.Add((entry.CanonicalFullName, entry.DisplayName));
+        }
+
+        if (symbol is { IsGenericType: true, IsUnboundGenericType: false })
+        {
+            var defClr = ToClrMetadataFullName(symbol.OriginalDefinition);
+            if (!typeEmissions.TryGetValue(defClr, out var defList))
+            {
+                defList = [];
+                typeEmissions[defClr] = defList;
+            }
+            foreach (var entry in emitted)
+            {
+                if (!defList.Any(e => string.Equals(e.Item1, entry.CanonicalFullName, StringComparison.Ordinal)))
+                    defList.Add((entry.CanonicalFullName, entry.DisplayName));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Extracts emitted event types by walking cref attributes in XML doc trivia on a syntax node,
+    /// using the semantic model to resolve constructed generic types.
+    /// For generic crefs like <c>EntityDeletedEvent{Customer}</c>, resolves the base type and each type
+    /// argument separately then constructs the canonical closed generic name.
+    /// </summary>
+    private static List<(string CanonicalFullName, string DisplayName)> ExtractEmittedTypesFromSyntaxCrefs(
+        SyntaxNode declNode,
+        SemanticModel model,
+        Compilation compilation)
+    {
+        var result = new List<(string, string)>();
+        var trivia = declNode.GetLeadingTrivia();
+
+        foreach (var t in trivia)
+        {
+            if (t.GetStructure() is not DocumentationCommentTriviaSyntax docComment)
+                continue;
+
+            foreach (var xmlNode in docComment.DescendantNodes())
+            {
+                if (xmlNode is not XmlEmptyElementSyntax { Name.LocalName.Text: "see" } seeElement)
+                    continue;
+
+                var crefAttr = seeElement.Attributes.OfType<XmlCrefAttributeSyntax>().FirstOrDefault();
+                if (crefAttr is null)
+                    continue;
+
+                if (!IsInsideDomainEmitsTag(seeElement))
+                    continue;
+
+                var symbolInfo = model.GetSymbolInfo(crefAttr.Cref);
+                var resolved = symbolInfo.Symbol ?? symbolInfo.CandidateSymbols.FirstOrDefault();
+                if (resolved is not INamedTypeSymbol baseType)
+                    continue;
+
+                var constructed = TryConstructGenericFromCref(crefAttr.Cref, baseType, model, compilation);
+                var nt = constructed ?? baseType;
+
+                var canonical = ToCanonicalGenericFullName(nt);
+                var display = ToDisplayGenericName(nt);
+                if (!result.Any(e => string.Equals(e.Item1, canonical, StringComparison.Ordinal)))
+                    result.Add((canonical, display));
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// For a generic cref like <c>EntityDeletedEvent{Customer}</c>, resolves the type arguments
+    /// as concrete type symbols and constructs the closed generic type.
+    /// Returns <c>null</c> if the cref is not generic or arguments cannot be resolved as real types
+    /// (as opposed to type parameter names).
+    /// </summary>
+    private static INamedTypeSymbol? TryConstructGenericFromCref(
+        CrefSyntax cref,
+        INamedTypeSymbol baseType,
+        SemanticModel model,
+        Compilation compilation)
+    {
+        if (!baseType.IsGenericType)
+            return null;
+
+        var genericDef = baseType.IsDefinition ? baseType : baseType.OriginalDefinition;
+
+        TypeArgumentListSyntax? typeArgList = null;
+        foreach (var descendant in cref.DescendantNodes())
+        {
+            if (descendant is TypeArgumentListSyntax tal)
+            {
+                typeArgList = tal;
+                break;
+            }
+        }
+
+        if (typeArgList is null || typeArgList.Arguments.Count == 0)
+            return null;
+
+        if (typeArgList.Arguments.Count != genericDef.TypeParameters.Length)
+            return null;
+
+        var typeArgs = new ITypeSymbol[typeArgList.Arguments.Count];
+        var allResolved = true;
+
+        for (var i = 0; i < typeArgList.Arguments.Count; i++)
+        {
+            var argSyntax = typeArgList.Arguments[i];
+
+            // Try semantic model first
+            INamedTypeSymbol? argType = null;
+
+            var argInfo = model.GetSymbolInfo(argSyntax);
+            if (argInfo.Symbol is INamedTypeSymbol nt1)
+                argType = nt1;
+            else if (argInfo.CandidateSymbols.FirstOrDefault() is INamedTypeSymbol nt2)
+                argType = nt2;
+
+            if (argType is null)
+            {
+                var argTypeInfo = model.GetTypeInfo(argSyntax);
+                if (argTypeInfo.Type is INamedTypeSymbol nt3)
+                    argType = nt3;
+            }
+
+            // In doc comment crefs, type arguments may not resolve via GetSymbolInfo.
+            // Fall back to finding the type by name in the compilation.
+            if (argType is null && argSyntax is IdentifierNameSyntax idName)
+            {
+                argType = ResolveTypeByName(idName.Identifier.Text, baseType.ContainingNamespace, compilation);
+            }
+            else if (argType is null && argSyntax is QualifiedNameSyntax qualName)
+            {
+                argType = ResolveTypeByQualifiedName(qualName.ToString(), compilation);
+            }
+
+            if (argType is not null && argType.TypeKind != TypeKind.TypeParameter)
+            {
+                typeArgs[i] = argType;
+            }
+            else
+            {
+                allResolved = false;
+                break;
+            }
+        }
+
+        if (!allResolved)
+            return null;
+
+        return genericDef.Construct(typeArgs);
+    }
+
+    private static INamedTypeSymbol? ResolveTypeByName(string name, INamespaceSymbol? searchNamespace, Compilation compilation)
+    {
+        if (searchNamespace is not null)
+        {
+            var inNs = FindTypeInNamespace(searchNamespace, name);
+            if (inNs is not null)
+                return inNs;
+        }
+
+        return FindTypeRecursive(compilation.GlobalNamespace, name);
+    }
+
+    private static INamedTypeSymbol? ResolveTypeByQualifiedName(string qualifiedName, Compilation compilation)
+    {
+        var parts = qualifiedName.Split('.');
+        INamespaceOrTypeSymbol current = compilation.GlobalNamespace;
+
+        for (var i = 0; i < parts.Length; i++)
+        {
+            var members = current.GetMembers(parts[i]);
+            if (i == parts.Length - 1)
+            {
+                var type = members.OfType<INamedTypeSymbol>().FirstOrDefault(t => t.TypeKind != TypeKind.TypeParameter);
+                if (type is not null)
+                    return type;
+            }
+            else
+            {
+                var ns = members.OfType<INamespaceSymbol>().FirstOrDefault();
+                if (ns is null)
+                    return null;
+                current = ns;
+            }
+        }
+
+        return null;
+    }
+
+    private static INamedTypeSymbol? FindTypeInNamespace(INamespaceSymbol ns, string name)
+    {
+        var found = ns.GetTypeMembers(name).FirstOrDefault(t => t.TypeKind != TypeKind.TypeParameter);
+        if (found is not null)
+            return found;
+
+        var parent = ns.ContainingNamespace;
+        if (parent is not null && !parent.IsGlobalNamespace)
+            return FindTypeInNamespace(parent, name);
+
+        return null;
+    }
+
+    private static INamedTypeSymbol? FindTypeRecursive(INamespaceSymbol ns, string name)
+    {
+        var found = ns.GetTypeMembers(name).FirstOrDefault(t => t.TypeKind != TypeKind.TypeParameter);
+        if (found is not null)
+            return found;
+
+        foreach (var childNs in ns.GetNamespaceMembers())
+        {
+            found = FindTypeRecursive(childNs, name);
+            if (found is not null)
+                return found;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Checks if an XML element is inside a &lt;domain&gt; tag whose text content starts with "emits".
+    /// </summary>
+    private static bool IsInsideDomainEmitsTag(SyntaxNode node)
+    {
+        var current = node.Parent;
+        while (current is not null)
+        {
+            if (current is XmlElementSyntax xmlEl &&
+                xmlEl.StartTag.Name.LocalName.Text.Equals("domain", StringComparison.OrdinalIgnoreCase))
+            {
+                var textContent = new StringBuilder();
+                foreach (var child in xmlEl.Content)
+                {
+                    if (child is XmlTextSyntax textNode)
+                        textContent.Append(textNode.ToString());
+                    else if (child is XmlEmptyElementSyntax)
+                        textContent.Append(' ');
+                }
+                var condensed = string.Join(' ', textContent.ToString().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+                return condensed.StartsWith("emits", StringComparison.OrdinalIgnoreCase);
+            }
+            current = current.Parent;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Builds a canonical CLR full name that matches the format produced by <c>Type.FullName</c> for
+    /// constructed generic types: <c>Ns.EntityDeletedEvent`1[[Ns.User, AssemblyName, ...]]</c>.
+    /// For non-generic types this is equivalent to <see cref="ToClrMetadataFullName"/>.
+    /// For constructed generics this uses the bracket notation matching CLR reflection.
+    /// </summary>
+    internal static string ToCanonicalGenericFullName(INamedTypeSymbol symbol)
+    {
+        if (!symbol.IsGenericType || symbol.IsUnboundGenericType || symbol.TypeArguments.All(a => a is ITypeParameterSymbol))
+            return ToClrMetadataFullName(symbol);
+
+        var def = symbol.OriginalDefinition;
+        var defName = ToClrMetadataFullName(def);
+        var args = symbol.TypeArguments;
+        var sb = new StringBuilder(defName);
+        sb.Append('[');
+        for (var i = 0; i < args.Length; i++)
+        {
+            if (i > 0) sb.Append(',');
+            sb.Append('[');
+            if (args[i] is INamedTypeSymbol argNt)
+                sb.Append(ToCanonicalGenericFullName(argNt));
+            else
+                sb.Append(args[i].ToDisplayString());
+            sb.Append(']');
+        }
+        sb.Append(']');
+        return sb.ToString();
+    }
+
+    private static string ToDisplayGenericName(INamedTypeSymbol symbol)
+    {
+        if (!symbol.IsGenericType || symbol.IsUnboundGenericType)
+            return symbol.Name;
+
+        var baseName = symbol.Name;
+        var args = symbol.TypeArguments;
+        return baseName + "<" + string.Join(", ", args.Select(a => a is INamedTypeSymbol nt ? ToDisplayGenericName(nt) : a.Name)) + ">";
     }
 
     private static void MergeDomainText(Dictionary<string, string> map, string clrFullName, string domainText)
