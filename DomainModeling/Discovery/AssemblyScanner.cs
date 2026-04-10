@@ -273,9 +273,6 @@ internal sealed class AssemblyScanner
             Properties = a.Properties
         }), knownEntityAndAggregateNames, relationships);
 
-        // Aggregate → child entity is both Contains (from composition) and Has/HasMany (from the same property scan).
-        RemoveRedundantHasWhenContainsExists(relationships);
-
         return new BoundedContextNode
         {
             Name = _config.Name,
@@ -1161,32 +1158,6 @@ internal sealed class AssemblyScanner
                     Kind = prop.IsCollection ? RelationshipKind.HasMany : RelationshipKind.Has,
                     Label = prop.Name
                 });
-            }
-        }
-    }
-
-    /// <summary>
-    /// When the same type pair appears as <see cref="RelationshipKind.Contains"/> and as
-    /// <see cref="RelationshipKind.Has"/> / <see cref="RelationshipKind.HasMany"/> (typical for aggregate child collections),
-    /// keep only <c>Contains</c> so the diagram does not show duplicate links.
-    /// </summary>
-    private static void RemoveRedundantHasWhenContainsExists(List<Relationship> relationships)
-    {
-        var containedPairs = new HashSet<(string Source, string Target)>(
-            relationships
-                .Where(r => r.Kind == RelationshipKind.Contains)
-                .Select(r => (r.SourceType, r.TargetType)));
-
-        if (containedPairs.Count == 0)
-            return;
-
-        for (var i = relationships.Count - 1; i >= 0; i--)
-        {
-            var r = relationships[i];
-            if (r.Kind is RelationshipKind.Has or RelationshipKind.HasMany &&
-                containedPairs.Contains((r.SourceType, r.TargetType)))
-            {
-                relationships.RemoveAt(i);
             }
         }
     }

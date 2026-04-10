@@ -155,3 +155,29 @@ export const SECTION_META = [
   { key: 'repositories',         label: 'Repositories',         color: 'var(--clr-repository)',         tag: 'REPO', bg: 'var(--clr-repository-bg)' },
   { key: 'domainServices',       label: 'Domain Services',      color: 'var(--clr-service)',            tag: 'SVC',  bg: 'var(--clr-service-bg)' },
 ];
+
+/**
+ * For diagram rendering only: when the same (source, target) appears as both Contains and Has/HasMany
+ * (typical for aggregate child collections), show a single edge — prefer Contains, then HasMany, then Has.
+ * The domain JSON still lists every relationship; this does not change exports or the relationships tab.
+ */
+export function filterDiagramEdgesForRendering(relationships) {
+  const rels = relationships || [];
+  const kindPriority = { Contains: 0, HasMany: 1, Has: 2 };
+  /** @type {Map<string, number>} */
+  const bestIdx = new Map();
+  for (let i = 0; i < rels.length; i++) {
+    const rel = rels[i];
+    const k = `${rel.sourceType}\0${rel.targetType}`;
+    const pri = kindPriority[rel.kind] ?? 99;
+    const prev = bestIdx.get(k);
+    if (prev === undefined) {
+      bestIdx.set(k, i);
+    } else {
+      const prevPri = kindPriority[rels[prev].kind] ?? 99;
+      if (pri < prevPri) bestIdx.set(k, i);
+    }
+  }
+  const keep = new Set(bestIdx.values());
+  return rels.filter((_, i) => keep.has(i));
+}

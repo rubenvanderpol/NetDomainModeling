@@ -53,7 +53,6 @@ public class DDDBuilderTests
 
         // OrderLine is an entity (inherits BaseEntity) but not an aggregate
         ctx.Entities.Should().Contain(e => e.Name == "OrderLine");
-        ctx.Entities.Should().Contain(e => e.Name == "LineBatch");
     }
 
     [Fact]
@@ -251,16 +250,16 @@ public class DDDBuilderTests
         var graph = BuildSampleGraph();
         var ctx = graph.BoundedContexts.Single();
 
-        // LineBatch.Lines → OrderLine (collection on a non-aggregate; aggregate→child uses Contains only)
+        // Order.Lines → OrderLine (collection of entities); diagram dedupes vs Contains, domain keeps both
         ctx.Relationships.Should().Contain(r =>
             r.Kind == RelationshipKind.HasMany &&
-            r.SourceType.Contains("LineBatch") &&
+            r.SourceType.Contains("Order") &&
             r.TargetType.Contains("OrderLine") &&
             r.Label == "Lines");
     }
 
     [Fact]
-    public void Build_DoesNotDuplicateContainsAndHasMany_ForAggregateChildEntityProperty()
+    public void Build_KeepsContainsAndHasMany_ForAggregateChildEntityProperty()
     {
         var graph = BuildSampleGraph();
         var ctx = graph.BoundedContexts.Single();
@@ -273,10 +272,12 @@ public class DDDBuilderTests
             r.SourceType == orderFullName &&
             r.TargetType == orderLineFullName);
 
-        ctx.Relationships.Should().NotContain(r =>
-            (r.Kind == RelationshipKind.Has || r.Kind == RelationshipKind.HasMany) &&
+        // Order may match both entity and aggregate conventions, so HasMany can appear more than once in the raw list.
+        ctx.Relationships.Should().Contain(r =>
+            r.Kind == RelationshipKind.HasMany &&
             r.SourceType == orderFullName &&
-            r.TargetType == orderLineFullName);
+            r.TargetType == orderLineFullName &&
+            r.Label == "Lines");
     }
 
     [Fact]

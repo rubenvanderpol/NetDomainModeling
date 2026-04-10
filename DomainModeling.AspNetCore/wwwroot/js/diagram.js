@@ -5,6 +5,7 @@
 import {
   esc, escAttr, shortName,
   formatDiagramPropertyLine, formatDiagramMethodLine, formatDiagramEmittedEventLine,
+  filterDiagramEdgesForRendering,
 } from './helpers.js';
 import { renderTabBar } from './tabs.js';
 
@@ -537,7 +538,7 @@ export function initDiagram(ctx, boundedContexts) {
   (ctx.repositories || []).forEach(r => addNode(r, 'repository'));
   (ctx.domainServices || []).forEach(s => addNode(s, 'service'));
 
-  for (const rel of (ctx.relationships || [])) {
+  for (const rel of filterDiagramEdgesForRendering(ctx.relationships || [])) {
     if (nMap[rel.sourceType] && nMap[rel.targetType]) {
       edges.push({ source: rel.sourceType, target: rel.targetType, kind: rel.kind, label: rel.label || '' });
     }

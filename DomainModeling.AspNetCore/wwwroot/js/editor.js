@@ -13,6 +13,7 @@
 import {
   esc, escAttr, shortName, SECTION_META,
   formatDiagramPropertyLine, formatDiagramMethodLine, formatDiagramEmittedEventLine,
+  filterDiagramEdgesForRendering,
 } from './helpers.js';
 import { renderTabBar } from './tabs.js';
 
@@ -265,7 +266,7 @@ function buildGraph() {
   (ctx.repositories || []).forEach(r => addNode(r, 'repository'));
   (ctx.domainServices || []).forEach(s => addNode(s, 'service'));
 
-  for (const rel of (ctx.relationships || [])) {
+  for (const rel of filterDiagramEdgesForRendering(ctx.relationships || [])) {
     if (st.nMap[rel.sourceType] && st.nMap[rel.targetType]) {
       st.allEdges.push({ source: rel.sourceType, target: rel.targetType, kind: rel.kind, label: rel.label || '' });
     }

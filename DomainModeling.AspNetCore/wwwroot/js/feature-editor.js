@@ -13,6 +13,7 @@
 import {
   esc, escAttr, shortName, ALL_SECTIONS,
   formatDiagramPropertyLine, formatDiagramMethodLine, formatDiagramEventBadgeLine,
+  filterDiagramEdgesForRendering,
 } from './helpers.js';
 import { renderTabBar } from './tabs.js';
 import {
@@ -1447,7 +1448,7 @@ function recalcNodeHeights() {
 function importAllRelationshipsFromDomain() {
   if (!st || !domainData) return;
   for (const c of (domainData.boundedContexts || [])) {
-    for (const rel of (c.relationships || [])) {
+    for (const rel of filterDiagramEdgesForRendering(c.relationships || [])) {
       const hasSource = st.nMap[rel.sourceType];
       const hasTarget = st.nMap[rel.targetType];
       if (!hasSource || !hasTarget) continue;
