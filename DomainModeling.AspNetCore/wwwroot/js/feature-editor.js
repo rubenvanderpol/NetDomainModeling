@@ -973,7 +973,10 @@ function loadFeatureState(feature) {
     n.h = nodeHeight(n);
     // Restore position
     const pos = feature.positions?.[n.id];
-    if (pos) { n.x = pos.x; n.y = pos.y; }
+    if (pos && typeof pos.x === 'number' && typeof pos.y === 'number') {
+      n.x = pos.x;
+      n.y = pos.y;
+    }
     st.nodes.push(n);
     st.nMap[n.id] = n;
   }
@@ -985,10 +988,18 @@ function loadFeatureState(feature) {
     }
   }
 
-  // Auto-layout nodes without positions
-  const needsLayout = st.nodes.filter(n => n.x === 0 && n.y === 0);
-  if (needsLayout.length > 0 && needsLayout.length === st.nodes.length) {
+  const fixedFromSaved = new Set();
+  for (const n of st.nodes) {
+    const pos = feature.positions?.[n.id];
+    if (pos && typeof pos.x === 'number' && typeof pos.y === 'number') {
+      fixedFromSaved.add(n.id);
+    }
+  }
+  const needsLayout = st.nodes.filter(n => !fixedFromSaved.has(n.id));
+  if (needsLayout.length === st.nodes.length) {
     applyAutoLayout(st.nodes, st.edges, st.nMap);
+  } else if (needsLayout.length > 0) {
+    applyAutoLayout(st.nodes, st.edges, st.nMap, fixedFromSaved);
   }
 }
 
@@ -1509,13 +1520,18 @@ function refreshPalette() {
 
 // ── Auto-layout (reused from diagram logic) ──────────
 
-function applyAutoLayout(nodes, edges, nMap) {
+/** @param {Set<string>|null|undefined} fixedNodeIds If set, those nodes keep their current x/y. */
+function applyAutoLayout(nodes, edges, nMap, fixedNodeIds) {
+  const fixed = fixedNodeIds instanceof Set && fixedNodeIds.size > 0 ? fixedNodeIds : null;
+  const isFixed = (n) => fixed && fixed.has(n.id);
+
   const kindRow = {
     aggregate: 0, entity: 1, valueObject: 1, event: 2, integrationEvent: 2,
     eventHandler: 3, commandHandlerTarget: 2, commandHandler: 3, queryHandler: 3, repository: 4, service: 4,
   };
   const rowBuckets = {};
   for (const n of nodes) {
+    if (isFixed(n)) continue;
     const r = kindRow[n.kind] || 0;
     (rowBuckets[r] = rowBuckets[r] || []).push(n);
   }
@@ -1528,23 +1544,32 @@ function applyAutoLayout(nodes, edges, nMap) {
     for (let a = 0; a < nodes.length; a++) {
       for (let b = a + 1; b < nodes.length; b++) {
         const na = nodes[a], nb = nodes[b];
+        const fa = isFixed(na), fb = isFixed(nb);
+        if (fa && fb) continue;
         let dx = nb.x - na.x, dy = nb.y - na.y;
         const dist = Math.sqrt(dx * dx + dy * dy) || 1;
         const force = (8000 * alpha) / (dist * dist);
         const fx = (dx / dist) * force, fy = (dy / dist) * force;
-        na.vx -= fx; na.vy -= fy; nb.vx += fx; nb.vy += fy;
+        if (!fa) { na.vx -= fx; na.vy -= fy; }
+        if (!fb) { nb.vx += fx; nb.vy += fy; }
       }
     }
     for (const e of edges) {
       const s = nMap[e.source], t = nMap[e.target];
       if (!s || !t) continue;
+      const fs = isFixed(s), ft = isFixed(t);
+      if (fs && ft) continue;
       const dx = t.x - s.x, dy = t.y - s.y;
       const dist = Math.sqrt(dx * dx + dy * dy) || 1;
       const force = dist * 0.004 * alpha;
       const fx = (dx / dist) * force, fy = (dy / dist) * force;
-      s.vx += fx; s.vy += fy; t.vx -= fx; t.vy -= fy;
+      if (!fs) { s.vx += fx; s.vy += fy; }
+      if (!ft) { t.vx -= fx; t.vy -= fy; }
     }
-    for (const n of nodes) { n.vx *= 0.82; n.vy *= 0.82; n.x += n.vx; n.y += n.vy; }
+    for (const n of nodes) {
+      if (isFixed(n)) { n.vx = 0; n.vy = 0; continue; }
+      n.vx *= 0.82; n.vy *= 0.82; n.x += n.vx; n.y += n.vy;
+    }
   }
   for (const n of nodes) { n.vx = 0; n.vy = 0; }
 }

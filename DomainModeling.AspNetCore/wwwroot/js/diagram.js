@@ -594,17 +594,27 @@ export function initDiagram(ctx, boundedContexts) {
       posSource = 'local';
     }
 
+    /** Node ids whose x/y were restored from the saved layout (server or local). */
+    let appliedFromSaved = null;
     let hasSaved = false;
+    let hasPartialSaved = false;
     if (saved) {
-      let allFound = true;
+      appliedFromSaved = new Set();
       for (const n of nodes) {
-        if (saved[n.id]) { n.x = saved[n.id].x; n.y = saved[n.id].y; }
-        else { allFound = false; }
+        const p = saved[n.id];
+        if (p && typeof p.x === 'number' && typeof p.y === 'number') {
+          n.x = p.x;
+          n.y = p.y;
+          appliedFromSaved.add(n.id);
+        }
       }
-      hasSaved = allFound;
+      hasSaved = nodes.length > 0 && appliedFromSaved.size === nodes.length;
+      hasPartialSaved = nodes.length > 0 && appliedFromSaved.size > 0 && appliedFromSaved.size < nodes.length;
     }
 
-    if (!hasSaved) {
+    if (hasPartialSaved) {
+      applyAutoLayout(nodes, edges, nMap, appliedFromSaved);
+    } else if (!hasSaved) {
       applyAutoLayout(nodes, edges, nMap);
     }
 
@@ -647,14 +657,14 @@ export function initDiagram(ctx, boundedContexts) {
 
     const lsViewport = loadViewport();
     let savedViewport = null;
-    if (hasSaved) {
+    if (hasSaved || hasPartialSaved) {
       if (serverLayout?.viewport && typeof serverLayout.viewport.zoom === 'number') {
         savedViewport = serverLayout.viewport;
       } else {
         savedViewport = lsViewport;
       }
     }
-    if (hasSaved && savedViewport) {
+    if ((hasSaved || hasPartialSaved) && savedViewport) {
       dgState.zoom = savedViewport.zoom;
       dgState.panX = savedViewport.panX;
       dgState.panY = savedViewport.panY;
@@ -664,7 +674,7 @@ export function initDiagram(ctx, boundedContexts) {
     refreshDiagramKindFilters();
     syncDiagramToolbarToggles();
 
-    if (!hasSaved || !savedViewport) {
+    if ((!hasSaved && !hasPartialSaved) || !savedViewport) {
       fitToView();
       saveViewport(dgState.zoom, dgState.panX, dgState.panY);
     }
@@ -842,10 +852,15 @@ function applyDiagramVisibility() {
 }
 
 // ── Auto-layout (row-based + forces) ─────────────────
-function applyAutoLayout(nodes, edges, nMap) {
-  // Group nodes by bounded context for initial placement
+/** @param {Set<string>|null|undefined} fixedNodeIds If set, those nodes keep their current x/y (partial layout restore). */
+function applyAutoLayout(nodes, edges, nMap, fixedNodeIds) {
+  const fixed = fixedNodeIds instanceof Set && fixedNodeIds.size > 0 ? fixedNodeIds : null;
+  const isFixed = (n) => fixed && fixed.has(n.id);
+
+  // Group movable nodes by bounded context for initial placement
   const ctxGroups = {};
   for (const n of nodes) {
+    if (isFixed(n)) continue;
     const key = n.contextName || '__default';
     (ctxGroups[key] = ctxGroups[key] || []).push(n);
   }
@@ -871,19 +886,25 @@ function applyAutoLayout(nodes, edges, nMap) {
     }
   } else {
     const rowBuckets = {};
-    for (const n of nodes) { const r = kindRow[n.kind] || 0; (rowBuckets[r] = rowBuckets[r] || []).push(n); }
+    for (const n of nodes) {
+      if (isFixed(n)) continue;
+      const r = kindRow[n.kind] || 0;
+      (rowBuckets[r] = rowBuckets[r] || []).push(n);
+    }
     for (const [row, rNodes] of Object.entries(rowBuckets)) {
       const y = parseInt(row) * 240;
       rNodes.forEach((n, i) => { n.x = (i - (rNodes.length - 1) / 2) * 270; n.y = y; });
     }
   }
 
-  // Force simulation
+  // Force simulation (fixed nodes participate in forces but do not move)
   for (let i = 0; i < 150; i++) {
     const alpha = 1 - i / 150;
     for (let a = 0; a < nodes.length; a++) {
       for (let b = a + 1; b < nodes.length; b++) {
         const na = nodes[a], nb = nodes[b];
+        const fa = isFixed(na), fb = isFixed(nb);
+        if (fa && fb) continue;
         let dx = nb.x - na.x, dy = nb.y - na.y;
         const dist = Math.sqrt(dx * dx + dy * dy) || 1;
         // Stronger repulsion between nodes of different contexts
@@ -891,19 +912,24 @@ function applyAutoLayout(nodes, edges, nMap) {
         const repStrength = crossCtx ? 16000 : 8000;
         const force = (repStrength * alpha) / (dist * dist);
         const fx = (dx / dist) * force, fy = (dy / dist) * force;
-        na.vx -= fx; na.vy -= fy; nb.vx += fx; nb.vy += fy;
+        if (!fa) { na.vx -= fx; na.vy -= fy; }
+        if (!fb) { nb.vx += fx; nb.vy += fy; }
       }
     }
     for (const e of edges) {
       const s = nMap[e.source], t = nMap[e.target];
       if (!s || !t) continue;
+      const fs = isFixed(s), ft = isFixed(t);
+      if (fs && ft) continue;
       const dx = t.x - s.x, dy = t.y - s.y;
       const dist = Math.sqrt(dx * dx + dy * dy) || 1;
       const force = dist * 0.004 * alpha;
       const fx = (dx / dist) * force, fy = (dy / dist) * force;
-      s.vx += fx; s.vy += fy; t.vx -= fx; t.vy -= fy;
+      if (!fs) { s.vx += fx; s.vy += fy; }
+      if (!ft) { t.vx -= fx; t.vy -= fy; }
     }
     for (const n of nodes) {
+      if (isFixed(n)) { n.vx = 0; n.vy = 0; continue; }
       n.vx *= 0.82; n.vy *= 0.82;
       n.x += n.vx; n.y += n.vy;
     }
