@@ -3,7 +3,12 @@
  */
 import { esc, escAttr, shortName, ALL_SECTIONS, SECTION_META } from './helpers.js';
 import { renderDetailView } from './views.js';
-import { renderDiagramView, initDiagram, diagramZoom, diagramFit, diagramResetLayout, diagramToggleKind, diagramShowAll, diagramDownloadSvg, diagramToggleAliases, diagramToggleLayers, diagramToggleEdgeKind, diagramToggleEdgeFilter, diagramToggleKindFilter, diagramShowAllKinds, diagramHideAllKinds, setDiagramLayoutBaseUrl, setServerDiagramLayoutCache } from './diagram.js';
+import {
+  renderDiagramView, initDiagram, diagramZoom, diagramFit, diagramResetLayout, diagramToggleKind, diagramShowAll,
+  diagramDownloadSvg, diagramToggleAliases, diagramToggleLayers, diagramToggleEdgeKind, diagramToggleEdgeFilter,
+  diagramToggleKindFilter, diagramShowAllKinds, diagramHideAllKinds, setDiagramLayoutBaseUrl, setServerDiagramLayoutCache,
+  setDiagramNodeHidden, isDiagramNodeHidden, getDiagramState,
+} from './diagram.js';
 
 const API_URL = window.__config?.apiUrl || '/domain-model/json';
 const BASE_URL = API_URL.replace(/\/json$/, '');
@@ -21,6 +26,22 @@ let metadata = {};
 const STORAGE_KEY = 'domainModelSelectedContexts';
 // Legacy browser persistence key (migration-only).
 const METADATA_STORAGE_KEY = 'domainModelMetadata';
+
+/** Maps explorer section keys to diagram node `kind` strings (see `diagram.js` KIND_CFG). */
+const SECTION_TO_DIAGRAM_KIND = {
+  aggregates: 'aggregate',
+  entities: 'entity',
+  valueObjects: 'valueObject',
+  subTypes: 'subType',
+  domainEvents: 'event',
+  integrationEvents: 'integrationEvent',
+  commandHandlerTargets: 'commandHandlerTarget',
+  eventHandlers: 'eventHandler',
+  commandHandlers: 'commandHandler',
+  queryHandlers: 'queryHandler',
+  repositories: 'repository',
+  domainServices: 'service',
+};
 
 let data = null;
 let selectedContextNames = new Set();
@@ -138,6 +159,7 @@ async function init() {
 
     render();
     initSidebarToggle();
+    window.__onDiagramHiddenNodesChanged = syncExplorerDiagramHideCheckboxes;
   } catch (e) {
     document.getElementById('loadingState').textContent = 'Failed to load domain model. Check the console.';
     console.error('Failed to load domain model:', e);
@@ -200,6 +222,7 @@ function render() {
   renderSidebar();
   renderMain();
   syncFeatureEditorViewBodyClass();
+  requestAnimationFrame(() => syncExplorerDiagramHideCheckboxes());
 }
 
 /** Hide explorer sidebar in feature editor view mode so canvas matches Diagram tab width. */
@@ -259,14 +282,26 @@ function renderSidebar() {
         <span class="chevron">▼</span>
       </div>
       <div class="nav-items">
-        ${items.map(item => `
-          <div class="nav-item${isActive(sec.key, item) ? ' active' : ''}"
-               onclick="window.__nav.showDetail('${sec.key}', '${escAttr(item.fullName)}')"
+        ${items.map(item => {
+          const dk = SECTION_TO_DIAGRAM_KIND[sec.key];
+          const hidden = dk && isNavDiagramHidden(dk, item.fullName);
+          const visTitle = hidden
+            ? 'Show on diagram (type may still be hidden via diagram filters)'
+            : 'Hide from diagram';
+          return `
+          <div class="nav-item nav-item-with-diagram-toggle${isActive(sec.key, item) ? ' active' : ''}"
                data-fullname="${escAttr(item.fullName)}">
-            <span class="nav-dot" style="background:${sec.color}"></span>
-            ${esc(item.name)}
-          </div>
-        `).join('')}
+            ${dk ? `<label class="nav-diagram-visibility" title="${escAttr(visTitle)}" onclick="event.stopPropagation()">
+              <input type="checkbox" ${hidden ? '' : 'checked'}
+                     data-nav-kind="${escAttr(sec.key)}"
+                     onchange="window.__nav.toggleDiagramVisibility('${escAttr(item.fullName)}', this.checked)" />
+            </label>` : '<span class="nav-diagram-visibility-spacer"></span>'}
+            <span class="nav-item-label" onclick="window.__nav.showDetail('${sec.key}', '${escAttr(item.fullName)}')">
+              <span class="nav-dot" style="background:${sec.color}"></span>
+              ${esc(item.name)}
+            </span>
+          </div>`;
+        }).join('')}
       </div>
     </div>`;
   }
@@ -308,6 +343,35 @@ function isActive(key, item) {
     return currentDetail.kind === key && currentDetail.item.fullName === item.fullName;
   }
   return false;
+}
+
+function isNavDiagramHidden(diagramKind, fullName) {
+  const st = getDiagramState();
+  if (st && st.hiddenKinds.has(diagramKind)) return true;
+  return isDiagramNodeHidden(fullName);
+}
+
+function syncExplorerDiagramHideCheckboxes() {
+  for (const row of document.querySelectorAll('.nav-item-with-diagram-toggle')) {
+    const fullName = row.getAttribute('data-fullname');
+    const input = row.querySelector('input[type="checkbox"][data-nav-kind]');
+    if (!fullName || !input) continue;
+    const kindKey = input.getAttribute('data-nav-kind');
+    const dk = kindKey ? SECTION_TO_DIAGRAM_KIND[kindKey] : null;
+    if (!dk) continue;
+    const hidden = isNavDiagramHidden(dk, fullName);
+    input.checked = !hidden;
+    const lab = row.querySelector('.nav-diagram-visibility');
+    if (lab) {
+      lab.title = hidden
+        ? 'Show on diagram (type may still be hidden via diagram filters)'
+        : 'Hide from diagram';
+    }
+  }
+}
+
+function toggleDiagramVisibility(fullName, visible) {
+  setDiagramNodeHidden(fullName, !visible);
 }
 
 function renderMain() {
@@ -406,7 +470,9 @@ function toggleSection(el) {
 }
 
 // ── Expose to global scope for onclick handlers ──────
-window.__nav = { switchTab, showDetail, navigateTo, toggleSection, toggleContext };
+window.__nav = {
+  switchTab, showDetail, navigateTo, toggleSection, toggleContext, toggleDiagramVisibility,
+};
 window.__saveMetadata = saveMetadata;
 window.__downloadExport = async function(name) {
   try {
