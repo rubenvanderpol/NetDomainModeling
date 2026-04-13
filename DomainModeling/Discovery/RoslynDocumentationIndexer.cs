@@ -36,6 +36,12 @@ internal sealed partial class RoslynDocumentationIndexer
     }
 
     /// <summary>
+    /// Holds resolved generic cref info from <c>&lt;domain&gt;</c> tags indexed by position
+    /// on a given type, so that <see cref="NormalizeDomainInnerXml"/> can render display names.
+    /// </summary>
+    private static readonly ConcurrentDictionary<string, Dictionary<string, string>> ResolvedCrefDisplayNames = new(StringComparer.Ordinal);
+
+    /// <summary>
     /// Returns concatenated <c>&lt;domain&gt;</c> inner text for the type, or <c>null</c> if none.
     /// </summary>
     public string? TryGetDomainSummary(Type type)
@@ -338,8 +344,10 @@ internal sealed partial class RoslynDocumentationIndexer
 
                         if (symbol is not null)
                         {
-                            TryAddSymbol(typeMap, symbol);
+                            // Resolve generic crefs first — populates ResolvedCrefDisplayNames cache
                             TryAddTypeDocumentedEmissions(typeEmissions, symbol, model, node, compilation);
+                            // Then build description text, which uses the resolved display names
+                            TryAddSymbol(typeMap, symbol);
                         }
                         break;
                     }
@@ -363,20 +371,25 @@ internal sealed partial class RoslynDocumentationIndexer
     private static void TryAddSymbol(Dictionary<string, string> map, INamedTypeSymbol symbol)
     {
         var xml = symbol.GetDocumentationCommentXml();
-        var domainText = ExtractDomainTags(xml);
+        var clrName = ToClrMetadataFullName(symbol);
+
+        // Use resolved display names if available (populated by TryAddTypeDocumentedEmissions)
+        ResolvedCrefDisplayNames.TryGetValue(clrName, out var crefDisplayNames);
+        var domainText = ExtractDomainTags(xml, crefDisplayNames);
         if (domainText is null)
             return;
 
-        MergeDomainText(map, ToClrMetadataFullName(symbol), domainText);
+        MergeDomainText(map, clrName, domainText);
 
         if (symbol is { IsGenericType: true, IsUnboundGenericType: false })
             MergeDomainText(map, ToClrMetadataFullName(symbol.OriginalDefinition), domainText);
     }
 
     /// <summary>
-    /// Walks the syntax trivia on a type declaration looking for <c>&lt;domain&gt;emits &lt;see cref="..."/&gt;</c>
-    /// tags, and resolves the <c>cref</c> to a constructed generic CLR full name using the semantic model.
-    /// This preserves type arguments that XML documentation comment IDs lose.
+    /// Walks the syntax trivia on a type declaration looking for <c>&lt;domain&gt;</c> tags containing
+    /// <c>&lt;see cref="..."/&gt;</c>, resolves generic crefs to constructed types, and stores them.
+    /// Resolved generic display names are cached for use in description text rendering.
+    /// Emits-specific references are stored in <paramref name="typeEmissions"/> for synthetic node creation.
     /// </summary>
     private static void TryAddTypeDocumentedEmissions(
         Dictionary<string, List<(string, string)>> typeEmissions,
@@ -389,73 +402,69 @@ internal sealed partial class RoslynDocumentationIndexer
         if (string.IsNullOrWhiteSpace(xml))
             return;
 
-        var hasDomainEmits = false;
-        foreach (Match m in DomainTagRegex().Matches(xml))
-        {
-            var inner = m.Groups[1].Value;
-            if (string.IsNullOrWhiteSpace(inner))
-                continue;
-            try
-            {
-                var wrapped = "<r>" + inner + "</r>";
-                var el = XElement.Parse(wrapped, LoadOptions.PreserveWhitespace);
-                if (DomainTagHasEmitsLinkKind(el))
-                {
-                    hasDomainEmits = true;
-                    break;
-                }
-            }
-            catch { }
-        }
-
-        if (!hasDomainEmits)
+        if (!DomainTagRegex().IsMatch(xml))
             return;
 
-        var emitted = ExtractEmittedTypesFromSyntaxCrefs(declNode, model, compilation);
-        if (emitted.Count == 0)
+        var allResolved = ExtractResolvedGenericCrefsFromDomainTags(declNode, model, compilation);
+        if (allResolved.Count == 0)
             return;
 
         var clrName = ToClrMetadataFullName(symbol);
-        if (!typeEmissions.TryGetValue(clrName, out var list))
-        {
-            list = [];
-            typeEmissions[clrName] = list;
-        }
 
-        foreach (var entry in emitted)
-        {
-            if (!list.Any(e => string.Equals(e.Item1, entry.CanonicalFullName, StringComparison.Ordinal)))
-                list.Add((entry.CanonicalFullName, entry.DisplayName));
-        }
-
+        // Store resolved display names for description text rendering (all link kinds)
+        // Only store entries for constructed generics — non-generic crefs render fine from doc IDs
+        var crefMap = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var entry in allResolved.Where(e => e.CanonicalFullName != e.OpenGenericMetadataName))
+            crefMap.TryAdd(entry.OpenGenericMetadataName, entry.DisplayName);
+        ResolvedCrefDisplayNames[clrName] = crefMap;
         if (symbol is { IsGenericType: true, IsUnboundGenericType: false })
+            ResolvedCrefDisplayNames[ToClrMetadataFullName(symbol.OriginalDefinition)] = crefMap;
+
+        // Filter to emits-only for synthetic event node creation
+        var emitsOnly = allResolved.Where(e => e.IsEmits).ToList();
+        if (emitsOnly.Count > 0)
         {
-            var defClr = ToClrMetadataFullName(symbol.OriginalDefinition);
-            if (!typeEmissions.TryGetValue(defClr, out var defList))
+            if (!typeEmissions.TryGetValue(clrName, out var list))
             {
-                defList = [];
-                typeEmissions[defClr] = defList;
+                list = [];
+                typeEmissions[clrName] = list;
             }
-            foreach (var entry in emitted)
+
+            foreach (var entry in emitsOnly)
             {
-                if (!defList.Any(e => string.Equals(e.Item1, entry.CanonicalFullName, StringComparison.Ordinal)))
-                    defList.Add((entry.CanonicalFullName, entry.DisplayName));
+                if (!list.Any(e => string.Equals(e.Item1, entry.CanonicalFullName, StringComparison.Ordinal)))
+                    list.Add((entry.CanonicalFullName, entry.DisplayName));
+            }
+
+            if (symbol is { IsGenericType: true, IsUnboundGenericType: false })
+            {
+                var defClr = ToClrMetadataFullName(symbol.OriginalDefinition);
+                if (!typeEmissions.TryGetValue(defClr, out var defList))
+                {
+                    defList = [];
+                    typeEmissions[defClr] = defList;
+                }
+                foreach (var entry in emitsOnly)
+                {
+                    if (!defList.Any(e => string.Equals(e.Item1, entry.CanonicalFullName, StringComparison.Ordinal)))
+                        defList.Add((entry.CanonicalFullName, entry.DisplayName));
+                }
             }
         }
     }
 
     /// <summary>
-    /// Extracts emitted event types by walking cref attributes in XML doc trivia on a syntax node,
-    /// using the semantic model to resolve constructed generic types.
-    /// For generic crefs like <c>EntityDeletedEvent{Customer}</c>, resolves the base type and each type
-    /// argument separately then constructs the canonical closed generic name.
+    /// Extracts resolved generic type references from ALL <c>&lt;domain&gt;</c> tags in the syntax trivia,
+    /// using the semantic model to resolve constructed generic types. Each result includes the canonical
+    /// CLR full name, display name, the open generic metadata name (for description text remapping),
+    /// and whether it came from an <c>emits</c> tag.
     /// </summary>
-    private static List<(string CanonicalFullName, string DisplayName)> ExtractEmittedTypesFromSyntaxCrefs(
+    private static List<(string CanonicalFullName, string DisplayName, string OpenGenericMetadataName, bool IsEmits)> ExtractResolvedGenericCrefsFromDomainTags(
         SyntaxNode declNode,
         SemanticModel model,
         Compilation compilation)
     {
-        var result = new List<(string, string)>();
+        var result = new List<(string, string, string, bool)>();
         var trivia = declNode.GetLeadingTrivia();
 
         foreach (var t in trivia)
@@ -472,7 +481,8 @@ internal sealed partial class RoslynDocumentationIndexer
                 if (crefAttr is null)
                     continue;
 
-                if (!IsInsideDomainEmitsTag(seeElement))
+                var domainTag = FindContainingDomainTag(seeElement);
+                if (domainTag is null)
                     continue;
 
                 var symbolInfo = model.GetSymbolInfo(crefAttr.Cref);
@@ -485,12 +495,42 @@ internal sealed partial class RoslynDocumentationIndexer
 
                 var canonical = ToCanonicalGenericFullName(nt);
                 var display = ToDisplayGenericName(nt);
+                var openGenericName = ToClrMetadataFullName(nt.IsGenericType ? nt.OriginalDefinition : nt);
+                var isEmits = IsDomainTagEmits(domainTag);
+
                 if (!result.Any(e => string.Equals(e.Item1, canonical, StringComparison.Ordinal)))
-                    result.Add((canonical, display));
+                    result.Add((canonical, display, openGenericName, isEmits));
             }
         }
 
         return result;
+    }
+
+    private static XmlElementSyntax? FindContainingDomainTag(SyntaxNode node)
+    {
+        var current = node.Parent;
+        while (current is not null)
+        {
+            if (current is XmlElementSyntax xmlEl &&
+                xmlEl.StartTag.Name.LocalName.Text.Equals("domain", StringComparison.OrdinalIgnoreCase))
+                return xmlEl;
+            current = current.Parent;
+        }
+        return null;
+    }
+
+    private static bool IsDomainTagEmits(XmlElementSyntax domainElement)
+    {
+        var textContent = new StringBuilder();
+        foreach (var child in domainElement.Content)
+        {
+            if (child is XmlTextSyntax textNode)
+                textContent.Append(textNode.ToString());
+            else if (child is XmlEmptyElementSyntax)
+                textContent.Append(' ');
+        }
+        var condensed = string.Join(' ', textContent.ToString().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        return condensed.StartsWith("emits", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -645,33 +685,6 @@ internal sealed partial class RoslynDocumentationIndexer
     }
 
     /// <summary>
-    /// Checks if an XML element is inside a &lt;domain&gt; tag whose text content starts with "emits".
-    /// </summary>
-    private static bool IsInsideDomainEmitsTag(SyntaxNode node)
-    {
-        var current = node.Parent;
-        while (current is not null)
-        {
-            if (current is XmlElementSyntax xmlEl &&
-                xmlEl.StartTag.Name.LocalName.Text.Equals("domain", StringComparison.OrdinalIgnoreCase))
-            {
-                var textContent = new StringBuilder();
-                foreach (var child in xmlEl.Content)
-                {
-                    if (child is XmlTextSyntax textNode)
-                        textContent.Append(textNode.ToString());
-                    else if (child is XmlEmptyElementSyntax)
-                        textContent.Append(' ');
-                }
-                var condensed = string.Join(' ', textContent.ToString().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
-                return condensed.StartsWith("emits", StringComparison.OrdinalIgnoreCase);
-            }
-            current = current.Parent;
-        }
-        return false;
-    }
-
-    /// <summary>
     /// Builds a canonical CLR full name that matches the format produced by <c>Type.FullName</c> for
     /// constructed generic types: <c>Ns.EntityDeletedEvent`1[[Ns.User, AssemblyName, ...]]</c>.
     /// For non-generic types this is equivalent to <see cref="ToClrMetadataFullName"/>.
@@ -817,7 +830,7 @@ internal sealed partial class RoslynDocumentationIndexer
         }
     }
 
-    private static string? ExtractDomainTags(string? documentationXml)
+    private static string? ExtractDomainTags(string? documentationXml, Dictionary<string, string>? crefDisplayNames = null)
     {
         if (string.IsNullOrWhiteSpace(documentationXml))
             return null;
@@ -830,7 +843,7 @@ internal sealed partial class RoslynDocumentationIndexer
         foreach (Match m in matches)
         {
             var raw = m.Groups[1].Value;
-            var normalized = NormalizeDomainInnerXml(raw);
+            var normalized = NormalizeDomainInnerXml(raw, crefDisplayNames);
             if (normalized.Length > 0)
                 segments.Add(normalized);
         }
@@ -841,8 +854,10 @@ internal sealed partial class RoslynDocumentationIndexer
     /// <summary>
     /// Strips XML doc tags inside &lt;domain&gt; and collapses whitespace so
     /// <c>emits &lt;see cref="T:Ns.Event"/&gt;</c> becomes a readable line.
+    /// When <paramref name="crefDisplayNames"/> is provided, resolved generic display names
+    /// are used instead of raw doc comment IDs (which lose type arguments).
     /// </summary>
-    private static string NormalizeDomainInnerXml(string raw)
+    private static string NormalizeDomainInnerXml(string raw, Dictionary<string, string>? crefDisplayNames)
     {
         if (string.IsNullOrWhiteSpace(raw))
             return string.Empty;
@@ -851,7 +866,7 @@ internal sealed partial class RoslynDocumentationIndexer
         {
             var wrapped = "<r>" + raw + "</r>";
             var el = XElement.Parse(wrapped, LoadOptions.PreserveWhitespace);
-            var text = string.Concat(el.Nodes().Select(NodeToPlainText)).Trim();
+            var text = string.Concat(el.Nodes().Select(n => NodeToPlainText(n, crefDisplayNames))).Trim();
             return string.Join(' ', text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
         }
         catch
@@ -860,18 +875,30 @@ internal sealed partial class RoslynDocumentationIndexer
         }
     }
 
-    private static string NodeToPlainText(XNode node)
+    private static string NodeToPlainText(XNode node, Dictionary<string, string>? crefDisplayNames)
     {
         return node switch
         {
             XText t => t.Value,
             XElement e when e.Name.LocalName.Equals("see", StringComparison.OrdinalIgnoreCase) =>
-                e.Attribute("cref")?.Value is { } cref
-                    ? StripDocIdPrefix(cref)
-                    : string.Empty,
-            XElement e => string.Concat(e.Nodes().Select(NodeToPlainText)),
+                ResolveCrefDisplayText(e.Attribute("cref")?.Value, crefDisplayNames),
+            XElement e => string.Concat(e.Nodes().Select(n => NodeToPlainText(n, crefDisplayNames))),
             _ => string.Empty
         };
+    }
+
+    private static string ResolveCrefDisplayText(string? cref, Dictionary<string, string>? crefDisplayNames)
+    {
+        if (cref is null)
+            return string.Empty;
+
+        var stripped = StripDocIdPrefix(cref);
+
+        // Check if we have a resolved display name for this open-generic metadata name
+        if (crefDisplayNames is not null && crefDisplayNames.TryGetValue(stripped, out var displayName))
+            return displayName;
+
+        return stripped;
     }
 
     private static string StripDocIdPrefix(string cref)

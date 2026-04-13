@@ -162,6 +162,7 @@ public class Order : BaseAggregateRoot
 
 /// <summary>
 /// <domain>emits <see cref="EntityDeletedEvent{Customer}"/></domain>
+/// <domain>When deleted: notifies <see cref="EntityDeletedEvent{Customer}"/></domain>
 /// </summary>
 public class Customer : BaseAggregateRoot
 {

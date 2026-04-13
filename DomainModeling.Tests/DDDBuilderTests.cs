@@ -416,6 +416,20 @@ public class DDDBuilderTests
     }
 
     [Fact]
+    public void Build_DomainTagDescription_ShowsGenericDisplayName_ForAllLinkKinds()
+    {
+        var graph = BuildSampleGraph();
+        var ctx = graph.BoundedContexts.Single();
+
+        var customer = ctx.Aggregates.Single(a => a.Name == "Customer");
+        customer.Description.Should().NotBeNull();
+        customer.Description.Should().Contain("EntityDeletedEvent<Customer>",
+            "generic types in domain tags should show display name, not metadata name like EntityDeletedEvent`1");
+        customer.Description.Should().NotContain("`1",
+            "open generic metadata names should be replaced by display names");
+    }
+
+    [Fact]
     public void Build_RepositoryManagesAggregate()
     {
         var graph = BuildSampleGraph();
