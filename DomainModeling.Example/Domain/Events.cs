@@ -42,3 +42,11 @@ public sealed class CustomerRegisteredEvent : DomainEvent
 {
     public Guid CustomerId { get; init; }
 }
+
+/// <summary>
+/// A generic domain event raised when any entity is deleted.
+/// </summary>
+public sealed class EntityDeletedEvent<TEntity> : DomainEvent where TEntity : Entity
+{
+    public Guid EntityId { get; init; }
+}
