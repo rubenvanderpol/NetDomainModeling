@@ -11,6 +11,15 @@
 .diagram-wrap svg.dragging { cursor: grabbing; }
 .diagram-wrap svg.dragging-node { cursor: grabbing; }
 
+/* Waypoint handles on edges */
+.dg-waypoint {
+  transition: r 0.1s, opacity 0.1s;
+}
+.dg-waypoint:hover {
+  r: 7;
+  opacity: 1 !important;
+}
+
 .diagram-controls {
   position: absolute; top: 12px; right: 12px;
   display: flex; gap: 4px; z-index: 10;

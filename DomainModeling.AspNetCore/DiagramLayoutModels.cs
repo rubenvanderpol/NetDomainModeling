@@ -25,6 +25,13 @@ internal sealed class DiagramLayoutDocument
 
     [JsonPropertyName("showLayers")]
     public bool? ShowLayers { get; set; }
+
+    /// <summary>
+    /// User-defined waypoints for edges, keyed by <c>"sourceType|targetType|kind"</c>.
+    /// Each value is an ordered list of intermediate points the edge passes through.
+    /// </summary>
+    [JsonPropertyName("edgeWaypoints")]
+    public Dictionary<string, List<DiagramNodePosition>>? EdgeWaypoints { get; set; }
 }
 
 internal sealed class DiagramNodePosition

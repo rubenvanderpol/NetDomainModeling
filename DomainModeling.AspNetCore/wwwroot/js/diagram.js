@@ -22,6 +22,7 @@ const LEGACY_HIDDEN_EDGE_KINDS_KEY = 'domain-model-diagram-hidden-edge-kinds';
 const LEGACY_VIEWPORT_KEY = 'domain-model-diagram-viewport';
 
 const FLUSH_MS = 450;
+const EDGE_WAYPOINTS_KEY = 'domain-model-diagram-edge-waypoints-global';
 let diagramLayoutBaseUrl = null;
 /** @type {object | null} */
 let serverLayoutDoc = null;
@@ -132,6 +133,14 @@ function buildLayoutPayloadFromState() {
   for (const n of dgState.allNodes) {
     positions[n.id] = { x: Math.round(n.x * 10) / 10, y: Math.round(n.y * 10) / 10 };
   }
+  const edgeWaypoints = {};
+  if (dgState.edgeWaypoints) {
+    for (const [key, pts] of Object.entries(dgState.edgeWaypoints)) {
+      if (pts && pts.length > 0) {
+        edgeWaypoints[key] = pts.map(p => ({ x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10 }));
+      }
+    }
+  }
   return {
     positions,
     viewport: {
@@ -143,6 +152,7 @@ function buildLayoutPayloadFromState() {
     hiddenEdgeKinds: [...dgState.hiddenEdgeKinds],
     showAliases,
     showLayers,
+    edgeWaypoints: Object.keys(edgeWaypoints).length > 0 ? edgeWaypoints : undefined,
   };
 }
 
@@ -297,6 +307,30 @@ function clearViewport() {
     localStorage.removeItem(VIEWPORT_KEY);
   } catch { /* ignore */ }
   scheduleFlushDiagramLayout();
+}
+
+function loadEdgeWaypoints() {
+  try {
+    const raw = localStorage.getItem(EDGE_WAYPOINTS_KEY);
+    if (!raw) return {};
+    const o = JSON.parse(raw);
+    return o && typeof o === 'object' && !Array.isArray(o) ? o : {};
+  } catch { return {}; }
+}
+
+function saveEdgeWaypoints(edgeWaypoints) {
+  try {
+    const filtered = {};
+    for (const [key, pts] of Object.entries(edgeWaypoints || {})) {
+      if (pts && pts.length > 0) filtered[key] = pts;
+    }
+    localStorage.setItem(EDGE_WAYPOINTS_KEY, JSON.stringify(filtered));
+  } catch { /* quota exceeded or private mode */ }
+  scheduleFlushDiagramLayout();
+}
+
+function edgeKey(e) {
+  return `${e.source}|${e.target}|${e.kind}`;
 }
 
 // ── Module state ─────────────────────────────────────
@@ -597,10 +631,17 @@ export function initDiagram(ctx, boundedContexts) {
       try { localStorage.setItem(SHOW_LAYERS_KEY, showLayers); } catch { /* ignore */ }
     }
 
+    let edgeWaypoints = {};
+    if (serverLayout?.edgeWaypoints && typeof serverLayout.edgeWaypoints === 'object') {
+      edgeWaypoints = serverLayout.edgeWaypoints;
+    } else {
+      edgeWaypoints = loadEdgeWaypoints();
+    }
+
     dgState = {
       nodes, edges, nMap, allNodes: nodes, allEdges: edges,
       zoom: 1, panX: 0, panY: 0, contextName,
-      hiddenKinds, hiddenEdgeKinds,
+      hiddenKinds, hiddenEdgeKinds, edgeWaypoints,
     };
     applyDiagramVisibility();
 
@@ -641,6 +682,9 @@ export function initDiagram(ctx, boundedContexts) {
       } catch { /* ignore */ }
       try {
         localStorage.setItem(HIDDEN_EDGE_KINDS_KEY, JSON.stringify([...hiddenEdgeKinds]));
+      } catch { /* ignore */ }
+      try {
+        saveEdgeWaypoints(edgeWaypoints);
       } catch { /* ignore */ }
       if (savedViewport) {
         try {
@@ -972,22 +1016,60 @@ function renderSvg() {
     }
   }
 
-  // Edges
+  // Edges (multi-segment with waypoints)
   for (const e of edges) {
     const src = nMap[e.source], tgt = nMap[e.target];
     if (!src || !tgt) continue;
     const srcCx = src.x + src.w / 2, srcCy = src.y + src.h / 2;
     const tgtCx = tgt.x + tgt.w / 2, tgtCy = tgt.y + tgt.h / 2;
-    const p1 = sourceAnchorForEdge(src, tgt, e) || rectEdge(srcCx, srcCy, src.w + 8, src.h + 8, tgtCx, tgtCy);
-    const p2 = rectEdge(tgtCx, tgtCy, tgt.w + 8, tgt.h + 8, srcCx, srcCy);
     const color = edgeColors[e.kind] || '#5c6070';
     const dashed = (e.kind === 'Emits' || e.kind === 'Handles' || e.kind === 'Publishes' || e.kind === 'References' || e.kind === 'ReferencesById') ? ' stroke-dasharray="6,4"' : '';
     const markerStart = e.kind === 'Contains' ? ' marker-start="url(#diamond)"' : '';
     const markerEnd = (e.kind === 'References' || e.kind === 'ReferencesById') ? '' : ` marker-end="url(#arrow-${e.kind})"`;
-    s += `<line x1="${p1.x}" y1="${p1.y}" x2="${p2.x}" y2="${p2.y}" stroke="${color}" stroke-width="1.5"${dashed}${markerStart}${markerEnd} opacity="0.65" />`;
-    const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
-    const label = e.label || e.kind;
-    s += `<text x="${mx}" y="${my - 6}" text-anchor="middle" fill="${color}" font-size="9" font-family="-apple-system,sans-serif" opacity="0.7">${esc(label)}</text>`;
+
+    const ek = edgeKey(e);
+    const waypoints = (dgState.edgeWaypoints && dgState.edgeWaypoints[ek]) || [];
+
+    if (waypoints.length === 0) {
+      const p1 = sourceAnchorForEdge(src, tgt, e) || rectEdge(srcCx, srcCy, src.w + 8, src.h + 8, tgtCx, tgtCy);
+      const p2 = rectEdge(tgtCx, tgtCy, tgt.w + 8, tgt.h + 8, srcCx, srcCy);
+      // Invisible hit area for double-click to add waypoints
+      s += `<line class="dg-edge-hit" data-edge-key="${escAttr(ek)}" x1="${p1.x}" y1="${p1.y}" x2="${p2.x}" y2="${p2.y}" stroke="transparent" stroke-width="12" fill="none" style="cursor:pointer" />`;
+      s += `<line x1="${p1.x}" y1="${p1.y}" x2="${p2.x}" y2="${p2.y}" stroke="${color}" stroke-width="1.5"${dashed}${markerStart}${markerEnd} opacity="0.65" pointer-events="none" />`;
+      const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
+      const label = e.label || e.kind;
+      s += `<text x="${mx}" y="${my - 6}" text-anchor="middle" fill="${color}" font-size="9" font-family="-apple-system,sans-serif" opacity="0.7" pointer-events="none">${esc(label)}</text>`;
+    } else {
+      const firstWp = waypoints[0];
+      const lastWp = waypoints[waypoints.length - 1];
+      const p1 = sourceAnchorForEdge(src, { x: firstWp.x - 1, y: firstWp.y - 1, w: 2, h: 2 }, e)
+        || rectEdge(srcCx, srcCy, src.w + 8, src.h + 8, firstWp.x, firstWp.y);
+      const p2 = rectEdge(tgtCx, tgtCy, tgt.w + 8, tgt.h + 8, lastWp.x, lastWp.y);
+
+      const allPts = [p1, ...waypoints, p2];
+      // Build polyline path
+      let pathD = `M${allPts[0].x},${allPts[0].y}`;
+      for (let i = 1; i < allPts.length; i++) {
+        pathD += ` L${allPts[i].x},${allPts[i].y}`;
+      }
+      // Invisible hit area
+      s += `<path class="dg-edge-hit" data-edge-key="${escAttr(ek)}" d="${pathD}" stroke="transparent" stroke-width="12" fill="none" style="cursor:pointer" />`;
+      s += `<path d="${pathD}" stroke="${color}" stroke-width="1.5"${dashed}${markerStart}${markerEnd} opacity="0.65" fill="none" pointer-events="none" />`;
+
+      // Label at midpoint of entire path
+      const midIdx = Math.floor(allPts.length / 2);
+      const mPrev = allPts[midIdx - 1] || allPts[0];
+      const mNext = allPts[midIdx] || allPts[allPts.length - 1];
+      const mx = (mPrev.x + mNext.x) / 2, my = (mPrev.y + mNext.y) / 2;
+      const label = e.label || e.kind;
+      s += `<text x="${mx}" y="${my - 6}" text-anchor="middle" fill="${color}" font-size="9" font-family="-apple-system,sans-serif" opacity="0.7" pointer-events="none">${esc(label)}</text>`;
+
+      // Waypoint handles
+      for (let wi = 0; wi < waypoints.length; wi++) {
+        const wp = waypoints[wi];
+        s += `<circle class="dg-waypoint" data-edge-key="${escAttr(ek)}" data-wp-idx="${wi}" cx="${wp.x}" cy="${wp.y}" r="5" fill="${color}" stroke="#0f1117" stroke-width="1.5" opacity="0.85" style="cursor:grab" />`;
+      }
+    }
   }
 
   // Nodes
@@ -1064,20 +1146,27 @@ function fitToView() {
   renderSvg();
 }
 
-// ── Interaction (drag nodes, drag context groups, pan, zoom) ──
+// ── Interaction (drag nodes, drag context groups, drag waypoints, pan, zoom) ──
 function setupInteraction() {
   const svg = document.getElementById('diagramSvg');
   if (!svg || !dgState) return;
 
   let dragNode = null, dragOffX = 0, dragOffY = 0;
   let dragCtx = null, dragCtxStartX = 0, dragCtxStartY = 0, dragCtxNodeStarts = null;
+  let dragWp = null; // { edgeKey, wpIdx }
   let panning = false, panStartX = 0, panStartY = 0, panOrigX = 0, panOrigY = 0;
 
   svg.addEventListener('mousedown', function(ev) {
+    const wpEl = ev.target.closest('.dg-waypoint');
     const nodeEl = ev.target.closest('.dg-node');
     const ctxEl = ev.target.closest('.dg-ctx-boundary');
 
-    if (nodeEl) {
+    if (wpEl) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      dragWp = { edgeKey: wpEl.dataset.edgeKey, wpIdx: parseInt(wpEl.dataset.wpIdx, 10) };
+      svg.classList.add('dragging-node');
+    } else if (nodeEl) {
       ev.preventDefault();
       const n = dgState.nMap[nodeEl.dataset.id];
       if (!n) return;
@@ -1091,7 +1180,6 @@ function setupInteraction() {
       dragCtx = ctxName;
       const pt = svgPoint(svg, ev);
       dragCtxStartX = pt.x; dragCtxStartY = pt.y;
-      // Snapshot starting positions of all nodes in this context (visible + hidden)
       dragCtxNodeStarts = new Map();
       for (const n of dgState.allNodes) {
         if (n.contextName === ctxName) {
@@ -1108,7 +1196,14 @@ function setupInteraction() {
   });
 
   svg.addEventListener('mousemove', function(ev) {
-    if (dragNode) {
+    if (dragWp) {
+      const pt = svgPoint(svg, ev);
+      const wps = dgState.edgeWaypoints[dragWp.edgeKey];
+      if (wps && wps[dragWp.wpIdx]) {
+        wps[dragWp.wpIdx] = { x: pt.x, y: pt.y };
+        renderSvg();
+      }
+    } else if (dragNode) {
       const pt = svgPoint(svg, ev);
       dragNode.x = pt.x - dragOffX; dragNode.y = pt.y - dragOffY;
       renderSvg();
@@ -1128,13 +1223,16 @@ function setupInteraction() {
   });
 
   function endDrag() {
+    if (dragWp) {
+      saveEdgeWaypoints(dgState.edgeWaypoints);
+    }
     if (dragNode || dragCtx) {
-      // Persist ALL node positions (including hidden) after drop
       savePositions(dgState.allNodes);
     }
-    if (dragNode || dragCtx || panning) {
+    if (dragWp || dragNode || dragCtx || panning) {
       saveViewport(dgState.zoom, dgState.panX, dgState.panY);
     }
+    dragWp = null;
     dragNode = null;
     dragCtx = null; dragCtxNodeStarts = null;
     panning = false;
@@ -1156,9 +1254,95 @@ function setupInteraction() {
   }, { passive: false });
 
   svg.addEventListener('dblclick', function(ev) {
+    // Double-click on waypoint → remove it
+    const wpEl = ev.target.closest('.dg-waypoint');
+    if (wpEl) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const ek = wpEl.dataset.edgeKey;
+      const idx = parseInt(wpEl.dataset.wpIdx, 10);
+      const wps = dgState.edgeWaypoints[ek];
+      if (wps) {
+        wps.splice(idx, 1);
+        if (wps.length === 0) delete dgState.edgeWaypoints[ek];
+        saveEdgeWaypoints(dgState.edgeWaypoints);
+        renderSvg();
+      }
+      return;
+    }
+
+    // Double-click on edge hit area → add a waypoint
+    const edgeHit = ev.target.closest('.dg-edge-hit');
+    if (edgeHit) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const ek = edgeHit.dataset.edgeKey;
+      const pt = svgPoint(svg, ev);
+      if (!dgState.edgeWaypoints[ek]) dgState.edgeWaypoints[ek] = [];
+      const wps = dgState.edgeWaypoints[ek];
+
+      // Find the segment closest to the click and insert the waypoint there
+      const edge = dgState.edges.find(e => edgeKey(e) === ek);
+      if (edge) {
+        const src = dgState.nMap[edge.source], tgt = dgState.nMap[edge.target];
+        if (src && tgt) {
+          const srcCx = src.x + src.w / 2, srcCy = src.y + src.h / 2;
+          const tgtCx = tgt.x + tgt.w / 2, tgtCy = tgt.y + tgt.h / 2;
+          const firstWp = wps.length > 0 ? wps[0] : { x: tgtCx, y: tgtCy };
+          const lastWp = wps.length > 0 ? wps[wps.length - 1] : { x: srcCx, y: srcCy };
+          const p1 = sourceAnchorForEdge(src, { x: firstWp.x - 1, y: firstWp.y - 1, w: 2, h: 2 }, edge)
+            || rectEdge(srcCx, srcCy, src.w + 8, src.h + 8, firstWp.x, firstWp.y);
+          const p2 = rectEdge(tgtCx, tgtCy, tgt.w + 8, tgt.h + 8, lastWp.x, lastWp.y);
+          const allPts = [p1, ...wps, p2];
+
+          let bestDist = Infinity, bestIdx = wps.length;
+          for (let i = 0; i < allPts.length - 1; i++) {
+            const d = distToSegment(pt, allPts[i], allPts[i + 1]);
+            if (d < bestDist) { bestDist = d; bestIdx = i; }
+          }
+          wps.splice(bestIdx, 0, { x: pt.x, y: pt.y });
+        } else {
+          wps.push({ x: pt.x, y: pt.y });
+        }
+      } else {
+        wps.push({ x: pt.x, y: pt.y });
+      }
+      saveEdgeWaypoints(dgState.edgeWaypoints);
+      renderSvg();
+      return;
+    }
+
     const nodeEl = ev.target.closest('.dg-node');
     if (nodeEl) window.__nav.navigateTo(nodeEl.dataset.id);
   });
+
+  // Right-click on waypoint → remove it
+  svg.addEventListener('contextmenu', function(ev) {
+    const wpEl = ev.target.closest('.dg-waypoint');
+    if (wpEl) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const ek = wpEl.dataset.edgeKey;
+      const idx = parseInt(wpEl.dataset.wpIdx, 10);
+      const wps = dgState.edgeWaypoints[ek];
+      if (wps) {
+        wps.splice(idx, 1);
+        if (wps.length === 0) delete dgState.edgeWaypoints[ek];
+        saveEdgeWaypoints(dgState.edgeWaypoints);
+        renderSvg();
+      }
+    }
+  });
+}
+
+function distToSegment(p, a, b) {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq === 0) return Math.sqrt((p.x - a.x) ** 2 + (p.y - a.y) ** 2);
+  let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq;
+  t = Math.max(0, Math.min(1, t));
+  const px = a.x + t * dx, py = a.y + t * dy;
+  return Math.sqrt((p.x - px) ** 2 + (p.y - py) ** 2);
 }
 
 function svgPoint(svg, ev) {
@@ -1191,6 +1375,8 @@ export function diagramResetLayout(ctx) {
   if (!dgState || !ctx) return;
   clearPositions();
   clearViewport();
+  dgState.edgeWaypoints = {};
+  saveEdgeWaypoints(dgState.edgeWaypoints);
   applyAutoLayout(dgState.allNodes, dgState.allEdges, dgState.nMap);
   applyDiagramVisibility();
   renderSvg();
