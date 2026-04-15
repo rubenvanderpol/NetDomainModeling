@@ -179,6 +179,10 @@ public sealed class TypeConventionBuilder
         if (!target.IsGenericTypeDefinition)
             return false;
 
+        // Closed generic interface (e.g. IRepository<Order>) satisfies Implements(typeof(IRepository<>))
+        if (candidate.IsGenericType && candidate.GetGenericTypeDefinition() == target)
+            return true;
+
         // Check open-generic base classes
         var current = candidate.BaseType;
         while (current is not null)

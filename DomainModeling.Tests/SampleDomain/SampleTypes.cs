@@ -194,7 +194,7 @@ public sealed class Invoice : BaseAggregateRoot
 
 public class OrderPlacedHandler : IEventHandler<OrderPlacedEvent>
 {
-    private readonly PlaceOrderCommandHandler _followUpCommandHandler = new();
+    private readonly PlaceOrderCommandHandler _followUpCommandHandler = new(null!);
 
     public Task HandleAsync(OrderPlacedEvent @event, CancellationToken ct = default)
     {
@@ -238,10 +238,13 @@ public record PlaceOrderCommand(Guid CustomerId, List<string> Products);
 /// <summary>Command DTO with no handler — used to test explicit <c>Commands(...)</c> registration on <c>DDDBuilder</c>.</summary>
 public record UnassignedCommand(string Reason);
 
-public class PlaceOrderCommandHandler : ICommandHandler<PlaceOrderCommand>
+public class PlaceOrderCommandHandler(IRepository<Order> orders) : ICommandHandler<PlaceOrderCommand>
 {
     public Task HandleAsync(PlaceOrderCommand command, CancellationToken ct = default)
-        => Task.CompletedTask;
+    {
+        ArgumentNullException.ThrowIfNull(orders);
+        return Task.CompletedTask;
+    }
 }
 
 public record GetOrderQuery(Guid OrderId);

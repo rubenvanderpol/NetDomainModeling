@@ -101,6 +101,41 @@ public class ExampleAppGraphTests
     }
 
     [Fact]
+    public void Build_PlaceOrderCommandHandler_HasReferencesEdge_ToOrderRepository_ForIRepositoryDependency()
+    {
+        var catalogDomainAssembly = typeof(Product).Assembly;
+        var sharedAssembly = GetSharedExampleAssembly(catalogDomainAssembly);
+
+        var graph = DDDBuilder.Create(ctx => ctx
+                .Entities(e => e.InheritsFrom<Entity>())
+                .Aggregates(a => a.InheritsFrom<AggregateRoot>())
+                .ValueObjects(v => v.InheritsFrom<ValueObject>())
+                .DomainEvents(e => e.InheritsFrom<DomainEvent>())
+                .IntegrationEvents(e => e.InheritsFrom<IntegrationEvent>())
+                .EventHandlers(h => h
+                    .Implements(typeof(IEventHandler<>))
+                    .Implements(typeof(IIntegrationEventHandler<>)))
+                .CommandHandlers(h => h.Implements(typeof(ICommandHandler<>)))
+                .Commands(c => c.NameEndsWith("Command"))
+                .Repositories(r => r.Implements(typeof(IRepository<>)))
+            )
+            .WithSharedAssembly(sharedAssembly)
+            .WithSharedAssembly(GetIntegrationEventsAssembly(), "IntegrationContracts")
+            .WithBoundedContext("Catalog", ctx => ctx
+                .WithDomainAssembly(catalogDomainAssembly))
+            .WithBoundedContext("Shipping", ctx => ctx
+                .WithDomainAssembly(typeof(Shipment).Assembly))
+            .Build();
+
+        var catalog = graph.BoundedContexts.Single(c => c.Name == "Catalog");
+        catalog.Relationships.Should().Contain(r =>
+            r.Kind == RelationshipKind.References &&
+            r.Label == "uses repository" &&
+            r.SourceType.Contains("PlaceOrderCommandHandler", StringComparison.Ordinal) &&
+            r.TargetType.Contains("OrderRepository", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Build_ProductPriceChangedHandler_LinksToRegisterCustomerCommand_AndHandler()
     {
         var graph = BuildExampleGraph();

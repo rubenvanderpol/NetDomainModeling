@@ -264,6 +264,27 @@ internal sealed class AssemblyScanner
 
         CrossReferenceCommandHandlerTargets(commandHandlerTargetNodes, commandHandlerNodes);
 
+        // CommandHandler → repository (constructor / field / property dependency on IRepository<T> or concrete repo; GitHub #51)
+        var aggregateFullNamesForRepos = new HashSet<string>(
+            aggregateNodes.Select(a => a.FullName),
+            StringComparer.Ordinal);
+        foreach (var handlerType in commandHandlerTypes)
+        {
+            foreach (var repoFullName in DetectCommandHandlerRepositoryDependencies(
+                         handlerType,
+                         repositoryNodes,
+                         aggregateFullNamesForRepos))
+            {
+                relationships.Add(new Relationship
+                {
+                    SourceType = handlerType.FullName!,
+                    TargetType = repoFullName,
+                    Kind = RelationshipKind.References,
+                    Label = "uses repository"
+                });
+            }
+        }
+
         // Repository → aggregate
         foreach (var repo in repositoryNodes.Where(r => r.ManagesAggregate is not null))
         {
@@ -629,6 +650,83 @@ internal sealed class AssemblyScanner
                     node.HandledBy.Add(handler.FullName);
             }
         }
+    }
+
+    /// <summary>
+    /// Finds repository dependencies for a command handler: primary constructor parameters, instance fields,
+    /// and instance properties on the declared type. Matches concrete repository classes and closed
+    /// <c>IRepository&lt;TAggregate&gt;</c>-style interfaces that satisfy <see cref="BoundedContextBuilder.RepositoryConvention"/>.
+    /// </summary>
+    private List<string> DetectCommandHandlerRepositoryDependencies(
+        Type handlerType,
+        List<RepositoryNode> repositoryNodes,
+        HashSet<string> aggregateFullNames)
+    {
+        if (repositoryNodes.Count == 0)
+            return [];
+
+        var results = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var repoByFullName = repositoryNodes.ToDictionary(r => r.FullName, StringComparer.Ordinal);
+
+        var reposByAggregate = repositoryNodes
+            .Where(r => r.ManagesAggregate is not null)
+            .GroupBy(r => r.ManagesAggregate!, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.Ordinal);
+
+        void TryAdd(string? repoFullName)
+        {
+            if (repoFullName is null || !repoByFullName.ContainsKey(repoFullName))
+                return;
+            if (seen.Add(repoFullName))
+                results.Add(repoFullName);
+        }
+
+        void ConsiderType(Type? t)
+        {
+            if (t is null)
+                return;
+
+            if (t.FullName is not null && repoByFullName.ContainsKey(t.FullName))
+            {
+                TryAdd(t.FullName);
+                return;
+            }
+
+            // Use the closed generic (e.g. IRepository<Order>): Implements() excludes the open-generic
+            // definition itself (t != interfaceType), so Matches(IRepository<>.GetGenericTypeDefinition()) is always false.
+            if (t is { IsGenericType: true }
+                && t.GetGenericArguments().Length == 1
+                && _config.RepositoryConvention.Matches(t))
+            {
+                var aggFn = t.GetGenericArguments()[0].FullName;
+                if (aggFn is not null
+                    && aggregateFullNames.Contains(aggFn)
+                    && reposByAggregate.TryGetValue(aggFn, out var repos))
+                {
+                    foreach (var r in repos)
+                        TryAdd(r.FullName);
+                }
+            }
+        }
+
+        foreach (var ctor in handlerType.GetConstructors(BindingFlags.Public | BindingFlags.Instance))
+        {
+            foreach (var p in ctor.GetParameters())
+                ConsiderType(p.ParameterType);
+        }
+
+        foreach (var field in handlerType.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.DeclaredOnly))
+            ConsiderType(field.FieldType);
+
+        foreach (var prop in handlerType.GetProperties(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.DeclaredOnly))
+        {
+            if (prop.GetIndexParameters().Length > 0)
+                continue;
+            ConsiderType(prop.PropertyType);
+        }
+
+        return results;
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────

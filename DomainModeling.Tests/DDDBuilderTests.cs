@@ -470,6 +470,22 @@ public class DDDBuilderTests
             r.TargetType.Contains("Order"));
     }
 
+    /// <summary>
+    /// GitHub #51: command handlers that depend on <c>IRepository&lt;TAggregate&gt;</c> should link to the matching repository node.
+    /// </summary>
+    [Fact]
+    public void Build_CommandHandler_LinksToRepository_WhenConstructorUsesIRepository()
+    {
+        var graph = BuildSampleGraph();
+        var ctx = graph.BoundedContexts.Single();
+
+        ctx.Relationships.Should().Contain(r =>
+            r.Kind == RelationshipKind.References &&
+            r.Label == "uses repository" &&
+            r.SourceType.Contains("PlaceOrderCommandHandler", StringComparison.Ordinal) &&
+            r.TargetType.Contains("OrderRepository", StringComparison.Ordinal));
+    }
+
     [Fact]
     public void ToJson_ProducesValidJson()
     {
