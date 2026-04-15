@@ -200,7 +200,10 @@ public sealed class CommandHandlerTargetNode
 
     public List<PropertyInfo> Properties { get; init; } = [];
 
-    /// <summary>Command handlers that reference this type in <see cref="HandlerNode.Handles"/>.</summary>
+    /// <summary>
+    /// Command handlers that reference this type in <see cref="HandlerNode.Handles"/>, and event handlers
+    /// that construct this command type (detected via IL; GitHub #49).
+    /// </summary>
     public List<string> HandledBy { get; init; } = [];
 }
 

@@ -120,7 +120,6 @@ internal sealed class AssemblyScanner
             repositoryNodes,
             domainServiceNodes,
             commandHandlerTargetNodes);
-        CrossReferenceCommandHandlerTargets(commandHandlerTargetNodes, commandHandlerNodes);
 
         // Build relationships
         var relationships = new List<Relationship>();
@@ -225,6 +224,45 @@ internal sealed class AssemblyScanner
                 });
             }
         }
+
+        // EventHandler → command DTO / command handler (IL scan; GitHub #49)
+        var commandTargetFullNames = new HashSet<string>(
+            commandHandlerTargetNodes.Select(t => t.FullName),
+            StringComparer.Ordinal);
+        var commandHandlerFullNames = new HashSet<string>(
+            commandHandlerNodes.Select(h => h.FullName),
+            StringComparer.Ordinal);
+        var commandTargetMap = commandHandlerTargetNodes.ToDictionary(t => t.FullName, StringComparer.Ordinal);
+        foreach (var handlerType in eventHandlerTypes)
+        {
+            var source = handlerType.FullName!;
+            foreach (var cmdFullName in DetectInstantiatedTypes(handlerType, commandTargetFullNames))
+            {
+                relationships.Add(new Relationship
+                {
+                    SourceType = source,
+                    TargetType = cmdFullName,
+                    Kind = RelationshipKind.Handles,
+                    Label = "creates command"
+                });
+                if (commandTargetMap.TryGetValue(cmdFullName, out var targetNode) &&
+                    !targetNode.HandledBy.Contains(source))
+                    targetNode.HandledBy.Add(source);
+            }
+
+            foreach (var (targetFullName, methodName) in DetectInvocationsOnDeclaredTypes(handlerType, commandHandlerFullNames))
+            {
+                relationships.Add(new Relationship
+                {
+                    SourceType = source,
+                    TargetType = targetFullName,
+                    Kind = RelationshipKind.References,
+                    Label = $"invokes {methodName}()"
+                });
+            }
+        }
+
+        CrossReferenceCommandHandlerTargets(commandHandlerTargetNodes, commandHandlerNodes);
 
         // Repository → aggregate
         foreach (var repo in repositoryNodes.Where(r => r.ManagesAggregate is not null))
@@ -1145,22 +1183,80 @@ internal sealed class AssemblyScanner
                 results.Add((targetFullName, methodName));
         }
 
-        ScanTypeMethodsForAggregateCalls(handlerType, aggregateFullNames, OnCall);
+        ScanTypeForInstanceCallsOnTypes(handlerType, aggregateFullNames, OnCall);
 
         foreach (var nested in handlerType.GetNestedTypes(BindingFlags.NonPublic | BindingFlags.Public))
         {
             if (nested.GetCustomAttributes(typeof(CompilerGeneratedAttribute), false).Length == 0)
                 continue;
 
-            ScanTypeMethodsForAggregateCalls(nested, aggregateFullNames, OnCall);
+            ScanTypeForInstanceCallsOnTypes(nested, aggregateFullNames, OnCall);
         }
 
         return results;
     }
 
-    private static void ScanTypeMethodsForAggregateCalls(
+    /// <summary>
+    /// Finds instance method calls whose declaring type is a known command handler type
+    /// (e.g. mediator dispatch to another handler), including inside async state machines.
+    /// </summary>
+    private static List<(string TargetFullName, string MethodName)> DetectInvocationsOnDeclaredTypes(
+        Type handlerType,
+        HashSet<string> declaringTypeFullNames)
+    {
+        var results = new List<(string, string)>();
+        var seen = new HashSet<(string Target, string Method)>();
+
+        void OnCall(string targetFullName, string methodName)
+        {
+            if (seen.Add((targetFullName, methodName)))
+                results.Add((targetFullName, methodName));
+        }
+
+        ScanTypeForInstanceCallsOnTypes(handlerType, declaringTypeFullNames, OnCall);
+
+        foreach (var nested in handlerType.GetNestedTypes(BindingFlags.NonPublic | BindingFlags.Public))
+        {
+            if (nested.GetCustomAttributes(typeof(CompilerGeneratedAttribute), false).Length == 0)
+                continue;
+
+            ScanTypeForInstanceCallsOnTypes(nested, declaringTypeFullNames, OnCall);
+        }
+
+        return results;
+    }
+
+    /// <summary>
+    /// Finds <c>newobj</c> instructions that construct types in <paramref name="typeFullNames"/>
+    /// (e.g. command DTOs created in an event handler).
+    /// </summary>
+    private static List<string> DetectInstantiatedTypes(Type handlerType, HashSet<string> typeFullNames)
+    {
+        var results = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        void OnCtor(string typeFullName)
+        {
+            if (seen.Add(typeFullName))
+                results.Add(typeFullName);
+        }
+
+        ScanTypeForNewObjOfTypes(handlerType, typeFullNames, OnCtor);
+
+        foreach (var nested in handlerType.GetNestedTypes(BindingFlags.NonPublic | BindingFlags.Public))
+        {
+            if (nested.GetCustomAttributes(typeof(CompilerGeneratedAttribute), false).Length == 0)
+                continue;
+
+            ScanTypeForNewObjOfTypes(nested, typeFullNames, OnCtor);
+        }
+
+        return results;
+    }
+
+    private static void ScanTypeForInstanceCallsOnTypes(
         Type type,
-        HashSet<string> aggregateFullNames,
+        HashSet<string> declaringTypeFullNames,
         Action<string, string> onCall)
     {
         var allMethods = type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly)
@@ -1168,13 +1264,13 @@ internal sealed class AssemblyScanner
             .Concat(type.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static));
 
         foreach (var method in allMethods)
-            ScanMethodBodyForCallsOnAggregates(method, type.Module, aggregateFullNames, onCall);
+            ScanMethodBodyForInstanceCallsOnTypes(method, type.Module, declaringTypeFullNames, onCall);
     }
 
-    private static void ScanMethodBodyForCallsOnAggregates(
+    private static void ScanMethodBodyForInstanceCallsOnTypes(
         MethodBase method,
         Module module,
-        HashSet<string> aggregateFullNames,
+        HashSet<string> declaringTypeFullNames,
         Action<string, string> onCall)
     {
         System.Reflection.MethodBody? body;
@@ -1219,10 +1315,74 @@ internal sealed class AssemblyScanner
                 var decl = mi.DeclaringType;
                 if (decl?.FullName is not { } declFullName)
                     continue;
-                if (!aggregateFullNames.Contains(declFullName))
+                if (!declaringTypeFullNames.Contains(declFullName))
                     continue;
 
                 onCall(declFullName, mi.Name);
+            }
+            catch
+            {
+                // Token might not be a method token
+            }
+
+            i += 4;
+        }
+    }
+
+    private static void ScanTypeForNewObjOfTypes(Type type, HashSet<string> typeFullNames, Action<string> onCtor)
+    {
+        var allMethods = type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly)
+            .Cast<MethodBase>()
+            .Concat(type.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static));
+
+        foreach (var method in allMethods)
+            ScanMethodBodyForNewObjOfTypes(method, type.Module, typeFullNames, onCtor);
+    }
+
+    private static void ScanMethodBodyForNewObjOfTypes(
+        MethodBase method,
+        Module module,
+        HashSet<string> typeFullNames,
+        Action<string> onCtor)
+    {
+        System.Reflection.MethodBody? body;
+        try { body = method.GetMethodBody(); }
+        catch { return; }
+
+        if (body is null)
+            return;
+
+        var il = body.GetILAsByteArray();
+        if (il is null)
+            return;
+
+        const byte newobj = 0x73;
+
+        for (var i = 0; i < il.Length; i++)
+        {
+            if (il[i] != newobj)
+                continue;
+
+            if (i + 4 >= il.Length)
+                continue;
+
+            var token = il[i + 1]
+                      | (il[i + 2] << 8)
+                      | (il[i + 3] << 16)
+                      | (il[i + 4] << 24);
+
+            try
+            {
+                var resolved = module.ResolveMethod(token);
+                if (resolved is not ConstructorInfo ctor)
+                    continue;
+                var decl = ctor.DeclaringType;
+                if (decl?.FullName is not { } declFullName)
+                    continue;
+                if (!typeFullNames.Contains(declFullName))
+                    continue;
+
+                onCtor(declFullName);
             }
             catch
             {

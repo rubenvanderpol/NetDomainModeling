@@ -194,11 +194,15 @@ public sealed class Invoice : BaseAggregateRoot
 
 public class OrderPlacedHandler : IEventHandler<OrderPlacedEvent>
 {
+    private readonly PlaceOrderCommandHandler _followUpCommandHandler = new();
+
     public Task HandleAsync(OrderPlacedEvent @event, CancellationToken ct = default)
     {
         // Publish integration event
         var integrationEvent = new OrderPlacedIntegrationEvent { OrderId = @event.OrderId };
-        return Task.CompletedTask;
+        // Issue #49: event handler creates a command and may delegate to another command handler
+        _ = new PlaceOrderCommand(Guid.Empty, []);
+        return _followUpCommandHandler.HandleAsync(new PlaceOrderCommand(@event.OrderId, []), ct);
     }
 }
 
