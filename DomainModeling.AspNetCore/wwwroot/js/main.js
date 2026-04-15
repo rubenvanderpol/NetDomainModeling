@@ -1,13 +1,14 @@
 /**
  * Main entry point — wires up data loading, navigation, sidebar, and views.
  */
-import { esc, escAttr, shortName, ALL_SECTIONS, SECTION_META } from './helpers.js';
+import { esc, escAttr, shortName, ALL_SECTIONS, SECTION_META, SECTION_TO_DIAGRAM_KIND } from './helpers.js';
 import { renderDetailView } from './views.js';
 import {
   renderDiagramView, initDiagram, diagramZoom, diagramFit, diagramResetLayout, diagramToggleKind, diagramShowAll,
   diagramDownloadSvg, diagramToggleAliases, diagramToggleLayers, diagramToggleEdgeKind, diagramToggleEdgeFilter,
   diagramToggleKindFilter, diagramShowAllKinds, diagramHideAllKinds, setDiagramLayoutBaseUrl, setServerDiagramLayoutCache,
-  setDiagramNodeHidden, isDiagramNodeHidden, getDiagramState,
+  isDiagramNodeHidden, getDiagramState, metadataImpliesDiagramHiddenByDefault, reapplyDiagramVisibilityAfterMetadataChange,
+  removeLegacyHiddenNodeId,
 } from './diagram.js';
 
 const API_URL = window.__config?.apiUrl || '/domain-model/json';
@@ -26,22 +27,6 @@ let metadata = {};
 const STORAGE_KEY = 'domainModelSelectedContexts';
 // Legacy browser persistence key (migration-only).
 const METADATA_STORAGE_KEY = 'domainModelMetadata';
-
-/** Maps explorer section keys to diagram node `kind` strings (see `diagram.js` KIND_CFG). */
-const SECTION_TO_DIAGRAM_KIND = {
-  aggregates: 'aggregate',
-  entities: 'entity',
-  valueObjects: 'valueObject',
-  subTypes: 'subType',
-  domainEvents: 'event',
-  integrationEvents: 'integrationEvent',
-  commandHandlerTargets: 'commandHandlerTarget',
-  eventHandlers: 'eventHandler',
-  commandHandlers: 'commandHandler',
-  queryHandlers: 'queryHandler',
-  repositories: 'repository',
-  domainServices: 'service',
-};
 
 let data = null;
 let selectedContextNames = new Set();
@@ -286,8 +271,8 @@ function renderSidebar() {
           const dk = SECTION_TO_DIAGRAM_KIND[sec.key];
           const hidden = dk && isNavDiagramHidden(dk, item.fullName);
           const visTitle = hidden
-            ? 'Show on diagram (type may still be hidden via diagram filters)'
-            : 'Hide from diagram';
+            ? 'Show on main diagram'
+            : 'Hide from main diagram';
           return `
           <div class="nav-item nav-item-with-diagram-toggle${isActive(sec.key, item) ? ' active' : ''}"
                data-fullname="${escAttr(item.fullName)}">
@@ -364,14 +349,52 @@ function syncExplorerDiagramHideCheckboxes() {
     const lab = row.querySelector('.nav-diagram-visibility');
     if (lab) {
       lab.title = hidden
-        ? 'Show on diagram (type may still be hidden via diagram filters)'
-        : 'Hide from diagram';
+        ? 'Show on main diagram'
+        : 'Hide from main diagram';
     }
   }
 }
 
-function toggleDiagramVisibility(fullName, visible) {
-  setDiagramNodeHidden(fullName, !visible);
+function metadataEntryIsEmpty(entry) {
+  if (!entry || typeof entry !== 'object') return true;
+  const a = entry.alias && String(entry.alias).trim();
+  const d = entry.description && String(entry.description).trim();
+  if (a || d) return false;
+  if (entry.hiddenOnDiagram === true || entry.hiddenOnDiagram === false) return false;
+  return true;
+}
+
+async function persistMetadata(fullName, entry) {
+  if (metadataEntryIsEmpty(entry)) {
+    delete metadata[fullName];
+  } else {
+    metadata[fullName] = entry;
+  }
+  window.__metadata = metadata;
+
+  try {
+    if (metadataEntryIsEmpty(entry)) {
+      await fetch(`${BASE_URL}/metadata/${encodeURIComponent(fullName)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ alias: null, description: null, hiddenOnDiagram: null }),
+      });
+    } else {
+      await fetch(`${BASE_URL}/metadata/${encodeURIComponent(fullName)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(entry),
+      });
+    }
+  } catch { /* server unreachable */ }
+}
+
+async function toggleDiagramVisibility(fullName, visible) {
+  const prev = metadata[fullName] || {};
+  const next = { ...prev, hiddenOnDiagram: visible ? false : true };
+  removeLegacyHiddenNodeId(fullName);
+  await persistMetadata(fullName, next);
+  reapplyDiagramVisibilityAfterMetadataChange();
 }
 
 function renderMain() {
@@ -415,24 +438,19 @@ function renderMain() {
 // ── Metadata persistence ─────────────────────────────
 
 async function saveMetadata(fullName, alias, description) {
-  const entry = { alias: alias || null, description: description || null };
-
-  // Always update local state (server persistence is handled via PUT)
-  if ((!alias || !alias.trim()) && (!description || !description.trim())) {
-    delete metadata[fullName];
-  } else {
-    metadata[fullName] = entry;
+  const prev = metadata[fullName] || {};
+  const next = {
+    ...prev,
+    alias: alias && String(alias).trim() ? alias : null,
+    description: description && String(description).trim() ? description : null,
+  };
+  if (!metadataImpliesDiagramHiddenByDefault(next)) {
+    delete next.hiddenOnDiagram;
+  } else if (next.hiddenOnDiagram === undefined) {
+    next.hiddenOnDiagram = true;
   }
-  window.__metadata = metadata;
-
-  // Best-effort sync to server
-  try {
-    await fetch(`${BASE_URL}/metadata/${encodeURIComponent(fullName)}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(entry),
-    });
-  } catch { /* server unreachable */ }
+  await persistMetadata(fullName, next);
+  reapplyDiagramVisibilityAfterMetadataChange();
 }
 
 // ── Navigation (exposed as window.__nav) ─────────────

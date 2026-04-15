@@ -245,35 +245,55 @@ function saveHiddenNodeIds(hiddenNodeIds) {
   scheduleFlushDiagramLayout();
 }
 
-/** @returns {boolean} */
+/**
+ * Whether custom metadata (alias/description) implies the type should default to hidden on the diagram
+ * until the user opts in with `hiddenOnDiagram: false`.
+ */
+export function metadataImpliesDiagramHiddenByDefault(meta) {
+  if (!meta || typeof meta !== 'object') return false;
+  const a = typeof meta.alias === 'string' ? meta.alias.trim() : '';
+  const d = typeof meta.description === 'string' ? meta.description.trim() : '';
+  return a.length > 0 || d.length > 0;
+}
+
+/**
+ * Effective per-type hide on the main diagram: kind filters are applied separately.
+ * Uses `window.__metadata` for `hiddenOnDiagram` and custom-metadata defaults; merges legacy `hiddenNodeIds` from layout.
+ * @param {string} nodeId
+ * @returns {boolean} true if this node should not appear on the diagram (when its kind is visible).
+ */
 export function isDiagramNodeHidden(nodeId) {
-  if (dgState && dgState.hiddenNodeIds) {
-    return dgState.hiddenNodeIds.has(nodeId);
-  }
+  const meta = (typeof window !== 'undefined' && window.__metadata && window.__metadata[nodeId]) || null;
+  if (meta && meta.hiddenOnDiagram === false) return false;
+  if (meta && meta.hiddenOnDiagram === true) return true;
+  if (metadataImpliesDiagramHiddenByDefault(meta)) return true;
+  if (dgState && dgState.hiddenNodeIds) return dgState.hiddenNodeIds.has(nodeId);
   return loadHiddenNodeIds().has(nodeId);
 }
 
 /**
- * Hide or show a single type on the main diagram (persists with diagram layout).
- * @param {string} nodeId Full type name (diagram node id).
- * @param {boolean} hidden When true, the node is hidden (if its kind is visible).
+ * Re-run visibility after metadata changes (does not reload layout from disk).
  */
-export function setDiagramNodeHidden(nodeId, hidden) {
+export function reapplyDiagramVisibilityAfterMetadataChange() {
+  if (!dgState) return;
+  applyDiagramVisibility();
+  renderSvg();
+  syncDiagramKindFilterUi();
+  if (typeof window.__onDiagramHiddenNodesChanged === 'function') {
+    window.__onDiagramHiddenNodesChanged();
+  }
+}
+
+/** Remove id from legacy per-layout hidden list (superseded by metadata.hiddenOnDiagram). */
+export function removeLegacyHiddenNodeId(nodeId) {
   if (typeof nodeId !== 'string' || !nodeId) return;
-  if (dgState && dgState.hiddenNodeIds) {
-    if (hidden) dgState.hiddenNodeIds.add(nodeId);
-    else dgState.hiddenNodeIds.delete(nodeId);
+  if (dgState && dgState.hiddenNodeIds && dgState.hiddenNodeIds.has(nodeId)) {
+    dgState.hiddenNodeIds.delete(nodeId);
     saveHiddenNodeIds(dgState.hiddenNodeIds);
-    applyDiagramVisibility();
-    renderSvg();
-    syncDiagramKindFilterUi();
-    if (typeof window.__onDiagramHiddenNodesChanged === 'function') {
-      window.__onDiagramHiddenNodesChanged();
-    }
   } else {
     const set = loadHiddenNodeIds();
-    if (hidden) set.add(nodeId);
-    else set.delete(nodeId);
+    if (!set.has(nodeId)) return;
+    set.delete(nodeId);
     saveHiddenNodeIds(set);
   }
 }
@@ -904,7 +924,7 @@ function applyDiagramVisibility() {
   const visibleIds = new Set();
   dgState.nodes = dgState.allNodes.filter(n => {
     if (dgState.hiddenKinds.has(n.kind)) return false;
-    if (dgState.hiddenNodeIds.has(n.id)) return false;
+    if (isDiagramNodeHidden(n.id)) return false;
     visibleIds.add(n.id);
     return true;
   });

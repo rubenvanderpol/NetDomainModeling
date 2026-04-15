@@ -262,7 +262,10 @@ public static class DomainModelEndpointExtensions
             var safeFileName = EncodeMetadataFileName(fullName);
             var path = Path.Combine(metadataDir, safeFileName + ".json");
 
-            if (string.IsNullOrWhiteSpace(entry.Alias) && string.IsNullOrWhiteSpace(entry.Description))
+            var hasAlias = !string.IsNullOrWhiteSpace(entry.Alias);
+            var hasDescription = !string.IsNullOrWhiteSpace(entry.Description);
+            var hasDiagramFlag = entry.HiddenOnDiagram.HasValue;
+            if (!hasAlias && !hasDescription && !hasDiagramFlag)
             {
                 metadata.TryRemove(fullName, out _);
                 if (File.Exists(path)) File.Delete(path);
