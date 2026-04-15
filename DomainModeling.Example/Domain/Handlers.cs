@@ -18,6 +18,22 @@ public class OrderPlacedHandler : IEventHandler<OrderPlacedEvent>
     }
 }
 
+/// <summary>
+/// Example of an event handler that issues another command: the domain explorer shows
+/// <c>Handles</c> edges to the command DTO and <c>References</c> to the command handler (see GitHub #49).
+/// </summary>
+public class ProductPriceChangedHandler : IEventHandler<ProductPriceChangedEvent>
+{
+    private readonly RegisterCustomerCommandHandler _registerCustomer = new();
+
+    public Task HandleAsync(ProductPriceChangedEvent @event, CancellationToken ct = default)
+    {
+        // Illustrative follow-up command (e.g. notify marketing when pricing changes)
+        var cmd = new RegisterCustomerCommand("Price watcher", "pricing@example.com");
+        return _registerCustomer.HandleAsync(cmd, ct);
+    }
+}
+
 public class SendShipmentNotificationHandler : IEventHandler<OrderShippedEvent>
 {
     public Task HandleAsync(OrderShippedEvent @event, CancellationToken ct = default)

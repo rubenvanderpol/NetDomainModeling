@@ -100,6 +100,27 @@ public class ExampleAppGraphTests
             r.Label.Contains("Place", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public void Build_ProductPriceChangedHandler_LinksToRegisterCustomerCommand_AndHandler()
+    {
+        var graph = BuildExampleGraph();
+        var catalog = graph.BoundedContexts.Single(c => c.Name == "Catalog");
+
+        var target = catalog.CommandHandlerTargets.Single(t => t.Name == "RegisterCustomerCommand");
+        target.HandledBy.Should().Contain(h => h.Contains("ProductPriceChangedHandler", StringComparison.Ordinal));
+
+        catalog.Relationships.Should().Contain(r =>
+            r.Kind == RelationshipKind.Handles &&
+            r.SourceType.Contains("ProductPriceChangedHandler", StringComparison.Ordinal) &&
+            r.TargetType.Contains("RegisterCustomerCommand", StringComparison.Ordinal) &&
+            r.Label == "creates command");
+
+        catalog.Relationships.Should().Contain(r =>
+            r.Kind == RelationshipKind.References &&
+            r.SourceType.Contains("ProductPriceChangedHandler", StringComparison.Ordinal) &&
+            r.TargetType.Contains("RegisterCustomerCommandHandler", StringComparison.Ordinal));
+    }
+
     private static DomainGraph BuildExampleGraph()
     {
         var catalogDomainAssembly = typeof(Product).Assembly;
