@@ -106,6 +106,32 @@ public class DDDBuilderTests
             r.TargetType.Contains("PlaceOrderCommand"));
     }
 
+    /// <summary>
+    /// GitHub #49: event handlers that construct command DTOs or call another command handler should surface graph links.
+    /// </summary>
+    [Fact]
+    public void Build_EventHandler_LinksToCommandTarget_AndReferencedCommandHandler()
+    {
+        var graph = BuildSampleGraph();
+        var ctx = graph.BoundedContexts.Single();
+
+        var placeOrderCmd = ctx.CommandHandlerTargets.Single(t => t.Name == "PlaceOrderCommand");
+        placeOrderCmd.HandledBy.Should().Contain(h => h.Contains("OrderPlacedHandler"));
+
+        ctx.Relationships.Should().Contain(r =>
+            r.Kind == RelationshipKind.Handles &&
+            r.SourceType.Contains("OrderPlacedHandler") &&
+            r.TargetType.Contains("PlaceOrderCommand") &&
+            r.Label == "creates command");
+
+        ctx.Relationships.Should().Contain(r =>
+            r.Kind == RelationshipKind.References &&
+            r.SourceType.Contains("OrderPlacedHandler") &&
+            r.TargetType.Contains("PlaceOrderCommandHandler") &&
+            r.Label != null &&
+            r.Label.Contains("HandleAsync", StringComparison.Ordinal));
+    }
+
     [Fact]
     public void Build_CommandsConvention_SurfacesCommandTypesWithoutHandlers()
     {
