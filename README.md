@@ -120,6 +120,23 @@ The link word **`emits`** is required for **method** blocks that should create *
 
 The scanner derives many edges from **metadata** (interfaces, properties, generic arguments on repositories). It also uses **IL inspection** where needed—for example domain event construction inside methods, integration events published from handlers, and aggregate method calls from command handlers—so the picture stays closer to real control flow than naming alone.
 
+#### How links between types are detected
+
+Relationships are edges in `DomainGraph.Relationships` with a `RelationshipKind`. Only types that match your **configured conventions** participate as nodes; edges are inferred as follows.
+
+| Kind | Detection |
+|------|-----------|
+| **Contains** | An aggregate has a public instance property whose type (or collection element type) is a classified **entity**—those entities are treated as children of the aggregate. |
+| **Has** / **HasMany** | On entities, aggregates, value objects, command-handler targets, and discovered **sub-types** (custom property types that are not framework primitives): a public instance property whose type is another **known domain type**, or a **custom** non-primitive type in your assemblies (not `System.*` / `Microsoft.*`), yields an edge labeled with the property name. Collections use **HasMany**; scalars use **Has**. |
+| **ReferencesById** | If a property is named `{Something}Id` (suffix `Id`), has no object reference above, and `{Something}` matches the **name** of a classified entity or aggregate, an association to that type is inferred (foreign-key style). |
+| **Handles** | For event, command, and query handlers: types taken from **generic arguments** of implemented interfaces (for example `IHandler<T>`), or—if none are found—from **public method parameters** that match known domain types. Event handlers also get **Handles** to command DTOs when IL shows **`new`** on those types. |
+| **References** | **Command handlers** calling **instance methods** on classified aggregates (for example `order.Place()`), including inside async state machines. **Event handlers** calling instance methods on **command handler** types (for example dispatching to another handler). |
+| **Manages** | **Repositories**: the aggregate type is taken from a **generic interface argument** on `IRepository<T>`-style interfaces that matches a classified aggregate. |
+| **Emits** | **Domain events** constructed in entity/aggregate IL (`new` / calls resolved to event constructors), including compiler-generated nested types for async/lambdas, merged with **`<domain>emits`** documentation on methods and optional **type-level** documented emissions. |
+| **Publishes** | **Integration events** constructed in event-handler IL (same emission scan as domain events, applied to integration event types). |
+
+Cross-references on event nodes (who emits or handles an event) are derived from these same rules. Command DTOs surfaced via `.Commands(...)` appear as nodes so **Handles** edges from handlers have endpoints even when nothing else references the type yet.
+
 ### 4. Optional: ASP.NET Core explorer
 
 ```csharp
