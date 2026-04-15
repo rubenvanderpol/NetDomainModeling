@@ -90,6 +90,10 @@ ASALocalRun/
 # Node.js Tools for Visual Studio
 node_modules/
 
+# diagram-poc (Electron / Vite build output)
+diagram-poc/dist/
+diagram-poc/renderer/dist/
+
 # Yarn
 .yarn/
 .pnp.*

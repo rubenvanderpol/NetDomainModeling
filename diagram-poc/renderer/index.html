@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Diagram POC</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        font-family: system-ui, sans-serif;
+        background: #020617;
+        color: #e2e8f0;
+      }
+      #app {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+      }
+      header {
+        padding: 10px 16px;
+        border-bottom: 1px solid #334155;
+        background: #0f172a;
+        font-size: 14px;
+      }
+      #diagram-root {
+        flex: 1;
+        min-height: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <header>Configurable graph diagram (POC) — kinds come from theme + graph JSON</header>
+      <div id="diagram-root"></div>
+    </div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
