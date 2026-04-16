@@ -186,16 +186,11 @@ public class ExampleAppGraphTests
         var graph = BuildExampleGraph();
         var catalog = graph.BoundedContexts.Single(c => c.Name == "Catalog");
 
-        // IL records closed-generic construction, but the graph merges emissions onto the open generic
-        // event node when no separate closed-generic node exists (see DDDBuilderTests generic event tests).
-        var entityDeletedOpen = catalog.DomainEvents.Single(e =>
-            e.Name.StartsWith("EntityDeletedEvent", StringComparison.Ordinal) &&
-            !e.Name.Contains('<', StringComparison.Ordinal));
-
-        entityDeletedOpen.EmittedBy.Should().Contain(e => e.Contains("Organization", StringComparison.Ordinal));
-        entityDeletedOpen.HandledBy.Should().Contain(h => h.Contains("OrganizationDeletedHandler", StringComparison.Ordinal));
+        var deletedOrg = catalog.DomainEvents.Single(e => e.Name == "EntityDeletedEvent<Organization>");
+        deletedOrg.EmittedBy.Should().Contain(e => e.Contains("Organization", StringComparison.Ordinal));
+        deletedOrg.HandledBy.Should().Contain(h => h.Contains("OrganizationDeletedHandler", StringComparison.Ordinal));
 
         var org = catalog.Aggregates.Single(a => a.Name == "Organization");
-        org.EmittedEvents.Should().Contain(entityDeletedOpen.FullName);
+        org.EmittedEvents.Should().Contain(deletedOrg.FullName);
     }
 }

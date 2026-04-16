@@ -72,11 +72,12 @@ public class DDDBuilderTests
         var graph = BuildSampleGraph();
         var ctx = graph.BoundedContexts.Single();
 
-        ctx.DomainEvents.Should().HaveCount(6);
+        ctx.DomainEvents.Should().HaveCount(7);
         ctx.DomainEvents.Select(e => e.Name).Should()
             .Contain(["OrderPlacedEvent", "OrderShippedEvent", "CustomerCreatedEvent", "InvoiceCreatedEvent"]);
         ctx.DomainEvents.Should().Contain(e => e.Name.StartsWith("EntityDeletedEvent", StringComparison.Ordinal));
         ctx.DomainEvents.Should().Contain(e => e.Name == "EntityDeletedEvent<Customer>");
+        ctx.DomainEvents.Should().Contain(e => e.Name == "EntityDeletedEvent<Order>");
     }
 
     [Fact]

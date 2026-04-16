@@ -93,6 +93,14 @@ internal sealed class AssemblyScanner
                 _documentationIndexer);
         }
 
+        MergeSyntheticClosedGenericEventNodesFromEmittedKeys(
+            entityNodes,
+            aggregateNodes,
+            domainEventTypes,
+            domainEventNodes,
+            knownDomainTypes,
+            eventHandlerNodes);
+
         var commandHandlerTargetNodes = DiscoverCommandHandlerTargets(
             allTypes,
             knownDomainTypes,
@@ -175,6 +183,7 @@ internal sealed class AssemblyScanner
 
         // Wire emittedBy / handledBy on domain event nodes
         CrossReferenceEvents(domainEventNodes, entityNodes, aggregateNodes, eventHandlerNodes);
+        MergeClosedGenericHandledByOntoOpenGenericDefinition(domainEventNodes);
 
         // Detect which integration events are published by event handlers (IL scanning)
         var integrationEventFullNames = new HashSet<string>(integrationEventTypesAll.Select(e => e.FullName!));
@@ -840,12 +849,12 @@ internal sealed class AssemblyScanner
         foreach (var method in allMethods)
         {
             var methodName = NormalizeMethodName(method, fallbackMethodName: null);
-            foreach (var documentedEvent in documentationIndexer.TryGetDocumentedEmissions(declaringType, methodName))
-            {
-                var key = ResolveCanonicalEventKey(documentedEvent, eventFullNames);
-                if (key is not null)
-                    AddEventEmission(emittedByMethod, key, methodName);
-            }
+                foreach (var documentedEvent in documentationIndexer.TryGetDocumentedEmissions(declaringType, methodName))
+                {
+                    var key = ResolveCanonicalEventKey(documentedEvent, eventFullNames);
+                    if (key is not null)
+                        RecordEventEmissionForGraph(emittedByMethod, key, methodName);
+                }
         }
     }
 
@@ -919,9 +928,9 @@ internal sealed class AssemblyScanner
                 var resolved = module.ResolveMethod(token);
                 if (resolved?.DeclaringType?.FullName is { } fullName)
                 {
-                    var key = ResolveCanonicalEventKey(fullName, eventFullNames);
+                    var key = ResolveEmissionEventKey(fullName, eventFullNames);
                     if (key is not null)
-                        AddEventEmission(emittedByMethod, key, sourceMethodName);
+                        RecordEventEmissionForGraph(emittedByMethod, key, sourceMethodName);
                 }
             }
             catch
@@ -941,10 +950,10 @@ internal sealed class AssemblyScanner
     {
         if (type.FullName is not null)
         {
-            var key = ResolveCanonicalEventKey(type.FullName, eventFullNames);
+            var key = ResolveEmissionEventKey(type.FullName, eventFullNames);
             if (key is not null)
             {
-                AddEventEmission(emittedByMethod, key, sourceMethodName);
+                RecordEventEmissionForGraph(emittedByMethod, key, sourceMethodName);
                 return;
             }
         }
@@ -968,6 +977,34 @@ internal sealed class AssemblyScanner
         }
 
         methods.Add(methodName);
+    }
+
+    /// <summary>
+    /// Records an emission keyed for graph cross-reference. Constructed generic emissions are also registered
+    /// under the open generic definition so <see cref="DomainEventNode.EmittedBy"/> is populated for both nodes.
+    /// </summary>
+    private static void RecordEventEmissionForGraph(
+        Dictionary<string, HashSet<string>> emittedByMethod,
+        string resolvedKey,
+        string methodName)
+    {
+        var key = resolvedKey;
+        if (key.Contains("[[", StringComparison.Ordinal))
+        {
+            var shortForm = ToCanonicalClosedGenericFullName(key);
+            if (shortForm is not null)
+                key = shortForm;
+        }
+
+        AddEventEmission(emittedByMethod, key, methodName);
+
+        var bracket = key.IndexOf("[[", StringComparison.Ordinal);
+        if (bracket >= 0)
+        {
+            var def = key[..bracket];
+            if (!string.Equals(def, key, StringComparison.Ordinal))
+                AddEventEmission(emittedByMethod, def, methodName);
+        }
     }
 
     private static string NormalizeMethodName(MethodBase method, string? fallbackMethodName)
@@ -1030,6 +1067,35 @@ internal sealed class AssemblyScanner
     }
 
     /// <summary>
+    /// Copies <see cref="DomainEventNode.HandledBy"/> from closed-generic event nodes onto the open generic
+    /// definition node so the diagram lists all handlers in one place (e.g. Organization + Customer handlers
+    /// on <c>EntityDeletedEvent`1</c>).
+    /// </summary>
+    private static void MergeClosedGenericHandledByOntoOpenGenericDefinition(List<DomainEventNode> eventNodes)
+    {
+        var byFullName = eventNodes.ToDictionary(e => e.FullName, StringComparer.Ordinal);
+        foreach (var node in eventNodes)
+        {
+            if (node.HandledBy.Count == 0)
+                continue;
+
+            var bracket = node.FullName.IndexOf("[[", StringComparison.Ordinal);
+            if (bracket < 0)
+                continue;
+
+            var defName = node.FullName[..bracket];
+            if (!byFullName.TryGetValue(defName, out var defNode))
+                continue;
+
+            foreach (var h in node.HandledBy)
+            {
+                if (!defNode.HandledBy.Contains(h))
+                    defNode.HandledBy.Add(h);
+            }
+        }
+    }
+
+    /// <summary>
     /// For constructed generic CLR names, the open generic definition is the prefix before type arguments (<c>[[...]]</c>).
     /// Handlers and IL often use the constructed form while the graph node is the generic type definition.
     /// Also matches CLR reflection names against canonical short-form constructed generics (e.g.
@@ -1054,6 +1120,159 @@ internal sealed class AssemblyScanner
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Like <see cref="ResolveCanonicalEventKey"/> but prefers the constructed generic CLR name when the
+    /// open generic definition is registered, so emissions and graph edges target the closed type
+    /// (e.g. <c>EntityDeletedEvent`1[[Organization]]</c>) rather than collapsing to <c>EntityDeletedEvent`1</c>.
+    /// </summary>
+    private static string? ResolveEmissionEventKey(string typeFullName, HashSet<string> registeredEventFullNames)
+    {
+        if (registeredEventFullNames.Contains(typeFullName))
+            return typeFullName;
+
+        var bracket = typeFullName.IndexOf("[[", StringComparison.Ordinal);
+        if (bracket >= 0)
+        {
+            var canonical = ToCanonicalClosedGenericFullName(typeFullName);
+            if (canonical is not null && registeredEventFullNames.Contains(canonical))
+                return canonical;
+
+            var def = typeFullName[..bracket];
+            if (registeredEventFullNames.Contains(def))
+                return typeFullName;
+        }
+
+        return ResolveCanonicalEventKey(typeFullName, registeredEventFullNames);
+    }
+
+    /// <summary>
+    /// Builds a C#-style display name (e.g. <c>EntityDeletedEvent&lt;Organization&gt;</c>) from a short canonical
+    /// constructed generic <see cref="Type.FullName"/> such as <c>Ns.EntityDeletedEvent`1[[Ns.Organization]]</c>.
+    /// </summary>
+    private static string FormatClosedGenericDisplayName(string canonicalConstructedClrFullName)
+    {
+        var tick = canonicalConstructedClrFullName.IndexOf('`');
+        if (tick < 0)
+            return canonicalConstructedClrFullName;
+
+        var defFqn = canonicalConstructedClrFullName[..tick];
+        var simpleDef = defFqn.Contains('.', StringComparison.Ordinal)
+            ? defFqn[(defFqn.LastIndexOf('.') + 1)..]
+            : defFqn;
+
+        var innerStart = canonicalConstructedClrFullName.IndexOf("[[", StringComparison.Ordinal);
+        if (innerStart < 0)
+            return StripGenericArity(simpleDef);
+
+        var args = new List<string>();
+        var i = innerStart + 1;
+        while (i < canonicalConstructedClrFullName.Length)
+        {
+            if (canonicalConstructedClrFullName[i] != '[')
+            {
+                i++;
+                continue;
+            }
+
+            i++;
+            var argStart = i;
+            var depth = 1;
+            while (i < canonicalConstructedClrFullName.Length && depth > 0)
+            {
+                if (canonicalConstructedClrFullName[i] == '[') depth++;
+                else if (canonicalConstructedClrFullName[i] == ']') depth--;
+                i++;
+            }
+
+            var argSegment = canonicalConstructedClrFullName[argStart..(i - 1)];
+            var comma = argSegment.IndexOf(',', StringComparison.Ordinal);
+            var argType = (comma >= 0 ? argSegment[..comma] : argSegment).Trim();
+            var shortArg = argType.Contains('.', StringComparison.Ordinal)
+                ? argType[(argType.LastIndexOf('.') + 1)..]
+                : argType;
+            args.Add(shortArg);
+
+            if (i < canonicalConstructedClrFullName.Length && canonicalConstructedClrFullName[i] == ',')
+                i++;
+        }
+
+        return args.Count == 0
+            ? StripGenericArity(simpleDef)
+            : $"{StripGenericArity(simpleDef)}<{string.Join(", ", args)}>";
+    }
+
+    /// <summary>
+    /// Ensures each distinct closed-generic emission key (from IL) has a <see cref="DomainEventNode"/> with a
+    /// C#-style <see cref="DomainEventNode.Name"/>, and remaps handler <c>Handles</c> to that canonical key when applicable.
+    /// </summary>
+    private static void MergeSyntheticClosedGenericEventNodesFromEmittedKeys(
+        List<EntityNode> entityNodes,
+        List<AggregateNode> aggregateNodes,
+        List<Type> domainEventDefinitions,
+        List<DomainEventNode> domainEventNodes,
+        HashSet<string> knownDomainTypes,
+        List<HandlerNode> eventHandlerNodes)
+    {
+        var existingEventFullNames = new HashSet<string>(domainEventNodes.Select(e => e.FullName), StringComparer.Ordinal);
+        var defFullNames = new HashSet<string>(domainEventDefinitions.Select(t => t.FullName!), StringComparer.Ordinal);
+
+        IEnumerable<string> AllEmittedKeys()
+        {
+            foreach (var n in entityNodes)
+            {
+                foreach (var e in n.EmittedEvents)
+                    yield return e;
+                foreach (var em in n.EventEmissions)
+                    yield return em.EventType;
+            }
+
+            foreach (var n in aggregateNodes)
+            {
+                foreach (var e in n.EmittedEvents)
+                    yield return e;
+                foreach (var em in n.EventEmissions)
+                    yield return em.EventType;
+            }
+        }
+
+        foreach (var key in AllEmittedKeys().Distinct(StringComparer.Ordinal))
+        {
+            if (!key.Contains("[[", StringComparison.Ordinal))
+                continue;
+
+            var canonical = ToCanonicalClosedGenericFullName(key);
+            if (canonical is null || existingEventFullNames.Contains(canonical))
+                continue;
+
+            var bracket = canonical.IndexOf("[[", StringComparison.Ordinal);
+            if (bracket < 0)
+                continue;
+
+            var defPrefix = canonical[..bracket];
+            if (!defFullNames.Contains(defPrefix))
+                continue;
+
+            domainEventNodes.Add(new DomainEventNode
+            {
+                Name = FormatClosedGenericDisplayName(canonical),
+                FullName = canonical,
+            });
+            existingEventFullNames.Add(canonical);
+            knownDomainTypes.Add(canonical);
+        }
+
+        var eventFullNames = new HashSet<string>(existingEventFullNames, StringComparer.Ordinal);
+        foreach (var handler in eventHandlerNodes)
+        {
+            for (var i = 0; i < handler.Handles.Count; i++)
+            {
+                var resolved = ResolveCanonicalEventKey(handler.Handles[i], eventFullNames);
+                if (resolved is not null)
+                    handler.Handles[i] = resolved;
+            }
+        }
     }
 
     /// <summary>
