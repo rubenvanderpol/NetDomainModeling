@@ -11,7 +11,13 @@ public abstract class AggregateRoot : Entity
 {
     private readonly List<DomainEvent> _events = [];
     public IReadOnlyCollection<DomainEvent> Events => _events.AsReadOnly();
-    protected void Raise(DomainEvent @event) => _events.Add(@event);
+
+    /// <summary>
+    /// Records a domain event raised by this aggregate (alias for the common <c>Raise</c> pattern).
+    /// </summary>
+    protected void AddDomainEvent(DomainEvent @event) => _events.Add(@event);
+
+    protected void Raise(DomainEvent @event) => AddDomainEvent(@event);
 }
 
 public abstract class DomainEvent

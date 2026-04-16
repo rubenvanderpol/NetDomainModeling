@@ -49,4 +49,17 @@ public sealed class CustomerRegisteredEvent : DomainEvent
 public sealed class EntityDeletedEvent<TEntity> : DomainEvent where TEntity : Entity
 {
     public Guid EntityId { get; init; }
+
+    public EntityDeletedEvent()
+    {
+    }
+
+    /// <summary>
+    /// Captures the deleted entity's id, e.g. <c>AddDomainEvent(new EntityDeletedEvent&lt;Organization&gt;(this))</c>.
+    /// </summary>
+    public EntityDeletedEvent(TEntity entity)
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+        EntityId = entity.Id;
+    }
 }

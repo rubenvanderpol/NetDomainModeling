@@ -74,3 +74,19 @@ public class Customer : AggregateRoot
         Raise(new CustomerRegisteredEvent { CustomerId = Id });
     }
 }
+
+/// <summary>
+/// Example aggregate that raises a closed generic domain event via <see cref="AggregateRoot.AddDomainEvent"/>.
+/// </summary>
+public class Organization : AggregateRoot
+{
+    public required string Name { get; init; }
+
+    /// <summary>
+    /// Illustrates tracking a generic domain event from the aggregate instance.
+    /// </summary>
+    public void Archive()
+    {
+        AddDomainEvent(new EntityDeletedEvent<Organization>(this));
+    }
+}

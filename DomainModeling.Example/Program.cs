@@ -47,6 +47,7 @@ builder.Services.AddMediatR(cfg =>
 // Register in-memory repositories
 builder.Services.AddSingleton<IRepository<Order>, OrderRepository>();
 builder.Services.AddSingleton<IRepository<Customer>, CustomerRepository>();
+builder.Services.AddSingleton<IRepository<Organization>, OrganizationRepository>();
 builder.Services.AddSingleton<IRepository<Product>, ProductRepository>();
 builder.Services.AddSingleton<IRepository<Shipment>, ShipmentRepository>();
 builder.Services.AddSingleton<IRepository<Carrier>, CarrierRepository>();

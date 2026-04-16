@@ -52,6 +52,12 @@ public class CustomerDeletedHandler : IEventHandler<EntityDeletedEvent<Customer>
         => Task.CompletedTask;
 }
 
+public class OrganizationDeletedHandler : IEventHandler<EntityDeletedEvent<Organization>>
+{
+    public Task HandleAsync(EntityDeletedEvent<Organization> @event, CancellationToken ct = default)
+        => Task.CompletedTask;
+}
+
 // ─── Command handlers ────────────────────────────────────────────
 
 public record PlaceOrderCommand(Guid CustomerId, List<string> Products);
@@ -84,4 +90,5 @@ public class RegisterCustomerCommandHandler : ICommandHandler<RegisterCustomerCo
 
 public class OrderRepository : InMemoryRepository<Order>;
 public class CustomerRepository : InMemoryRepository<Customer>;
+public class OrganizationRepository : InMemoryRepository<Organization>;
 public class ProductRepository : InMemoryRepository<Product>;
