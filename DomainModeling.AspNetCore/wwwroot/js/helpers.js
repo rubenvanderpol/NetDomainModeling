@@ -140,6 +140,22 @@ export const ALL_SECTIONS = [
   'repositories', 'domainServices'
 ];
 
+/** Maps explorer section keys to main-diagram node `kind` strings (see `diagram.js` KIND_CFG). */
+export const SECTION_TO_DIAGRAM_KIND = {
+  aggregates: 'aggregate',
+  entities: 'entity',
+  valueObjects: 'valueObject',
+  subTypes: 'subType',
+  domainEvents: 'event',
+  integrationEvents: 'integrationEvent',
+  commandHandlerTargets: 'commandHandlerTarget',
+  eventHandlers: 'eventHandler',
+  commandHandlers: 'commandHandler',
+  queryHandlers: 'queryHandler',
+  repositories: 'repository',
+  domainServices: 'service',
+};
+
 /** Section metadata used in sidebar + overview. */
 export const SECTION_META = [
   { key: 'aggregates',           label: 'Aggregates',           color: 'var(--clr-aggregate)',          tag: 'AGG',  bg: 'var(--clr-aggregate-bg)' },

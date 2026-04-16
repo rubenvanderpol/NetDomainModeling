@@ -11,6 +11,7 @@ import { renderTabBar } from './tabs.js';
 // Global layout (not scoped by bounded-context selection)
 const STORAGE_KEY = 'domain-model-diagram-positions-global';
 const HIDDEN_KINDS_KEY = 'domain-model-diagram-hidden-kinds-global';
+const HIDDEN_NODE_IDS_KEY = 'domain-model-diagram-hidden-node-ids-global';
 const HIDDEN_EDGE_KINDS_KEY = 'domain-model-diagram-hidden-edge-kinds-global';
 const VIEWPORT_KEY = 'domain-model-diagram-viewport-global';
 const SHOW_ALIASES_KEY = 'domain-model-diagram-show-aliases';
@@ -149,6 +150,7 @@ function buildLayoutPayloadFromState() {
       panY: Math.round(dgState.panY * 10) / 10,
     },
     hiddenKinds: [...dgState.hiddenKinds],
+    hiddenNodeIds: [...dgState.hiddenNodeIds],
     hiddenEdgeKinds: [...dgState.hiddenEdgeKinds],
     showAliases,
     showLayers,
@@ -225,6 +227,75 @@ export function saveDiagramHiddenKindsSet(hiddenKinds) {
 
 export function saveDiagramHiddenEdgeKindsSet(hiddenEdgeKinds) {
   saveHiddenEdgeKinds(hiddenEdgeKinds instanceof Set ? hiddenEdgeKinds : new Set(hiddenEdgeKinds || []));
+}
+
+function loadHiddenNodeIds() {
+  try {
+    const raw = localStorage.getItem(HIDDEN_NODE_IDS_KEY);
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw);
+    return new Set(Array.isArray(arr) ? arr : []);
+  } catch { return new Set(); }
+}
+
+function saveHiddenNodeIds(hiddenNodeIds) {
+  try {
+    localStorage.setItem(HIDDEN_NODE_IDS_KEY, JSON.stringify([...hiddenNodeIds]));
+  } catch { /* quota exceeded or private mode */ }
+  scheduleFlushDiagramLayout();
+}
+
+/**
+ * Whether custom metadata (alias/description) implies the type should default to hidden on the diagram
+ * until the user opts in with `hiddenOnDiagram: false`.
+ */
+export function metadataImpliesDiagramHiddenByDefault(meta) {
+  if (!meta || typeof meta !== 'object') return false;
+  const a = typeof meta.alias === 'string' ? meta.alias.trim() : '';
+  const d = typeof meta.description === 'string' ? meta.description.trim() : '';
+  return a.length > 0 || d.length > 0;
+}
+
+/**
+ * Effective per-type hide on the main diagram: kind filters are applied separately.
+ * Uses `window.__metadata` for `hiddenOnDiagram` and custom-metadata defaults; merges legacy `hiddenNodeIds` from layout.
+ * @param {string} nodeId
+ * @returns {boolean} true if this node should not appear on the diagram (when its kind is visible).
+ */
+export function isDiagramNodeHidden(nodeId) {
+  const meta = (typeof window !== 'undefined' && window.__metadata && window.__metadata[nodeId]) || null;
+  if (meta && meta.hiddenOnDiagram === false) return false;
+  if (meta && meta.hiddenOnDiagram === true) return true;
+  if (metadataImpliesDiagramHiddenByDefault(meta)) return true;
+  if (dgState && dgState.hiddenNodeIds) return dgState.hiddenNodeIds.has(nodeId);
+  return loadHiddenNodeIds().has(nodeId);
+}
+
+/**
+ * Re-run visibility after metadata changes (does not reload layout from disk).
+ */
+export function reapplyDiagramVisibilityAfterMetadataChange() {
+  if (!dgState) return;
+  applyDiagramVisibility();
+  renderSvg();
+  syncDiagramKindFilterUi();
+  if (typeof window.__onDiagramHiddenNodesChanged === 'function') {
+    window.__onDiagramHiddenNodesChanged();
+  }
+}
+
+/** Remove id from legacy per-layout hidden list (superseded by metadata.hiddenOnDiagram). */
+export function removeLegacyHiddenNodeId(nodeId) {
+  if (typeof nodeId !== 'string' || !nodeId) return;
+  if (dgState && dgState.hiddenNodeIds && dgState.hiddenNodeIds.has(nodeId)) {
+    dgState.hiddenNodeIds.delete(nodeId);
+    saveHiddenNodeIds(dgState.hiddenNodeIds);
+  } else {
+    const set = loadHiddenNodeIds();
+    if (!set.has(nodeId)) return;
+    set.delete(nodeId);
+    saveHiddenNodeIds(set);
+  }
 }
 
 function loadPositions() {
@@ -632,6 +703,13 @@ export function initDiagram(ctx, boundedContexts) {
       hiddenEdgeKinds = loadHiddenEdgeKinds();
     }
 
+    let hiddenNodeIds;
+    if (serverLayout && Array.isArray(serverLayout.hiddenNodeIds)) {
+      hiddenNodeIds = new Set(serverLayout.hiddenNodeIds.filter((id) => typeof id === 'string'));
+    } else {
+      hiddenNodeIds = loadHiddenNodeIds();
+    }
+
     if (serverLayout && typeof serverLayout.showAliases === 'boolean') {
       showAliases = serverLayout.showAliases;
       try { localStorage.setItem(SHOW_ALIASES_KEY, showAliases ? 'true' : 'false'); } catch { /* ignore */ }
@@ -651,7 +729,7 @@ export function initDiagram(ctx, boundedContexts) {
     dgState = {
       nodes, edges, nMap, allNodes: nodes, allEdges: edges,
       zoom: 1, panX: 0, panY: 0, contextName,
-      hiddenKinds, hiddenEdgeKinds, edgeWaypoints,
+      hiddenKinds, hiddenNodeIds, hiddenEdgeKinds, edgeWaypoints,
     };
     applyDiagramVisibility();
 
@@ -692,6 +770,9 @@ export function initDiagram(ctx, boundedContexts) {
       } catch { /* ignore */ }
       try {
         localStorage.setItem(HIDDEN_EDGE_KINDS_KEY, JSON.stringify([...hiddenEdgeKinds]));
+      } catch { /* ignore */ }
+      try {
+        localStorage.setItem(HIDDEN_NODE_IDS_KEY, JSON.stringify([...hiddenNodeIds]));
       } catch { /* ignore */ }
       try {
         saveEdgeWaypoints(edgeWaypoints);
@@ -843,6 +924,7 @@ function applyDiagramVisibility() {
   const visibleIds = new Set();
   dgState.nodes = dgState.allNodes.filter(n => {
     if (dgState.hiddenKinds.has(n.kind)) return false;
+    if (isDiagramNodeHidden(n.id)) return false;
     visibleIds.add(n.id);
     return true;
   });
@@ -1401,6 +1483,8 @@ export function diagramResetLayout(ctx) {
   if (!dgState || !ctx) return;
   clearPositions();
   clearViewport();
+  dgState.hiddenNodeIds = new Set();
+  saveHiddenNodeIds(dgState.hiddenNodeIds);
   dgState.edgeWaypoints = {};
   saveEdgeWaypoints(dgState.edgeWaypoints);
   applyAutoLayout(dgState.allNodes, dgState.allEdges, dgState.nMap);
@@ -1409,6 +1493,9 @@ export function diagramResetLayout(ctx) {
   fitToView();
   savePositions(dgState.allNodes);
   saveViewport(dgState.zoom, dgState.panX, dgState.panY);
+  if (typeof window.__onDiagramHiddenNodesChanged === 'function') {
+    window.__onDiagramHiddenNodesChanged();
+  }
 }
 
 export function diagramToggleKind(eventOrKind, maybeKind) {
@@ -1429,6 +1516,9 @@ export function diagramToggleKind(eventOrKind, maybeKind) {
   applyDiagramVisibility();
   renderSvg();
   syncDiagramKindFilterUi();
+  if (typeof window.__onDiagramHiddenNodesChanged === 'function') {
+    window.__onDiagramHiddenNodesChanged();
+  }
 }
 
 function setAllKindVisibility(visible) {
@@ -1445,6 +1535,9 @@ function setAllKindVisibility(visible) {
   applyDiagramVisibility();
   renderSvg();
   syncDiagramKindFilterUi();
+  if (typeof window.__onDiagramHiddenNodesChanged === 'function') {
+    window.__onDiagramHiddenNodesChanged();
+  }
 }
 
 export function diagramShowAllKinds() {
@@ -1458,12 +1551,17 @@ export function diagramHideAllKinds() {
 export function diagramShowAll() {
   if (!dgState) return;
   dgState.hiddenKinds.clear();
+  dgState.hiddenNodeIds.clear();
   dgState.hiddenEdgeKinds.clear();
   saveHiddenKinds(dgState.hiddenKinds);
+  saveHiddenNodeIds(dgState.hiddenNodeIds);
   saveHiddenEdgeKinds(dgState.hiddenEdgeKinds);
   applyDiagramVisibility();
   renderSvg();
   refreshDiagramKindFilters();
+  if (typeof window.__onDiagramHiddenNodesChanged === 'function') {
+    window.__onDiagramHiddenNodesChanged();
+  }
 }
 
 export function diagramToggleEdgeKind(eventOrKind, maybeKind) {
@@ -1484,6 +1582,9 @@ export function diagramToggleEdgeKind(eventOrKind, maybeKind) {
   applyDiagramVisibility();
   renderSvg();
   refreshDiagramEdgeFilter();
+  if (typeof window.__onDiagramHiddenNodesChanged === 'function') {
+    window.__onDiagramHiddenNodesChanged();
+  }
 }
 
 function toggleDropdown(menuId, triggerId) {

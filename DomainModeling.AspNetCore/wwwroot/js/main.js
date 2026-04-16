@@ -1,9 +1,15 @@
 /**
  * Main entry point — wires up data loading, navigation, sidebar, and views.
  */
-import { esc, escAttr, shortName, ALL_SECTIONS, SECTION_META } from './helpers.js';
+import { esc, escAttr, shortName, ALL_SECTIONS, SECTION_META, SECTION_TO_DIAGRAM_KIND } from './helpers.js';
 import { renderDetailView } from './views.js';
-import { renderDiagramView, initDiagram, diagramZoom, diagramFit, diagramResetLayout, diagramToggleKind, diagramShowAll, diagramDownloadSvg, diagramToggleAliases, diagramToggleLayers, diagramToggleEdgeKind, diagramToggleEdgeFilter, diagramToggleKindFilter, diagramShowAllKinds, diagramHideAllKinds, setDiagramLayoutBaseUrl, setServerDiagramLayoutCache } from './diagram.js';
+import {
+  renderDiagramView, initDiagram, diagramZoom, diagramFit, diagramResetLayout, diagramToggleKind, diagramShowAll,
+  diagramDownloadSvg, diagramToggleAliases, diagramToggleLayers, diagramToggleEdgeKind, diagramToggleEdgeFilter,
+  diagramToggleKindFilter, diagramShowAllKinds, diagramHideAllKinds, setDiagramLayoutBaseUrl, setServerDiagramLayoutCache,
+  isDiagramNodeHidden, getDiagramState, metadataImpliesDiagramHiddenByDefault, reapplyDiagramVisibilityAfterMetadataChange,
+  removeLegacyHiddenNodeId,
+} from './diagram.js';
 
 const API_URL = window.__config?.apiUrl || '/domain-model/json';
 const BASE_URL = API_URL.replace(/\/json$/, '');
@@ -138,6 +144,7 @@ async function init() {
 
     render();
     initSidebarToggle();
+    window.__onDiagramHiddenNodesChanged = syncExplorerDiagramHideCheckboxes;
   } catch (e) {
     document.getElementById('loadingState').textContent = 'Failed to load domain model. Check the console.';
     console.error('Failed to load domain model:', e);
@@ -200,6 +207,7 @@ function render() {
   renderSidebar();
   renderMain();
   syncFeatureEditorViewBodyClass();
+  requestAnimationFrame(() => syncExplorerDiagramHideCheckboxes());
 }
 
 /** Hide explorer sidebar in feature editor view mode so canvas matches Diagram tab width. */
@@ -259,14 +267,26 @@ function renderSidebar() {
         <span class="chevron">▼</span>
       </div>
       <div class="nav-items">
-        ${items.map(item => `
-          <div class="nav-item${isActive(sec.key, item) ? ' active' : ''}"
-               onclick="window.__nav.showDetail('${sec.key}', '${escAttr(item.fullName)}')"
+        ${items.map(item => {
+          const dk = SECTION_TO_DIAGRAM_KIND[sec.key];
+          const hidden = dk && isNavDiagramHidden(dk, item.fullName);
+          const visTitle = hidden
+            ? 'Show on main diagram'
+            : 'Hide from main diagram';
+          return `
+          <div class="nav-item nav-item-with-diagram-toggle${isActive(sec.key, item) ? ' active' : ''}"
                data-fullname="${escAttr(item.fullName)}">
-            <span class="nav-dot" style="background:${sec.color}"></span>
-            ${esc(item.name)}
-          </div>
-        `).join('')}
+            ${dk ? `<label class="nav-diagram-visibility" title="${escAttr(visTitle)}" onclick="event.stopPropagation()">
+              <input type="checkbox" ${hidden ? '' : 'checked'}
+                     data-nav-kind="${escAttr(sec.key)}"
+                     onchange="window.__nav.toggleDiagramVisibility('${escAttr(item.fullName)}', this.checked)" />
+            </label>` : '<span class="nav-diagram-visibility-spacer"></span>'}
+            <span class="nav-item-label" onclick="window.__nav.showDetail('${sec.key}', '${escAttr(item.fullName)}')">
+              <span class="nav-dot" style="background:${sec.color}"></span>
+              ${esc(item.name)}
+            </span>
+          </div>`;
+        }).join('')}
       </div>
     </div>`;
   }
@@ -310,6 +330,73 @@ function isActive(key, item) {
   return false;
 }
 
+function isNavDiagramHidden(diagramKind, fullName) {
+  const st = getDiagramState();
+  if (st && st.hiddenKinds.has(diagramKind)) return true;
+  return isDiagramNodeHidden(fullName);
+}
+
+function syncExplorerDiagramHideCheckboxes() {
+  for (const row of document.querySelectorAll('.nav-item-with-diagram-toggle')) {
+    const fullName = row.getAttribute('data-fullname');
+    const input = row.querySelector('input[type="checkbox"][data-nav-kind]');
+    if (!fullName || !input) continue;
+    const kindKey = input.getAttribute('data-nav-kind');
+    const dk = kindKey ? SECTION_TO_DIAGRAM_KIND[kindKey] : null;
+    if (!dk) continue;
+    const hidden = isNavDiagramHidden(dk, fullName);
+    input.checked = !hidden;
+    const lab = row.querySelector('.nav-diagram-visibility');
+    if (lab) {
+      lab.title = hidden
+        ? 'Show on main diagram'
+        : 'Hide from main diagram';
+    }
+  }
+}
+
+function metadataEntryIsEmpty(entry) {
+  if (!entry || typeof entry !== 'object') return true;
+  const a = entry.alias && String(entry.alias).trim();
+  const d = entry.description && String(entry.description).trim();
+  if (a || d) return false;
+  if (entry.hiddenOnDiagram === true || entry.hiddenOnDiagram === false) return false;
+  return true;
+}
+
+async function persistMetadata(fullName, entry) {
+  if (metadataEntryIsEmpty(entry)) {
+    delete metadata[fullName];
+  } else {
+    metadata[fullName] = entry;
+  }
+  window.__metadata = metadata;
+
+  try {
+    if (metadataEntryIsEmpty(entry)) {
+      await fetch(`${BASE_URL}/metadata/${encodeURIComponent(fullName)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ alias: null, description: null, hiddenOnDiagram: null }),
+      });
+    } else {
+      await fetch(`${BASE_URL}/metadata/${encodeURIComponent(fullName)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(entry),
+      });
+    }
+  } catch { /* server unreachable */ }
+}
+
+async function toggleDiagramVisibility(fullName, visible) {
+  const prev = metadata[fullName] || {};
+  const next = { ...prev, hiddenOnDiagram: visible ? false : true };
+  removeLegacyHiddenNodeId(fullName);
+  await persistMetadata(fullName, next);
+  reapplyDiagramVisibilityAfterMetadataChange();
+}
+
 function renderMain() {
   const main = document.getElementById('mainContent');
 
@@ -351,24 +438,19 @@ function renderMain() {
 // ── Metadata persistence ─────────────────────────────
 
 async function saveMetadata(fullName, alias, description) {
-  const entry = { alias: alias || null, description: description || null };
-
-  // Always update local state (server persistence is handled via PUT)
-  if ((!alias || !alias.trim()) && (!description || !description.trim())) {
-    delete metadata[fullName];
-  } else {
-    metadata[fullName] = entry;
+  const prev = metadata[fullName] || {};
+  const next = {
+    ...prev,
+    alias: alias && String(alias).trim() ? alias : null,
+    description: description && String(description).trim() ? description : null,
+  };
+  if (!metadataImpliesDiagramHiddenByDefault(next)) {
+    delete next.hiddenOnDiagram;
+  } else if (next.hiddenOnDiagram === undefined) {
+    next.hiddenOnDiagram = true;
   }
-  window.__metadata = metadata;
-
-  // Best-effort sync to server
-  try {
-    await fetch(`${BASE_URL}/metadata/${encodeURIComponent(fullName)}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(entry),
-    });
-  } catch { /* server unreachable */ }
+  await persistMetadata(fullName, next);
+  reapplyDiagramVisibilityAfterMetadataChange();
 }
 
 // ── Navigation (exposed as window.__nav) ─────────────
@@ -406,7 +488,9 @@ function toggleSection(el) {
 }
 
 // ── Expose to global scope for onclick handlers ──────
-window.__nav = { switchTab, showDetail, navigateTo, toggleSection, toggleContext };
+window.__nav = {
+  switchTab, showDetail, navigateTo, toggleSection, toggleContext, toggleDiagramVisibility,
+};
 window.__saveMetadata = saveMetadata;
 window.__downloadExport = async function(name) {
   try {

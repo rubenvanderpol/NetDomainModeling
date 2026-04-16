@@ -20,6 +20,12 @@ internal sealed class DiagramLayoutDocument
     [JsonPropertyName("hiddenEdgeKinds")]
     public List<string> HiddenEdgeKinds { get; set; } = [];
 
+    /// <summary>
+    /// Node ids (type full names) hidden individually on the main diagram, in addition to kind/edge filters.
+    /// </summary>
+    [JsonPropertyName("hiddenNodeIds")]
+    public List<string> HiddenNodeIds { get; set; } = [];
+
     [JsonPropertyName("showAliases")]
     public bool? ShowAliases { get; set; }
 

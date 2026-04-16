@@ -381,6 +381,11 @@ public sealed class TypeMetadata
 {
     public string? Alias { get; set; }
     public string? Description { get; set; }
+
+    /// <summary>
+    /// When true, the type is hidden on the main diagram (in addition to diagram kind filters).
+    /// </summary>
+    public bool? HiddenOnDiagram { get; set; }
 }
 
 internal static class JsonOptions
