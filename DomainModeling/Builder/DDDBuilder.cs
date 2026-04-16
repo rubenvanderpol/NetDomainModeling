@@ -50,29 +50,12 @@ public sealed class DDDBuilder
     /// Defines a bounded context by name using a domain assembly.
     /// </summary>
     public DDDBuilder WithDomainAssembly(string contextName, Assembly assembly)
-        => WithDomainAssembly(contextName, assembly, scanAssemblyForDocumentation: false, _ => { });
-
-    /// <summary>
-    /// Defines a bounded context by name using a domain assembly and optional documentation discovery
-    /// (see <see cref="BoundedContextBuilder.WithDomainAssembly(Assembly, bool)"/>).
-    /// </summary>
-    public DDDBuilder WithDomainAssembly(string contextName, Assembly assembly, bool scanAssemblyForDocumentation)
-        => WithDomainAssembly(contextName, assembly, scanAssemblyForDocumentation, _ => { });
+        => WithDomainAssembly(contextName, assembly, _ => { });
 
     /// <summary>
     /// Defines a bounded context by name using a domain assembly and additional configuration.
     /// </summary>
     public DDDBuilder WithDomainAssembly(string contextName, Assembly assembly, Action<BoundedContextBuilder> configure)
-        => WithDomainAssembly(contextName, assembly, scanAssemblyForDocumentation: false, configure);
-
-    /// <summary>
-    /// Defines a bounded context by name using a domain assembly, optional documentation discovery, and additional configuration.
-    /// </summary>
-    public DDDBuilder WithDomainAssembly(
-        string contextName,
-        Assembly assembly,
-        bool scanAssemblyForDocumentation,
-        Action<BoundedContextBuilder> configure)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(contextName);
         ArgumentNullException.ThrowIfNull(assembly);
@@ -80,7 +63,7 @@ public sealed class DDDBuilder
 
         return WithBoundedContext(contextName, ctx =>
         {
-            ctx.WithDomainAssembly(assembly, scanAssemblyForDocumentation);
+            ctx.WithDomainAssembly(assembly);
             configure(ctx);
         });
     }
