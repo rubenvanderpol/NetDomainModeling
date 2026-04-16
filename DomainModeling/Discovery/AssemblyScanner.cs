@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using DomainModeling.Builder;
 using DomainModeling.Graph;
+using DomainModeling;
 using MethodInfo = DomainModeling.Graph.MethodInfo;
 using PropertyInfo = DomainModeling.Graph.PropertyInfo;
 
@@ -100,6 +101,8 @@ internal sealed class AssemblyScanner
             domainEventNodes,
             knownDomainTypes,
             eventHandlerNodes);
+
+        RemapEventHandlerHandlesFromIEventHandlerInterfaces(eventHandlerTypes, domainEventNodes, eventHandlerNodes);
 
         var commandHandlerTargetNodes = DiscoverCommandHandlerTargets(
             allTypes,
@@ -203,7 +206,22 @@ internal sealed class AssemblyScanner
         var registeredEventFullNames = new HashSet<string>(
             domainEventNodes.Select(e => e.FullName).Concat(integrationEventNodes.Select(e => e.FullName)),
             StringComparer.Ordinal);
-        foreach (var handler in eventHandlerNodes.Concat(commandHandlerNodes).Concat(queryHandlerNodes))
+        foreach (var handler in eventHandlerNodes)
+        {
+            foreach (var handled in handler.Handles)
+            {
+                var target = ResolveEmissionEventKey(handled, registeredEventFullNames) ?? handled;
+                relationships.Add(new Relationship
+                {
+                    SourceType = handler.FullName,
+                    TargetType = target,
+                    Kind = RelationshipKind.Handles,
+                    Label = "handles"
+                });
+            }
+        }
+
+        foreach (var handler in commandHandlerNodes.Concat(queryHandlerNodes))
         {
             foreach (var handled in handler.Handles)
             {
@@ -734,7 +752,7 @@ internal sealed class AssemblyScanner
 
         if (type.IsGenericType)
         {
-            var baseName = StripGenericArity(type.Name);
+            var baseName = GenericTypeDisplayNames.StripGenericArity(type.Name);
             var args = string.Join(", ", type.GetGenericArguments().Select(FormatTypeName));
             return $"{baseName}<{args}>";
         }
@@ -769,7 +787,7 @@ internal sealed class AssemblyScanner
 
             // Generic but not a collection (e.g. Nullable<T>)
             var argNames = string.Join(", ", args.Select(a => a.Name));
-            return ($"{StripGenericArity(type.Name)}<{argNames}>", false, null);
+            return ($"{GenericTypeDisplayNames.StripGenericArity(type.Name)}<{argNames}>", false, null);
         }
 
         return (type.Name, false, null);
@@ -785,12 +803,6 @@ internal sealed class AssemblyScanner
             || genericDef == typeof(IReadOnlyList<>)
             || genericDef == typeof(HashSet<>)
             || genericDef == typeof(ISet<>);
-    }
-
-    private static string StripGenericArity(string name)
-    {
-        var idx = name.IndexOf('`');
-        return idx >= 0 ? name[..idx] : name;
     }
 
     /// <summary>
@@ -991,7 +1003,7 @@ internal sealed class AssemblyScanner
         var key = resolvedKey;
         if (key.Contains("[[", StringComparison.Ordinal))
         {
-            var shortForm = ToCanonicalClosedGenericFullName(key);
+            var shortForm = GenericTypeDisplayNames.ToCanonicalClosedGenericFullName(key);
             if (shortForm is not null)
                 key = shortForm;
         }
@@ -1110,7 +1122,7 @@ internal sealed class AssemblyScanner
         var bracket = typeFullName.IndexOf("[[", StringComparison.Ordinal);
         if (bracket >= 0)
         {
-            var canonical = ToCanonicalClosedGenericFullName(typeFullName);
+            var canonical = GenericTypeDisplayNames.ToCanonicalClosedGenericFullName(typeFullName);
             if (canonical is not null && registeredEventFullNames.Contains(canonical))
                 return canonical;
 
@@ -1135,7 +1147,7 @@ internal sealed class AssemblyScanner
         var bracket = typeFullName.IndexOf("[[", StringComparison.Ordinal);
         if (bracket >= 0)
         {
-            var canonical = ToCanonicalClosedGenericFullName(typeFullName);
+            var canonical = GenericTypeDisplayNames.ToCanonicalClosedGenericFullName(typeFullName);
             if (canonical is not null && registeredEventFullNames.Contains(canonical))
                 return canonical;
 
@@ -1145,62 +1157,6 @@ internal sealed class AssemblyScanner
         }
 
         return ResolveCanonicalEventKey(typeFullName, registeredEventFullNames);
-    }
-
-    /// <summary>
-    /// Builds a C#-style display name (e.g. <c>EntityDeletedEvent&lt;Organization&gt;</c>) from a short canonical
-    /// constructed generic <see cref="Type.FullName"/> such as <c>Ns.EntityDeletedEvent`1[[Ns.Organization]]</c>.
-    /// </summary>
-    private static string FormatClosedGenericDisplayName(string canonicalConstructedClrFullName)
-    {
-        var tick = canonicalConstructedClrFullName.IndexOf('`');
-        if (tick < 0)
-            return canonicalConstructedClrFullName;
-
-        var defFqn = canonicalConstructedClrFullName[..tick];
-        var simpleDef = defFqn.Contains('.', StringComparison.Ordinal)
-            ? defFqn[(defFqn.LastIndexOf('.') + 1)..]
-            : defFqn;
-
-        var innerStart = canonicalConstructedClrFullName.IndexOf("[[", StringComparison.Ordinal);
-        if (innerStart < 0)
-            return StripGenericArity(simpleDef);
-
-        var args = new List<string>();
-        var i = innerStart + 1;
-        while (i < canonicalConstructedClrFullName.Length)
-        {
-            if (canonicalConstructedClrFullName[i] != '[')
-            {
-                i++;
-                continue;
-            }
-
-            i++;
-            var argStart = i;
-            var depth = 1;
-            while (i < canonicalConstructedClrFullName.Length && depth > 0)
-            {
-                if (canonicalConstructedClrFullName[i] == '[') depth++;
-                else if (canonicalConstructedClrFullName[i] == ']') depth--;
-                i++;
-            }
-
-            var argSegment = canonicalConstructedClrFullName[argStart..(i - 1)];
-            var comma = argSegment.IndexOf(',', StringComparison.Ordinal);
-            var argType = (comma >= 0 ? argSegment[..comma] : argSegment).Trim();
-            var shortArg = argType.Contains('.', StringComparison.Ordinal)
-                ? argType[(argType.LastIndexOf('.') + 1)..]
-                : argType;
-            args.Add(shortArg);
-
-            if (i < canonicalConstructedClrFullName.Length && canonicalConstructedClrFullName[i] == ',')
-                i++;
-        }
-
-        return args.Count == 0
-            ? StripGenericArity(simpleDef)
-            : $"{StripGenericArity(simpleDef)}<{string.Join(", ", args)}>";
     }
 
     /// <summary>
@@ -1242,7 +1198,7 @@ internal sealed class AssemblyScanner
             if (!key.Contains("[[", StringComparison.Ordinal))
                 continue;
 
-            var canonical = ToCanonicalClosedGenericFullName(key);
+            var canonical = GenericTypeDisplayNames.ToCanonicalClosedGenericFullName(key);
             if (canonical is null || existingEventFullNames.Contains(canonical))
                 continue;
 
@@ -1256,7 +1212,7 @@ internal sealed class AssemblyScanner
 
             domainEventNodes.Add(new DomainEventNode
             {
-                Name = FormatClosedGenericDisplayName(canonical),
+                Name = GenericTypeDisplayNames.FormatAsCSharp(canonical),
                 FullName = canonical,
             });
             existingEventFullNames.Add(canonical);
@@ -1276,59 +1232,62 @@ internal sealed class AssemblyScanner
     }
 
     /// <summary>
-    /// Converts a CLR reflection constructed generic full name (with assembly-qualified type arguments)
-    /// to the short canonical form: <c>Ns.Event`1[[Ns.User]]</c>.
-    /// Returns <c>null</c> if the name is not a constructed generic.
+    /// When <see cref="HandlerNode.Handles"/> was resolved to an open generic definition (e.g. <c>EntityDeletedEvent`1</c>)
+    /// but a closed <see cref="DomainEventNode"/> exists for the event type parameter from <c>IEventHandler&lt;T&gt;</c>,
+    /// remap <c>Handles</c> to the closed canonical full name so diagram edges and JSON match the event node id.
     /// </summary>
-    private static string? ToCanonicalClosedGenericFullName(string clrFullName)
+    private static void RemapEventHandlerHandlesFromIEventHandlerInterfaces(
+        List<Type> eventHandlerTypes,
+        List<DomainEventNode> domainEventNodes,
+        List<HandlerNode> eventHandlerNodes)
     {
-        var outerStart = clrFullName.IndexOf("[[", StringComparison.Ordinal);
-        if (outerStart < 0)
-            return null;
+        var eventFullNames = new HashSet<string>(domainEventNodes.Select(e => e.FullName), StringComparer.Ordinal);
+        var handlersByFullName = eventHandlerTypes.ToDictionary(t => t.FullName!, StringComparer.Ordinal);
 
-        var prefix = clrFullName[..outerStart];
-        var sb = new System.Text.StringBuilder(prefix);
-        sb.Append('[');
-
-        var i = outerStart + 1;
-        var first = true;
-        while (i < clrFullName.Length)
+        foreach (var handler in eventHandlerNodes)
         {
-            if (clrFullName[i] == '[')
+            if (!handlersByFullName.TryGetValue(handler.FullName, out var handlerType))
+                continue;
+
+            var closedFromInterfaces = new List<string>();
+            foreach (var iface in handlerType.GetInterfaces().Where(i => i.IsGenericType))
             {
-                if (!first) sb.Append(',');
-                first = false;
-                i++;
-                var commaPos = clrFullName.IndexOf(',', i);
-                var closeBracket = clrFullName.IndexOf(']', i);
-                string argFullName;
-                if (commaPos >= 0 && commaPos < closeBracket)
-                    argFullName = clrFullName[i..commaPos].Trim();
-                else if (closeBracket >= 0)
-                    argFullName = clrFullName[i..closeBracket].Trim();
-                else
-                    return null;
+                if (iface.GetGenericTypeDefinition().Name != "IEventHandler`1")
+                    continue;
 
-                sb.Append('[');
-                sb.Append(argFullName);
-                sb.Append(']');
+                var arg = iface.GetGenericArguments()[0];
+                if (arg.FullName is null || !arg.IsGenericType)
+                    continue;
 
-                var depth = 1;
-                while (i < clrFullName.Length && depth > 0)
+                var canonical = GenericTypeDisplayNames.ToCanonicalClosedGenericFullName(arg.FullName);
+                if (canonical is null || !eventFullNames.Contains(canonical))
+                    continue;
+
+                closedFromInterfaces.Add(canonical);
+            }
+
+            if (closedFromInterfaces.Count == 0)
+                continue;
+
+            for (var i = 0; i < handler.Handles.Count; i++)
+            {
+                var h = handler.Handles[i];
+                var bracket = h.IndexOf("[[", StringComparison.Ordinal);
+                if (bracket < 0)
+                    continue;
+
+                var defKey = h[..bracket];
+                foreach (var closed in closedFromInterfaces)
                 {
-                    if (clrFullName[i] == '[') depth++;
-                    else if (clrFullName[i] == ']') depth--;
-                    i++;
+                    if (closed.StartsWith(defKey, StringComparison.Ordinal) &&
+                        eventFullNames.Contains(closed))
+                    {
+                        handler.Handles[i] = closed;
+                        break;
+                    }
                 }
             }
-            else
-            {
-                i++;
-            }
         }
-
-        sb.Append(']');
-        return sb.ToString();
     }
 
     private static bool TryResolveEventNode(
@@ -1342,7 +1301,7 @@ internal sealed class AssemblyScanner
         var bracket = typeFullName.IndexOf("[[", StringComparison.Ordinal);
         if (bracket >= 0)
         {
-            var canonical = ToCanonicalClosedGenericFullName(typeFullName);
+            var canonical = GenericTypeDisplayNames.ToCanonicalClosedGenericFullName(typeFullName);
             if (canonical is not null && eventMap.TryGetValue(canonical, out node))
                 return true;
 

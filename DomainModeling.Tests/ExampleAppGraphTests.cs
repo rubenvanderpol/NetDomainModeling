@@ -192,5 +192,10 @@ public class ExampleAppGraphTests
 
         var org = catalog.Aggregates.Single(a => a.Name == "Organization");
         org.EmittedEvents.Should().Contain(deletedOrg.FullName);
+
+        catalog.Relationships.Should().Contain(r =>
+            r.Kind == RelationshipKind.Handles &&
+            r.SourceType.Contains("OrganizationDeletedHandler", StringComparison.Ordinal) &&
+            r.TargetType == deletedOrg.FullName);
     }
 }
