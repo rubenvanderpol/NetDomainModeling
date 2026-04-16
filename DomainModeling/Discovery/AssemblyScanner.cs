@@ -440,7 +440,7 @@ internal sealed class AssemblyScanner
                 foreach (var param in method.GetParameters())
                 {
                     var paramFullName = param.ParameterType.FullName;
-                    if (paramFullName is not null && knownDomainTypes.Contains(paramFullName))
+                    if (paramFullName is not null)
                         handledTypes.Add(paramFullName);
                 }
             }
