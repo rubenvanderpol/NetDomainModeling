@@ -32,9 +32,37 @@ import {
 const NODE_W = 200;
 const PROP_H = 17;
 const HEADER_H = 26;
-const NAME_H = 24;
+const NAME_LINE_H = 18;
+const NAME_PAD = 6;
 const DIVIDER_H = 8;
 const PAD = 12;
+const MAX_NAME_CHARS = 22;
+
+/** Split a name into lines that fit within the node width (same rules as the main Diagram tab). */
+function wrapName(text) {
+  if (!text || text.length <= MAX_NAME_CHARS) return [text || ''];
+  const words = text.includes(' ')
+    ? text.split(' ')
+    : text.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2').split(' ');
+  const lines = [];
+  let line = '';
+  for (const w of words) {
+    const candidate = line ? line + (text.includes(' ') ? ' ' : '') + w : w;
+    if (candidate.length > MAX_NAME_CHARS && line) {
+      lines.push(line);
+      line = w;
+    } else {
+      line = candidate;
+    }
+  }
+  if (line) lines.push(line);
+  return lines.length ? lines : [text];
+}
+
+function nodeNameHeight(n) {
+  const lines = wrapName(feDisplayName(n));
+  return NAME_PAD + lines.length * NAME_LINE_H;
+}
 
 const KIND_CFG = {
   aggregate:        { stereotype: '«Aggregate»',        color: '#d4a0ff', bg: '#1f1828', border: '#7c5aa8' },
@@ -1576,7 +1604,7 @@ function applyAutoLayout(nodes, edges, nMap, fixedNodeIds) {
 
 function nodeHeight(n) {
   const derivedEvents = getEmittedEventsForNode(n.id);
-  let h = PAD + HEADER_H + NAME_H;
+  let h = PAD + HEADER_H + nodeNameHeight(n);
   if (n.props.length > 0) h += DIVIDER_H + n.props.length * PROP_H;
   if (n.methods.length > 0) h += DIVIDER_H + n.methods.length * PROP_H;
   if (derivedEvents.length > 0) h += DIVIDER_H + derivedEvents.length * PROP_H;
@@ -1755,9 +1783,14 @@ function renderSvg() {
 
     let ty = 20;
     s += `<text x="${n.w / 2}" y="${ty}" text-anchor="middle" fill="${c.color}" font-size="10" font-family="-apple-system,sans-serif" opacity="0.85">${c.stereotype}</text>`;
-    ty += 22;
-    const displayName = feDisplayName(n);
-    s += `<text class="fe-name" x="${n.w / 2}" y="${ty}" text-anchor="middle" fill="#f0f2f7" font-size="14" font-weight="600" font-family="-apple-system,sans-serif">${esc(displayName)}</text>`;
+    ty += NAME_PAD;
+    const nameLines = wrapName(feDisplayName(n));
+    s += `<text class="fe-name" x="${n.w / 2}" text-anchor="middle" fill="#f0f2f7" font-size="14" font-weight="600" font-family="-apple-system,sans-serif">`;
+    for (const ln of nameLines) {
+      ty += NAME_LINE_H;
+      s += `<tspan x="${n.w / 2}" y="${ty}">${esc(ln)}</tspan>`;
+    }
+    s += '</text>';
     if (n.props.length > 0) {
       ty += 8;
       s += `<line x1="12" y1="${ty}" x2="${n.w - 12}" y2="${ty}" stroke="${c.border}" stroke-width="0.5" />`;
