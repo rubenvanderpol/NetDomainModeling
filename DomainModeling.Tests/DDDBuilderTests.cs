@@ -23,7 +23,7 @@ public class DDDBuilderTests
                 .Entities(e => e.InheritsFrom<BaseEntity>())
                 .Aggregates(a => a.InheritsFrom<BaseAggregateRoot>())
                 .ValueObjects(v => v.InheritsFrom<BaseValueObject>())
-                .DomainEvents(e => e.InheritsFrom<BaseDomainEvent>())
+                .DomainEvents(e => e.InheritsFrom<BaseDomainEvent>().Or().Implements(typeof(IDomainEvent)))
                 .IntegrationEvents(e => e.InheritsFrom<BaseIntegrationEvent>())
                 .EventHandlers(h => h
                     .Implements(typeof(IEventHandler<>))
@@ -72,7 +72,7 @@ public class DDDBuilderTests
         var graph = BuildSampleGraph();
         var ctx = graph.BoundedContexts.Single();
 
-        ctx.DomainEvents.Should().HaveCount(6);
+        ctx.DomainEvents.Should().HaveCount(7);
         ctx.DomainEvents.Select(e => e.Name).Should()
             .Contain(["OrderPlacedEvent", "OrderShippedEvent", "CustomerCreatedEvent", "InvoiceCreatedEvent"]);
         ctx.DomainEvents.Should().Contain(e => e.Name.StartsWith("EntityDeletedEvent", StringComparison.Ordinal));
@@ -86,7 +86,7 @@ public class DDDBuilderTests
         var graph = BuildSampleGraph();
         var ctx = graph.BoundedContexts.Single();
 
-        ctx.EventHandlers.Should().HaveCount(5);
+        ctx.EventHandlers.Should().HaveCount(6);
         ctx.CommandHandlers.Should().ContainSingle(h => h.Name == "PlaceOrderCommandHandler");
         ctx.QueryHandlers.Should().ContainSingle(h => h.Name == "GetOrderQueryHandler");
     }
@@ -438,6 +438,22 @@ public class DDDBuilderTests
     }
 
     [Fact]
+    public void Build_RecordGenericEvent_FromOverrideDeclaredOnBaseType_IsEmittedAndHandled()
+    {
+        var graph = BuildSampleGraph();
+        var ctx = graph.BoundedContexts.Single();
+
+        var closed = ctx.DomainEvents.Single(e => e.Name == "EntityDeletedEvent<RecordDeleteSample>");
+        closed.EmittedBy.Should().Contain(e => e.Contains("RecordDeleteSample", StringComparison.Ordinal));
+        closed.HandledBy.Should().Contain(h => h.Contains("RecordDeleteSampleDeletedEventHandler"));
+
+        ctx.Relationships.Should().Contain(r =>
+            r.Kind == RelationshipKind.Handles &&
+            r.SourceType.Contains("RecordDeleteSampleDeletedEventHandler", StringComparison.Ordinal) &&
+            r.TargetType == closed.FullName);
+    }
+
+    [Fact]
     public void Build_TypeDocumentedEmits_OrderHandlerStillLinkedToClosedGenericOrderDeleted()
     {
         var graph = BuildSampleGraph();
@@ -521,7 +537,7 @@ public class DDDBuilderTests
                 .WithApplicationAssembly(assembly)
                 .Entities(e => e.InheritsFrom<BaseEntity>())
                 .Aggregates(a => a.InheritsFrom<BaseAggregateRoot>())
-                .DomainEvents(e => e.InheritsFrom<BaseDomainEvent>())
+                .DomainEvents(e => e.InheritsFrom<BaseDomainEvent>().Or().Implements(typeof(IDomainEvent)))
                 .IntegrationEvents(e => e.InheritsFrom<BaseIntegrationEvent>())
                 .EventHandlers(h => h.NameEndsWith("EventHandler"))
             )
@@ -554,7 +570,7 @@ public class DDDBuilderTests
                 .WithApplicationAssembly(assembly)
                 .Entities(e => e.InheritsFrom<BaseEntity>())
                 .Aggregates(a => a.InheritsFrom<BaseAggregateRoot>())
-                .DomainEvents(e => e.InheritsFrom<BaseDomainEvent>())
+                .DomainEvents(e => e.InheritsFrom<BaseDomainEvent>().Or().Implements(typeof(IDomainEvent)))
                 .IntegrationEvents(e => e.InheritsFrom<BaseIntegrationEvent>())
                 .EventHandlers(h => h.NameEndsWith("EventHandler"))
             )
@@ -619,11 +635,12 @@ public class DDDBuilderTests
             .Build();
 
         var ctx = graph.BoundedContexts.Single();
-        ctx.EventHandlers.Should().HaveCount(4);
+        ctx.EventHandlers.Should().HaveCount(5);
         ctx.EventHandlers.Should().Contain(h => h.Name == "OrderPlacedHandler");
         ctx.EventHandlers.Should().Contain(h => h.Name == "SendShipmentNotificationHandler");
         ctx.EventHandlers.Should().Contain(h => h.Name == "OrderDeletedEventHandler");
         ctx.EventHandlers.Should().Contain(h => h.Name == "CustomerDeletedEventHandler");
+        ctx.EventHandlers.Should().Contain(h => h.Name == "RecordDeleteSampleDeletedEventHandler");
         ctx.EventHandlers.Should().NotContain(h => h.Name == "OrderPlacedIntegrationHandler");
         ctx.EventHandlers.Should().NotContain(h => h.Name.Contains("PublishCustomerRegistered"));
     }
@@ -644,7 +661,7 @@ public class DDDBuilderTests
             .Build();
 
         var ctx = graph.BoundedContexts.Single();
-        ctx.EventHandlers.Should().HaveCount(5);
+        ctx.EventHandlers.Should().HaveCount(6);
     }
 
     [Fact]
@@ -825,7 +842,7 @@ public class DDDBuilderTests
             .WithBoundedContext("ContextA", ctx => ctx
                 .WithDomainAssembly(assembly)
                 .Aggregates(a => a.InheritsFrom<BaseAggregateRoot>())
-                .DomainEvents(e => e.InheritsFrom<BaseDomainEvent>())
+                .DomainEvents(e => e.InheritsFrom<BaseDomainEvent>().Or().Implements(typeof(IDomainEvent)))
                 .IntegrationEvents(e => e.InheritsFrom<BaseIntegrationEvent>())
                 .EventHandlers(h => h.Implements(typeof(IEventHandler<>)))
             )

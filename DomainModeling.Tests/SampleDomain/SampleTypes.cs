@@ -9,6 +9,13 @@
 
 namespace DomainModeling.Tests.SampleDomain;
 
+// ─── Marker for record / interface-based event discovery ─────────
+
+public interface IDomainEvent
+{
+    DateTime OccurredOn { get; }
+}
+
 // ─── Base classes (the project's own DDD building blocks) ────────
 
 public abstract class BaseEntity
@@ -18,12 +25,16 @@ public abstract class BaseEntity
 
 public abstract class BaseAggregateRoot : BaseEntity
 {
-    private readonly List<BaseDomainEvent> _events = [];
-    public IReadOnlyCollection<BaseDomainEvent> Events => _events.AsReadOnly();
-    protected void Raise(BaseDomainEvent @event) => _events.Add(@event);
+    private readonly List<IDomainEvent> _events = [];
+    public IReadOnlyCollection<IDomainEvent> Events => _events.AsReadOnly();
+    protected void Raise(IDomainEvent @event) => _events.Add(@event);
+
+    public virtual void DeleteEntity()
+    {
+    }
 }
 
-public abstract class BaseDomainEvent
+public abstract class BaseDomainEvent : IDomainEvent
 {
     public DateTime OccurredOn { get; init; } = DateTime.UtcNow;
 }
@@ -35,7 +46,7 @@ public abstract class BaseIntegrationEvent
 
 public abstract class BaseValueObject;
 
-public interface IEventHandler<in TEvent> where TEvent : BaseDomainEvent
+public interface IEventHandler<in TEvent> where TEvent : IDomainEvent
 {
     Task HandleAsync(TEvent @event, CancellationToken ct = default);
 }
@@ -94,7 +105,11 @@ public sealed class InvoiceCreatedEvent : BaseDomainEvent
     public Guid InvoiceId { get; init; }
 }
 
-public sealed class EntityDeletedEvent<TEntity> : BaseDomainEvent where TEntity : BaseEntity;
+public record EntityDeletedEvent<TEntity>(TEntity Entity) : IDomainEvent where TEntity : BaseEntity
+{
+    public DateTime OccurredOn { get; init; } = DateTime.UtcNow;
+    public Guid EntityId { get; init; } = Entity.Id;
+}
 
 // ─── Integration Events ───────────────────────────────────────────
 
@@ -156,7 +171,7 @@ public class Order : BaseAggregateRoot
 
     public void Delete()
     {
-        Raise(new EntityDeletedEvent<Order>());
+        Raise(new EntityDeletedEvent<Order>(this));
     }
 }
 
@@ -173,6 +188,19 @@ public class Customer : BaseAggregateRoot
     public void Register()
     {
         Raise(new CustomerCreatedEvent { CustomerId = Id });
+    }
+}
+
+/// <summary>
+/// Used to test record primary-constructor emissions from an overridden method declared on a base type.
+/// </summary>
+public abstract class DeletableAggregateRoot : BaseAggregateRoot;
+
+public class RecordDeleteSample : DeletableAggregateRoot
+{
+    public override void DeleteEntity()
+    {
+        Raise(new EntityDeletedEvent<RecordDeleteSample>(this));
     }
 }
 
@@ -221,6 +249,12 @@ public class OrderDeletedEventHandler : IEventHandler<EntityDeletedEvent<Order>>
 public class CustomerDeletedEventHandler : IEventHandler<EntityDeletedEvent<Customer>>
 {
     public Task HandleAsync(EntityDeletedEvent<Customer> @event, CancellationToken ct = default)
+        => Task.CompletedTask;
+}
+
+public class RecordDeleteSampleDeletedEventHandler : IEventHandler<EntityDeletedEvent<RecordDeleteSample>>
+{
+    public Task HandleAsync(EntityDeletedEvent<RecordDeleteSample> @event, CancellationToken ct = default)
         => Task.CompletedTask;
 }
 

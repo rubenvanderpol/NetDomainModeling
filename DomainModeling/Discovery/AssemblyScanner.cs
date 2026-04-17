@@ -476,14 +476,32 @@ internal sealed class AssemblyScanner
             }
         }
 
+        var handles = handledTypes
+            .Select(NormalizeHandlerHandledTypeFullName)
+            .Where(s => s.Length > 0)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
         return new HandlerNode
         {
             Name = type.Name,
             FullName = type.FullName!,
             Layer = layer,
             Description = _documentationIndexer?.TryGetDomainSummary(type),
-            Handles = handledTypes.ToList()
+            Handles = handles
         };
+    }
+
+    /// <summary>
+    /// Reflection sometimes returns assembly-qualified constructed generic names; normalize to the short
+    /// canonical form used elsewhere in the graph (e.g. for record event types from <c>IEventHandler&lt;T&gt;</c>).
+    /// </summary>
+    private static string NormalizeHandlerHandledTypeFullName(string fullName)
+    {
+        if (!fullName.Contains("[[", StringComparison.Ordinal))
+            return fullName;
+
+        return GenericTypeDisplayNames.ToCanonicalClosedGenericFullName(fullName) ?? fullName;
     }
 
     private RepositoryNode BuildRepositoryNode(Type type, List<Type> aggregateTypes, string? layer)
@@ -820,6 +838,29 @@ internal sealed class AssemblyScanner
         var emittedByMethod = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
 
         ScanTypeMethods(type, eventFullNames, emittedByMethod);
+
+        // Instance methods declared on base types (e.g. virtual DeleteEntity on AggregateRoot) carry IL on the
+        // declaring type — scan those bodies too so overrides in aggregates are detected.
+        for (var baseType = type.BaseType; baseType is not null; baseType = baseType.BaseType)
+        {
+            foreach (var method in baseType.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly))
+            {
+                if (method.IsAbstract)
+                    continue;
+
+                var impl = type.GetMethod(
+                    method.Name,
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly,
+                    null,
+                    method.GetParameters().Select(p => p.ParameterType).ToArray(),
+                    null);
+                if (impl is null || impl.DeclaringType != type)
+                    continue;
+
+                var sourceMethodName = NormalizeMethodName(impl, fallbackMethodName: null);
+                ScanMethodBodyForEvents(impl, impl.Module, eventFullNames, emittedByMethod, sourceMethodName);
+            }
+        }
 
         // Also scan compiler-generated nested types (async state machines, lambda display classes, etc.)
         foreach (var nested in type.GetNestedTypes(BindingFlags.NonPublic | BindingFlags.Public))

@@ -35,7 +35,7 @@ public class ExampleAppGraphTests
                 .Entities(e => e.InheritsFrom<Entity>())
                 .Aggregates(a => a.InheritsFrom<AggregateRoot>())
                 .ValueObjects(v => v.InheritsFrom<ValueObject>())
-                .DomainEvents(e => e.InheritsFrom<DomainEvent>())
+                .DomainEvents(e => e.InheritsFrom<DomainEvent>().Or().Implements(typeof(IDomainEvent)))
                 .IntegrationEvents(e => e.InheritsFrom<IntegrationEvent>())
                 .EventHandlers(h => h
                     .Implements(typeof(IEventHandler<>))
@@ -74,7 +74,7 @@ public class ExampleAppGraphTests
                 .Entities(e => e.InheritsFrom<Entity>())
                 .Aggregates(a => a.InheritsFrom<AggregateRoot>())
                 .ValueObjects(v => v.InheritsFrom<ValueObject>())
-                .DomainEvents(e => e.InheritsFrom<DomainEvent>())
+                .DomainEvents(e => e.InheritsFrom<DomainEvent>().Or().Implements(typeof(IDomainEvent)))
                 .IntegrationEvents(e => e.InheritsFrom<IntegrationEvent>())
                 .EventHandlers(h => h
                     .Implements(typeof(IEventHandler<>))
@@ -130,7 +130,7 @@ public class ExampleAppGraphTests
                 .Entities(e => e.InheritsFrom<Entity>())
                 .Aggregates(a => a.InheritsFrom<AggregateRoot>())
                 .ValueObjects(v => v.InheritsFrom<ValueObject>())
-                .DomainEvents(e => e.InheritsFrom<DomainEvent>())
+                .DomainEvents(e => e.InheritsFrom<DomainEvent>().Or().Implements(typeof(IDomainEvent)))
                 .IntegrationEvents(e => e.InheritsFrom<IntegrationEvent>())
                 .EventHandlers(h => h
                     .Implements(typeof(IEventHandler<>))
@@ -200,5 +200,8 @@ public class ExampleAppGraphTests
 
         catalog.DomainEvents.Should().NotContain(e =>
             e.FullName == "DomainModeling.Example.Domain.EntityDeletedEvent`1");
+
+        var orgHandler = catalog.EventHandlers.Single(h => h.Name == "OrganizationDeletedHandler");
+        orgHandler.Handles.Should().Contain(deletedOrg.FullName);
     }
 }

@@ -1,5 +1,15 @@
 namespace DomainModeling.Example.Domain;
 
+// ─── Marker (optional second axis for domain event discovery) ───
+
+/// <summary>
+/// Marker for all domain events. Class events typically inherit <see cref="DomainEvent"/>; record events implement this directly (records cannot inherit non-record base classes).
+/// </summary>
+public interface IDomainEvent
+{
+    DateTime OccurredOn { get; }
+}
+
 // ─── Base classes ────────────────────────────────────────────────
 
 public abstract class Entity
@@ -9,18 +19,25 @@ public abstract class Entity
 
 public abstract class AggregateRoot : Entity
 {
-    private readonly List<DomainEvent> _events = [];
-    public IReadOnlyCollection<DomainEvent> Events => _events.AsReadOnly();
+    private readonly List<IDomainEvent> _events = [];
+    public IReadOnlyCollection<IDomainEvent> Events => _events.AsReadOnly();
 
     /// <summary>
     /// Records a domain event raised by this aggregate (alias for the common <c>Raise</c> pattern).
     /// </summary>
-    protected void AddDomainEvent(DomainEvent @event) => _events.Add(@event);
+    protected void AddDomainEvent(IDomainEvent @event) => _events.Add(@event);
 
     protected void Raise(DomainEvent @event) => AddDomainEvent(@event);
+
+    /// <summary>
+    /// Optional hook for deletion flows; overrides may raise <see cref="EntityDeletedEvent{TEntity}"/>.
+    /// </summary>
+    public virtual void DeleteEntity()
+    {
+    }
 }
 
-public abstract class DomainEvent
+public abstract class DomainEvent : IDomainEvent
 {
     public DateTime OccurredOn { get; init; } = DateTime.UtcNow;
 }
@@ -29,7 +46,7 @@ public abstract class ValueObject;
 
 // ─── Handler contracts ───────────────────────────────────────────
 
-public interface IEventHandler<in TEvent> where TEvent : DomainEvent
+public interface IEventHandler<in TEvent> where TEvent : IDomainEvent
 {
     Task HandleAsync(TEvent @event, CancellationToken ct = default);
 }

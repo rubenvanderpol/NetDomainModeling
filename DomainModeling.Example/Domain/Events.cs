@@ -44,22 +44,10 @@ public sealed class CustomerRegisteredEvent : DomainEvent
 }
 
 /// <summary>
-/// A generic domain event raised when any entity is deleted.
+/// A generic domain event raised when any entity is deleted (record primary constructor).
 /// </summary>
-public sealed class EntityDeletedEvent<TEntity> : DomainEvent where TEntity : Entity
+public record EntityDeletedEvent<TEntity>(TEntity Entity) : IDomainEvent where TEntity : Entity
 {
-    public Guid EntityId { get; init; }
-
-    public EntityDeletedEvent()
-    {
-    }
-
-    /// <summary>
-    /// Captures the deleted entity's id, e.g. <c>AddDomainEvent(new EntityDeletedEvent&lt;Organization&gt;(this))</c>.
-    /// </summary>
-    public EntityDeletedEvent(TEntity entity)
-    {
-        ArgumentNullException.ThrowIfNull(entity);
-        EntityId = entity.Id;
-    }
+    public DateTime OccurredOn { get; init; } = DateTime.UtcNow;
+    public Guid EntityId { get; init; } = Entity.Id;
 }

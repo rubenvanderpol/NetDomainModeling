@@ -83,9 +83,9 @@ public class Organization : AggregateRoot
     public required string Name { get; init; }
 
     /// <summary>
-    /// Illustrates tracking a generic domain event from the aggregate instance.
+    /// Illustrates tracking a generic record domain event from an overridden method.
     /// </summary>
-    public void Archive()
+    public override void DeleteEntity()
     {
         AddDomainEvent(new EntityDeletedEvent<Organization>(this));
     }

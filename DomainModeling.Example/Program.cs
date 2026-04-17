@@ -19,7 +19,7 @@ var domainGraph = DDDBuilder.Create(ctx => ctx
         .Entities(e => e.InheritsFrom<Entity>())
         .Aggregates(a => a.InheritsFrom<AggregateRoot>())
         .ValueObjects(v => v.InheritsFrom<ValueObject>())
-        .DomainEvents(e => e.InheritsFrom<DomainEvent>())
+        .DomainEvents(e => e.InheritsFrom<DomainEvent>().Or().Implements(typeof(IDomainEvent)))
         .IntegrationEvents(e => e.InheritsFrom<IntegrationEvent>())
         .EventHandlers(h => h
             .Implements(typeof(IEventHandler<>))
