@@ -197,5 +197,8 @@ public class ExampleAppGraphTests
             r.Kind == RelationshipKind.Handles &&
             r.SourceType.Contains("OrganizationDeletedHandler", StringComparison.Ordinal) &&
             r.TargetType == deletedOrg.FullName);
+
+        catalog.DomainEvents.Should().NotContain(e =>
+            e.FullName == "DomainModeling.Example.Domain.EntityDeletedEvent`1");
     }
 }

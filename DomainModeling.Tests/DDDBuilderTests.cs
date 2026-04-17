@@ -72,7 +72,7 @@ public class DDDBuilderTests
         var graph = BuildSampleGraph();
         var ctx = graph.BoundedContexts.Single();
 
-        ctx.DomainEvents.Should().HaveCount(7);
+        ctx.DomainEvents.Should().HaveCount(6);
         ctx.DomainEvents.Select(e => e.Name).Should()
             .Contain(["OrderPlacedEvent", "OrderShippedEvent", "CustomerCreatedEvent", "InvoiceCreatedEvent"]);
         ctx.DomainEvents.Should().Contain(e => e.Name.StartsWith("EntityDeletedEvent", StringComparison.Ordinal));
@@ -327,33 +327,31 @@ public class DDDBuilderTests
     }
 
     [Fact]
-    public void Build_GenericDomainEvent_HandlerLinksToOpenGenericEventNode()
+    public void Build_GenericDomainEvent_HandlerLinksToClosedGenericEventNode()
     {
         var graph = BuildSampleGraph();
         var ctx = graph.BoundedContexts.Single();
 
-        var genericEvent = ctx.DomainEvents.Single(e =>
-            e.Name.StartsWith("EntityDeletedEvent", StringComparison.Ordinal) && !e.Name.Contains('<'));
-        genericEvent.HandledBy.Should().Contain(h => h.Contains("OrderDeletedEventHandler"));
+        var orderDeleted = ctx.DomainEvents.Single(e => e.Name == "EntityDeletedEvent<Order>");
+        orderDeleted.HandledBy.Should().Contain(h => h.Contains("OrderDeletedEventHandler"));
 
         ctx.Relationships.Should().Contain(r =>
             r.Kind == RelationshipKind.Handles &&
             r.SourceType.Contains("OrderDeletedEventHandler", StringComparison.Ordinal) &&
-            r.TargetType == genericEvent.FullName);
+            r.TargetType == orderDeleted.FullName);
     }
 
     [Fact]
-    public void Build_GenericDomainEvent_EmissionUsesOpenGenericEventKey()
+    public void Build_GenericDomainEvent_EmissionUsesClosedGenericEventKey()
     {
         var graph = BuildSampleGraph();
         var ctx = graph.BoundedContexts.Single();
 
-        var genericEvent = ctx.DomainEvents.Single(e =>
-            e.Name.StartsWith("EntityDeletedEvent", StringComparison.Ordinal) && !e.Name.Contains('<'));
-        genericEvent.EmittedBy.Should().Contain(e => e.Contains("Order"));
+        var orderDeleted = ctx.DomainEvents.Single(e => e.Name == "EntityDeletedEvent<Order>");
+        orderDeleted.EmittedBy.Should().Contain(e => e.Contains("Order"));
 
         var order = ctx.Aggregates.Single(a => a.Name == "Order");
-        order.EmittedEvents.Should().Contain(genericEvent.FullName);
+        order.EmittedEvents.Should().Contain(orderDeleted.FullName);
     }
 
     [Fact]
@@ -430,16 +428,24 @@ public class DDDBuilderTests
     }
 
     [Fact]
-    public void Build_TypeDocumentedEmits_OpenGenericNodeStillExistsAndHandlerStillLinked()
+    public void Build_OpenGenericEntityDeletedEventDefinition_IsNotListedAsDomainEvent()
     {
         var graph = BuildSampleGraph();
         var ctx = graph.BoundedContexts.Single();
 
-        var openGenericEvent = ctx.DomainEvents.Single(e =>
-            e.Name.StartsWith("EntityDeletedEvent", StringComparison.Ordinal) &&
-            !e.Name.Contains("<"));
-        openGenericEvent.HandledBy.Should().Contain(h => h.Contains("OrderDeletedEventHandler"));
-        openGenericEvent.EmittedBy.Should().Contain(e => e.Contains("Order"));
+        ctx.DomainEvents.Should().NotContain(e =>
+            e.FullName == "DomainModeling.Tests.SampleDomain.EntityDeletedEvent`1");
+    }
+
+    [Fact]
+    public void Build_TypeDocumentedEmits_OrderHandlerStillLinkedToClosedGenericOrderDeleted()
+    {
+        var graph = BuildSampleGraph();
+        var ctx = graph.BoundedContexts.Single();
+
+        var orderDeleted = ctx.DomainEvents.Single(e => e.Name == "EntityDeletedEvent<Order>");
+        orderDeleted.HandledBy.Should().Contain(h => h.Contains("OrderDeletedEventHandler"));
+        orderDeleted.EmittedBy.Should().Contain(e => e.Contains("Order"));
     }
 
     [Fact]

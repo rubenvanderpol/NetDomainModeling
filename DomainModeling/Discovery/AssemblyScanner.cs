@@ -102,7 +102,11 @@ internal sealed class AssemblyScanner
             knownDomainTypes,
             eventHandlerNodes);
 
+        EnsureClosedGenericDomainEventNodesFromEventHandlers(domainEventTypes, domainEventNodes, knownDomainTypes, eventHandlerTypes);
+
         RemapEventHandlerHandlesFromIEventHandlerInterfaces(eventHandlerTypes, domainEventNodes, eventHandlerNodes);
+
+        RemoveOpenGenericDomainEventDefinitionNodes(domainEventNodes);
 
         var commandHandlerTargetNodes = DiscoverCommandHandlerTargets(
             allTypes,
@@ -186,7 +190,6 @@ internal sealed class AssemblyScanner
 
         // Wire emittedBy / handledBy on domain event nodes
         CrossReferenceEvents(domainEventNodes, entityNodes, aggregateNodes, eventHandlerNodes);
-        MergeClosedGenericHandledByOntoOpenGenericDefinition(domainEventNodes);
 
         // Detect which integration events are published by event handlers (IL scanning)
         var integrationEventFullNames = new HashSet<string>(integrationEventTypesAll.Select(e => e.FullName!));
@@ -1009,14 +1012,6 @@ internal sealed class AssemblyScanner
         }
 
         AddEventEmission(emittedByMethod, key, methodName);
-
-        var bracket = key.IndexOf("[[", StringComparison.Ordinal);
-        if (bracket >= 0)
-        {
-            var def = key[..bracket];
-            if (!string.Equals(def, key, StringComparison.Ordinal))
-                AddEventEmission(emittedByMethod, def, methodName);
-        }
     }
 
     private static string NormalizeMethodName(MethodBase method, string? fallbackMethodName)
@@ -1074,35 +1069,6 @@ internal sealed class AssemblyScanner
             {
                 if (TryResolveEventNode(eventMap, handled, out var evtNode))
                     evtNode.HandledBy.Add(handler.FullName);
-            }
-        }
-    }
-
-    /// <summary>
-    /// Copies <see cref="DomainEventNode.HandledBy"/> from closed-generic event nodes onto the open generic
-    /// definition node so the diagram lists all handlers in one place (e.g. Organization + Customer handlers
-    /// on <c>EntityDeletedEvent`1</c>).
-    /// </summary>
-    private static void MergeClosedGenericHandledByOntoOpenGenericDefinition(List<DomainEventNode> eventNodes)
-    {
-        var byFullName = eventNodes.ToDictionary(e => e.FullName, StringComparer.Ordinal);
-        foreach (var node in eventNodes)
-        {
-            if (node.HandledBy.Count == 0)
-                continue;
-
-            var bracket = node.FullName.IndexOf("[[", StringComparison.Ordinal);
-            if (bracket < 0)
-                continue;
-
-            var defName = node.FullName[..bracket];
-            if (!byFullName.TryGetValue(defName, out var defNode))
-                continue;
-
-            foreach (var h in node.HandledBy)
-            {
-                if (!defNode.HandledBy.Contains(h))
-                    defNode.HandledBy.Add(h);
             }
         }
     }
@@ -1273,10 +1239,7 @@ internal sealed class AssemblyScanner
             {
                 var h = handler.Handles[i];
                 var bracket = h.IndexOf("[[", StringComparison.Ordinal);
-                if (bracket < 0)
-                    continue;
-
-                var defKey = h[..bracket];
+                var defKey = bracket >= 0 ? h[..bracket] : h;
                 foreach (var closed in closedFromInterfaces)
                 {
                     if (closed.StartsWith(defKey, StringComparison.Ordinal) &&
@@ -1288,6 +1251,64 @@ internal sealed class AssemblyScanner
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Ensures a <see cref="DomainEventNode"/> exists for each closed generic event type referenced by
+    /// <c>IEventHandler&lt;T&gt;</c>, so removing open generic definition nodes does not drop handlers.
+    /// </summary>
+    private static void EnsureClosedGenericDomainEventNodesFromEventHandlers(
+        List<Type> domainEventDefinitions,
+        List<DomainEventNode> domainEventNodes,
+        HashSet<string> knownDomainTypes,
+        List<Type> eventHandlerTypes)
+    {
+        var defsByFullName = domainEventDefinitions
+            .Where(t => t is { FullName: not null, IsGenericTypeDefinition: true })
+            .Select(t => t.FullName!)
+            .ToHashSet(StringComparer.Ordinal);
+
+        var existing = new HashSet<string>(domainEventNodes.Select(e => e.FullName), StringComparer.Ordinal);
+
+        foreach (var handlerType in eventHandlerTypes)
+        {
+            foreach (var iface in handlerType.GetInterfaces().Where(i => i.IsGenericType))
+            {
+                if (iface.GetGenericTypeDefinition().Name != "IEventHandler`1")
+                    continue;
+
+                var arg = iface.GetGenericArguments()[0];
+                if (arg.FullName is null || !arg.IsGenericType || arg.IsGenericTypeDefinition)
+                    continue;
+
+                var defFullName = arg.GetGenericTypeDefinition().FullName;
+                if (defFullName is null || !defsByFullName.Contains(defFullName))
+                    continue;
+
+                var canonical = GenericTypeDisplayNames.ToCanonicalClosedGenericFullName(arg.FullName);
+                if (canonical is null || existing.Contains(canonical))
+                    continue;
+
+                domainEventNodes.Add(new DomainEventNode
+                {
+                    Name = GenericTypeDisplayNames.FormatAsCSharp(canonical),
+                    FullName = canonical,
+                });
+                existing.Add(canonical);
+                knownDomainTypes.Add(canonical);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Drops open generic definition nodes (e.g. <c>EntityDeletedEvent`1</c>) from the listed domain events;
+    /// only closed constructed types (and non-generics) remain as first-class graph nodes.
+    /// </summary>
+    private static void RemoveOpenGenericDomainEventDefinitionNodes(List<DomainEventNode> domainEventNodes)
+    {
+        domainEventNodes.RemoveAll(static e =>
+            e.FullName.IndexOf('`', StringComparison.Ordinal) >= 0 &&
+            e.FullName.IndexOf("[[", StringComparison.Ordinal) < 0);
     }
 
     private static bool TryResolveEventNode(
