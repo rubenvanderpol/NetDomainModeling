@@ -23,12 +23,22 @@ namespace DomainModeling.Builder;
 public sealed class TypeConventionBuilder
 {
     private readonly List<List<Func<Type, bool>>> _orBranches = [];
+    private readonly List<StructuralDomainEventRule> _structuralRules = [];
     private bool _mergeNextIntoCurrentBranch;
 
     /// <summary>
-    /// True when at least one convention rule has been configured.
+    /// True when at least one predicate convention rule has been configured.
     /// </summary>
     internal bool HasPredicates => _orBranches.Count > 0;
+
+    /// <summary>
+    /// Structural rules derive domain event types from handler types (method parameters).
+    /// </summary>
+    internal bool HasStructuralRules => _structuralRules.Count > 0;
+
+    internal IReadOnlyList<StructuralDomainEventRule> StructuralRules => _structuralRules;
+
+    internal void AddStructuralRule(StructuralDomainEventRule rule) => _structuralRules.Add(rule);
 
     /// <summary>
     /// AND the next rule with the current branch (the one formed by the immediately preceding rule).
@@ -144,6 +154,20 @@ public sealed class TypeConventionBuilder
         ArgumentNullException.ThrowIfNull(predicate);
         AddPredicate(predicate);
         return this;
+    }
+
+    /// <summary>
+    /// Begins a structural rule for domain events: choose handler types, then a method and parameter whose type is treated as a domain event.
+    /// Example: <c>Type(t => t.NameEndsWith("EventHandler")).HasMethod("Handle").Parameters().First().Type()</c>.
+    /// </summary>
+    public TypeStructuralSelector Type(Action<TypeConventionBuilder> configure)
+    {
+        ArgumentNullException.ThrowIfNull(configure);
+        var nested = new TypeConventionBuilder();
+        configure(nested);
+        if (!nested.HasPredicates)
+            throw new InvalidOperationException("Type() requires at least one predicate in the nested convention (e.g. NameEndsWith(\"EventHandler\")).");
+        return new TypeStructuralSelector(this, nested);
     }
 
     /// <summary>
