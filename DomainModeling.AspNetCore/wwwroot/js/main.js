@@ -581,6 +581,7 @@ function wireFeatureEditorGlobals() {
     downloadExport: featureEditorModule.downloadExport,
     toggleRelDropdown: featureEditorModule.toggleRelDropdown,
     changeAlias: featureEditorModule.changeAlias,
+    renameCustomType: featureEditorModule.renameCustomType,
     changeDescription: featureEditorModule.changeDescription,
     changeBoundedContext: featureEditorModule.changeBoundedContext,
     toggleBcDropdown: featureEditorModule.toggleBcDropdown,

@@ -735,8 +735,22 @@ function renderPropertiesPanel() {
     const cfg = KIND_CFG[n.kind];
 
     let h = `<div class="fe-panel-title" style="color:${cfg.color}">${cfg.stereotype}</div>`;
-    h += `<div class="fe-panel-field"><label>Name</label><div class="fe-panel-value">${esc(n.name)}</div></div>`;
-    h += `<div class="fe-panel-field"><label>Full Name</label><div class="fe-panel-value">${esc(n.id)}</div></div>`;
+    h += `<div class="fe-panel-field"><label>Name</label>`;
+    if (readOnly) {
+      h += `<div class="fe-panel-value">${esc(n.name)}</div></div>`;
+    } else if (n.isCustom) {
+      h += `<input type="text" class="fe-input" value="${escAttr(n.name)}" placeholder="Short type name…" `;
+      h += `onchange="window.__featureEditor.renameCustomType('${escAttr(n.id)}', this.value)" /></div>`;
+    } else {
+      h += `<div class="fe-panel-value">${esc(n.name)}</div></div>`;
+    }
+
+    h += `<div class="fe-panel-field"><label>Full Name</label>`;
+    if (readOnly || !n.isCustom) {
+      h += `<div class="fe-panel-value">${esc(n.id)}</div></div>`;
+    } else {
+      h += `<div class="fe-panel-value" style="opacity:0.9"><span style="color:var(--text-dim)">${esc('Custom.')}</span>${esc(n.name)}</div></div>`;
+    }
 
     // Alias
     h += `<div class="fe-panel-field"><label>Alias</label>`;
@@ -1634,6 +1648,49 @@ function renderBoundedContextDropdown(node) {
   }
   h += '</div></div>';
   return h;
+}
+
+/**
+ * Rename a custom type: updates id to `Custom.{shortName}` and rewires edges / selection.
+ * Domain-discovered types keep a fixed full name and cannot be renamed here.
+ */
+export function renameCustomType(nodeId, newShortName) {
+  if (isReadOnlyFeature()) return;
+  if (!st) return;
+  const n = st.nMap[nodeId];
+  if (!n || !n.isCustom) return;
+
+  const short = String(newShortName ?? '').trim();
+  if (!short) {
+    alert('Name cannot be empty.');
+    refreshPanel();
+    return;
+  }
+
+  const newId = `Custom.${short}`;
+  if (newId === nodeId) return;
+  if (st.nMap[newId]) {
+    alert('A type with that name already exists in this feature.');
+    refreshPanel();
+    return;
+  }
+
+  delete st.nMap[nodeId];
+  n.id = newId;
+  n.name = short;
+  st.nMap[newId] = n;
+
+  for (const e of st.edges) {
+    if (e.source === nodeId) e.source = newId;
+    if (e.target === nodeId) e.target = newId;
+  }
+  if (connecting && connecting.sourceId === nodeId) connecting.sourceId = newId;
+  if (st.selectedNode === nodeId) st.selectedNode = newId;
+
+  markDirty();
+  renderSvg();
+  refreshPalette();
+  refreshPanel();
 }
 
 export function changeAlias(nodeId, value) {
