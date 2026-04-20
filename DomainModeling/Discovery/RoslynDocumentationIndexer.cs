@@ -687,8 +687,8 @@ internal sealed partial class RoslynDocumentationIndexer
     /// <summary>
     /// Builds a canonical CLR full name that matches the format produced by <c>Type.FullName</c> for
     /// constructed generic types: <c>Ns.EntityDeletedEvent`1[[Ns.User, AssemblyName, ...]]</c>.
+    /// The graph later normalizes these to bracket keys via <see cref="GenericTypeDisplayNames.ToCanonicalClosedGenericFullName"/>.
     /// For non-generic types this is equivalent to <see cref="ToClrMetadataFullName"/>.
-    /// For constructed generics this uses the bracket notation matching CLR reflection.
     /// </summary>
     internal static string ToCanonicalGenericFullName(INamedTypeSymbol symbol)
     {

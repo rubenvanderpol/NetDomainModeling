@@ -457,7 +457,7 @@ internal sealed class AssemblyScanner
             foreach (var arg in iface.GetGenericArguments())
             {
                 if (arg.FullName is not null)
-                    handledTypes.Add(arg.FullName);
+                    handledTypes.Add(NormalizeHandlerHandledTypeFullName(arg.FullName));
             }
         }
 
@@ -471,13 +471,12 @@ internal sealed class AssemblyScanner
                 {
                     var paramFullName = param.ParameterType.FullName;
                     if (paramFullName is not null)
-                        handledTypes.Add(paramFullName);
+                        handledTypes.Add(NormalizeHandlerHandledTypeFullName(paramFullName));
                 }
             }
         }
 
         var handles = handledTypes
-            .Select(NormalizeHandlerHandledTypeFullName)
             .Where(s => s.Length > 0)
             .Distinct(StringComparer.Ordinal)
             .ToList();
@@ -493,16 +492,10 @@ internal sealed class AssemblyScanner
     }
 
     /// <summary>
-    /// Reflection sometimes returns assembly-qualified constructed generic names; normalize to the short
-    /// canonical form used elsewhere in the graph (e.g. for record event types from <c>IEventHandler&lt;T&gt;</c>).
+    /// Reflection returns CLR <c>`1[[...]]</c> names; graph keys use bracket form <c>Type[Arg]</c>.
     /// </summary>
-    private static string NormalizeHandlerHandledTypeFullName(string fullName)
-    {
-        if (!fullName.Contains("[[", StringComparison.Ordinal))
-            return fullName;
-
-        return GenericTypeDisplayNames.ToCanonicalClosedGenericFullName(fullName) ?? fullName;
-    }
+    private static string NormalizeHandlerHandledTypeFullName(string fullName) =>
+        GenericTypeDisplayNames.ToCanonicalClosedGenericFullName(fullName) ?? fullName;
 
     private RepositoryNode BuildRepositoryNode(Type type, List<Type> aggregateTypes, string? layer)
     {
@@ -1115,36 +1108,31 @@ internal sealed class AssemblyScanner
     }
 
     /// <summary>
-    /// For constructed generic CLR names, the open generic definition is the prefix before type arguments (<c>[[...]]</c>).
-    /// Handlers and IL often use the constructed form while the graph node is the generic type definition.
-    /// Also matches CLR reflection names against canonical short-form constructed generics (e.g.
-    /// <c>Ns.Event`1[[Ns.User, Assembly, ...]]</c> matches <c>Ns.Event`1[[Ns.User]]</c>).
-    /// Prefers a constructed generic match over the open generic definition.
+    /// Resolves reflection or documentation type strings to graph <see cref="DomainEventNode.FullName"/> keys
+    /// (closed generics use bracket form <c>Ns.Event[Ns.Arg]</c>, not CLR <c>[[...]]</c>).
     /// </summary>
     private static string? ResolveCanonicalEventKey(string typeFullName, HashSet<string> registeredEventFullNames)
     {
         if (registeredEventFullNames.Contains(typeFullName))
             return typeFullName;
 
-        var bracket = typeFullName.IndexOf("[[", StringComparison.Ordinal);
-        if (bracket >= 0)
-        {
-            var canonical = GenericTypeDisplayNames.ToCanonicalClosedGenericFullName(typeFullName);
-            if (canonical is not null && registeredEventFullNames.Contains(canonical))
-                return canonical;
+        // Constructed generic (CLR `[[...]]` or bracket form): map only to the closed canonical key, never to the
+        // open generic definition — otherwise handler Handles get rewritten to `EntityDeletedEvent`1` before
+        // closed nodes exist and never match again.
+        var asClosed = GenericTypeDisplayNames.ToCanonicalClosedGenericFullName(typeFullName);
+        if (asClosed is not null)
+            return registeredEventFullNames.Contains(asClosed) ? asClosed : null;
 
-            var def = typeFullName[..bracket];
-            if (registeredEventFullNames.Contains(def))
-                return def;
-        }
+        var defWithArity = GenericTypeDisplayNames.GetOpenGenericDefinitionWithArity(typeFullName);
+        if (defWithArity is not null && registeredEventFullNames.Contains(defWithArity))
+            return defWithArity;
 
         return null;
     }
 
     /// <summary>
-    /// Like <see cref="ResolveCanonicalEventKey"/> but prefers the constructed generic CLR name when the
-    /// open generic definition is registered, so emissions and graph edges target the closed type
-    /// (e.g. <c>EntityDeletedEvent`1[[Organization]]</c>) rather than collapsing to <c>EntityDeletedEvent`1</c>.
+    /// Like <see cref="ResolveCanonicalEventKey"/> but for IL emissions: prefer the normalized closed bracket key
+    /// when the open generic definition is registered.
     /// </summary>
     private static string? ResolveEmissionEventKey(string typeFullName, HashSet<string> registeredEventFullNames)
     {
@@ -1202,19 +1190,12 @@ internal sealed class AssemblyScanner
 
         foreach (var key in AllEmittedKeys().Distinct(StringComparer.Ordinal))
         {
-            if (!key.Contains("[[", StringComparison.Ordinal))
-                continue;
-
             var canonical = GenericTypeDisplayNames.ToCanonicalClosedGenericFullName(key);
             if (canonical is null || existingEventFullNames.Contains(canonical))
                 continue;
 
-            var bracket = canonical.IndexOf("[[", StringComparison.Ordinal);
-            if (bracket < 0)
-                continue;
-
-            var defPrefix = canonical[..bracket];
-            if (!defFullNames.Contains(defPrefix))
+            var defPrefix = GenericTypeDisplayNames.GetOpenGenericDefinitionWithArity(canonical);
+            if (defPrefix is null || !defFullNames.Contains(defPrefix))
                 continue;
 
             domainEventNodes.Add(new DomainEventNode
@@ -1279,12 +1260,33 @@ internal sealed class AssemblyScanner
             for (var i = 0; i < handler.Handles.Count; i++)
             {
                 var h = handler.Handles[i];
-                var bracket = h.IndexOf("[[", StringComparison.Ordinal);
-                var defKey = bracket >= 0 ? h[..bracket] : h;
+                var hCanon = GenericTypeDisplayNames.ToCanonicalClosedGenericFullName(h) ?? h;
+                var hOpenDef = GenericTypeDisplayNames.GetOpenGenericDefinitionWithArity(hCanon);
+                if (hOpenDef is null)
+                {
+                    var clrBi = h.IndexOf("[[", StringComparison.Ordinal);
+                    if (clrBi >= 0)
+                        hOpenDef = h[..clrBi];
+                }
+
                 foreach (var closed in closedFromInterfaces)
                 {
-                    if (closed.StartsWith(defKey, StringComparison.Ordinal) &&
-                        eventFullNames.Contains(closed))
+                    var closedOpen = GenericTypeDisplayNames.GetOpenGenericDefinitionWithArity(closed);
+                    if (closedOpen is null)
+                        continue;
+
+                    var sameOpen = hOpenDef is not null &&
+                        string.Equals(closedOpen, hOpenDef, StringComparison.Ordinal);
+                    if (!sameOpen && hOpenDef is not null)
+                    {
+                        // e.g. handler still has only arity-stripped name in edge cases
+                        sameOpen = string.Equals(
+                            GenericTypeDisplayNames.StripGenericArity(closedOpen),
+                            GenericTypeDisplayNames.StripGenericArity(hOpenDef),
+                            StringComparison.Ordinal);
+                    }
+
+                    if (sameOpen && eventFullNames.Contains(closed))
                     {
                         handler.Handles[i] = closed;
                         break;
@@ -1349,7 +1351,7 @@ internal sealed class AssemblyScanner
     {
         domainEventNodes.RemoveAll(static e =>
             e.FullName.IndexOf('`', StringComparison.Ordinal) >= 0 &&
-            e.FullName.IndexOf("[[", StringComparison.Ordinal) < 0);
+            e.FullName.IndexOf('[', StringComparison.Ordinal) < 0);
     }
 
     private static bool TryResolveEventNode(
@@ -1357,19 +1359,30 @@ internal sealed class AssemblyScanner
         string typeFullName,
         [NotNullWhen(true)] out DomainEventNode? node)
     {
+        var normalized = GenericTypeDisplayNames.ToCanonicalClosedGenericFullName(typeFullName) ?? typeFullName;
+
+        if (eventMap.TryGetValue(normalized, out node))
+            return true;
+
         if (eventMap.TryGetValue(typeFullName, out node))
             return true;
 
-        var bracket = typeFullName.IndexOf("[[", StringComparison.Ordinal);
-        if (bracket >= 0)
+        foreach (var (key, evt) in eventMap)
         {
-            var canonical = GenericTypeDisplayNames.ToCanonicalClosedGenericFullName(typeFullName);
-            if (canonical is not null && eventMap.TryGetValue(canonical, out node))
+            if (GenericTypeDisplayNames.AreSameConstructedGeneric(typeFullName, key))
+            {
+                node = evt;
                 return true;
-
-            if (eventMap.TryGetValue(typeFullName[..bracket], out node))
-                return true;
+            }
         }
+
+        var clrBracket = typeFullName.IndexOf("[[", StringComparison.Ordinal);
+        if (clrBracket >= 0 && eventMap.TryGetValue(typeFullName[..clrBracket], out node))
+            return true;
+
+        var defArity = GenericTypeDisplayNames.GetOpenGenericDefinitionWithArity(typeFullName);
+        if (defArity is not null && eventMap.TryGetValue(defArity, out node))
+            return true;
 
         node = null;
         return false;
@@ -1786,18 +1799,19 @@ internal sealed class AssemblyScanner
             var emissions = documentationIndexer.TryGetTypeDocumentedEmissions(type);
             foreach (var (canonicalFullName, _) in emissions)
             {
-                if (!eventFullNames.Contains(canonicalFullName))
+                var fullNameKey = GenericTypeDisplayNames.ToCanonicalClosedGenericFullName(canonicalFullName) ?? canonicalFullName;
+                if (!eventFullNames.Contains(fullNameKey))
                     continue;
-                if (!emittedEvents.Contains(canonicalFullName))
-                    emittedEvents.Add(canonicalFullName);
-                if (!eventEmissions.Any(e => e.EventType == canonicalFullName))
-                    eventEmissions.Add(new EventEmissionInfo { EventType = canonicalFullName, MethodName = "(documented)" });
-                if (addedRelationships.Add((emitterFullName, canonicalFullName)))
+                if (!emittedEvents.Contains(fullNameKey))
+                    emittedEvents.Add(fullNameKey);
+                if (!eventEmissions.Any(e => e.EventType == fullNameKey))
+                    eventEmissions.Add(new EventEmissionInfo { EventType = fullNameKey, MethodName = "(documented)" });
+                if (addedRelationships.Add((emitterFullName, fullNameKey)))
                 {
                     relationships.Add(new Relationship
                     {
                         SourceType = emitterFullName,
-                        TargetType = canonicalFullName,
+                        TargetType = fullNameKey,
                         Kind = RelationshipKind.Emits,
                         Label = "emits (documented)"
                     });
@@ -1833,16 +1847,17 @@ internal sealed class AssemblyScanner
 
             foreach (var (canonicalFullName, displayName) in emissions)
             {
-                if (existingEventFullNames.Contains(canonicalFullName))
+                var fullNameKey = GenericTypeDisplayNames.ToCanonicalClosedGenericFullName(canonicalFullName) ?? canonicalFullName;
+                if (existingEventFullNames.Contains(fullNameKey))
                     continue;
 
                 domainEventNodes.Add(new DomainEventNode
                 {
                     Name = displayName,
-                    FullName = canonicalFullName,
+                    FullName = fullNameKey,
                 });
-                existingEventFullNames.Add(canonicalFullName);
-                knownDomainTypes.Add(canonicalFullName);
+                existingEventFullNames.Add(fullNameKey);
+                knownDomainTypes.Add(fullNameKey);
             }
         }
 
