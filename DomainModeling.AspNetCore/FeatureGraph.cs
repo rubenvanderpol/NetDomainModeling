@@ -26,7 +26,13 @@ public sealed class FeatureGraph
 /// </summary>
 public sealed class FeatureBoundedContext
 {
+    /// <summary>Name of the saved feature (single bounded context node in the feature slice).</summary>
     public string Name { get; init; } = "";
+    /// <summary>
+    /// Distinct bounded context names attached to types in this diagram (from the editor’s
+    /// <c>boundedContext</c> field and/or merged from the scanned domain graph).
+    /// </summary>
+    public List<string> ReferencedBoundedContextNames { get; init; } = [];
     public List<FeatureEntity> Entities { get; init; } = [];
     public List<FeatureAggregate> Aggregates { get; init; } = [];
     public List<FeatureValueObject> ValueObjects { get; init; } = [];
@@ -44,6 +50,7 @@ public sealed class FeatureBoundedContext
     internal static FeatureBoundedContext FromBoundedContextNode(BoundedContextNode n) => new()
     {
         Name = n.Name,
+        ReferencedBoundedContextNames = CollectReferencedBoundedContextNames(n),
         Entities = n.Entities.Select(FeatureEntity.FromEntityNode).ToList(),
         Aggregates = n.Aggregates.Select(FeatureAggregate.FromAggregateNode).ToList(),
         ValueObjects = n.ValueObjects.Select(FeatureValueObject.FromValueObjectNode).ToList(),
@@ -58,6 +65,31 @@ public sealed class FeatureBoundedContext
         SubTypes = n.SubTypes.Select(FeatureSubType.FromSubTypeNode).ToList(),
         Relationships = n.Relationships.Select(FeatureRelationship.FromRelationship).ToList(),
     };
+
+    private static List<string> CollectReferencedBoundedContextNames(BoundedContextNode n)
+    {
+        var set = new HashSet<string>(StringComparer.Ordinal);
+        void Add(string? s)
+        {
+            if (!string.IsNullOrWhiteSpace(s))
+                set.Add(s.Trim());
+        }
+
+        foreach (var x in n.Aggregates) Add(x.BoundedContextName);
+        foreach (var x in n.Entities) Add(x.BoundedContextName);
+        foreach (var x in n.ValueObjects) Add(x.BoundedContextName);
+        foreach (var x in n.DomainEvents) Add(x.BoundedContextName);
+        foreach (var x in n.IntegrationEvents) Add(x.BoundedContextName);
+        foreach (var x in n.CommandHandlerTargets) Add(x.BoundedContextName);
+        foreach (var x in n.EventHandlers) Add(x.BoundedContextName);
+        foreach (var x in n.CommandHandlers) Add(x.BoundedContextName);
+        foreach (var x in n.QueryHandlers) Add(x.BoundedContextName);
+        foreach (var x in n.Repositories) Add(x.BoundedContextName);
+        foreach (var x in n.DomainServices) Add(x.BoundedContextName);
+        foreach (var x in n.SubTypes) Add(x.BoundedContextName);
+
+        return set.OrderBy(s => s, StringComparer.Ordinal).ToList();
+    }
 }
 
 public sealed class FeatureEntity
@@ -66,6 +98,8 @@ public sealed class FeatureEntity
     public string FullName { get; init; } = "";
     public string? Alias { get; init; }
     public string? Description { get; init; }
+    /// <summary>Discovered or editor-persisted bounded context for this type.</summary>
+    public string? BoundedContextName { get; init; }
     public string? Layer { get; init; }
     public bool IsCustom { get; init; }
     public List<FeatureProperty> Properties { get; init; } = [];
@@ -78,6 +112,7 @@ public sealed class FeatureEntity
         FullName = n.FullName,
         Alias = n.Alias,
         Description = n.Description,
+        BoundedContextName = n.BoundedContextName,
         Layer = n.Layer,
         IsCustom = n.IsCustom,
         Properties = n.Properties.Select(FeatureProperty.FromGraphProperty).ToList(),
@@ -92,6 +127,7 @@ public sealed class FeatureAggregate
     public string FullName { get; init; } = "";
     public string? Alias { get; init; }
     public string? Description { get; init; }
+    public string? BoundedContextName { get; init; }
     public string? Layer { get; init; }
     public bool IsCustom { get; init; }
     public List<FeatureProperty> Properties { get; init; } = [];
@@ -106,6 +142,7 @@ public sealed class FeatureAggregate
         FullName = n.FullName,
         Alias = n.Alias,
         Description = n.Description,
+        BoundedContextName = n.BoundedContextName,
         Layer = n.Layer,
         IsCustom = n.IsCustom,
         Properties = n.Properties.Select(FeatureProperty.FromGraphProperty).ToList(),
@@ -134,6 +171,7 @@ public sealed class FeatureValueObject
     public string FullName { get; init; } = "";
     public string? Alias { get; init; }
     public string? Description { get; init; }
+    public string? BoundedContextName { get; init; }
     public string? Layer { get; init; }
     public bool IsCustom { get; init; }
     public List<FeatureProperty> Properties { get; init; } = [];
@@ -144,6 +182,7 @@ public sealed class FeatureValueObject
         FullName = n.FullName,
         Alias = n.Alias,
         Description = n.Description,
+        BoundedContextName = n.BoundedContextName,
         Layer = n.Layer,
         IsCustom = n.IsCustom,
         Properties = n.Properties.Select(FeatureProperty.FromGraphProperty).ToList(),
@@ -156,6 +195,7 @@ public sealed class FeatureCommandHandlerTarget
     public string FullName { get; init; } = "";
     public string? Alias { get; init; }
     public string? Description { get; init; }
+    public string? BoundedContextName { get; init; }
     public string? Layer { get; init; }
     public bool IsCustom { get; init; }
     public List<FeatureProperty> Properties { get; init; } = [];
@@ -167,6 +207,7 @@ public sealed class FeatureCommandHandlerTarget
         FullName = n.FullName,
         Alias = n.Alias,
         Description = n.Description,
+        BoundedContextName = n.BoundedContextName,
         Layer = n.Layer,
         IsCustom = n.IsCustom,
         Properties = n.Properties.Select(FeatureProperty.FromGraphProperty).ToList(),
@@ -180,6 +221,7 @@ public sealed class FeatureDomainEvent
     public string FullName { get; init; } = "";
     public string? Alias { get; init; }
     public string? Description { get; init; }
+    public string? BoundedContextName { get; init; }
     public string? Layer { get; init; }
     public bool IsCustom { get; init; }
     public List<FeatureProperty> Properties { get; init; } = [];
@@ -192,6 +234,7 @@ public sealed class FeatureDomainEvent
         FullName = n.FullName,
         Alias = n.Alias,
         Description = n.Description,
+        BoundedContextName = n.BoundedContextName,
         Layer = n.Layer,
         IsCustom = n.IsCustom,
         Properties = n.Properties.Select(FeatureProperty.FromGraphProperty).ToList(),
@@ -206,6 +249,7 @@ public sealed class FeatureHandler
     public string FullName { get; init; } = "";
     public string? Alias { get; init; }
     public string? Description { get; init; }
+    public string? BoundedContextName { get; init; }
     public string? Layer { get; init; }
     public bool IsCustom { get; init; }
     public List<string> Handles { get; init; } = [];
@@ -216,6 +260,7 @@ public sealed class FeatureHandler
         FullName = n.FullName,
         Alias = n.Alias,
         Description = n.Description,
+        BoundedContextName = n.BoundedContextName,
         Layer = n.Layer,
         IsCustom = n.IsCustom,
         Handles = [..n.Handles],
@@ -228,6 +273,7 @@ public sealed class FeatureRepository
     public string FullName { get; init; } = "";
     public string? Alias { get; init; }
     public string? Description { get; init; }
+    public string? BoundedContextName { get; init; }
     public string? Layer { get; init; }
     public bool IsCustom { get; init; }
     public string? ManagesAggregate { get; init; }
@@ -238,6 +284,7 @@ public sealed class FeatureRepository
         FullName = n.FullName,
         Alias = n.Alias,
         Description = n.Description,
+        BoundedContextName = n.BoundedContextName,
         Layer = n.Layer,
         IsCustom = n.IsCustom,
         ManagesAggregate = n.ManagesAggregate,
@@ -250,6 +297,7 @@ public sealed class FeatureDomainService
     public string FullName { get; init; } = "";
     public string? Alias { get; init; }
     public string? Description { get; init; }
+    public string? BoundedContextName { get; init; }
     public string? Layer { get; init; }
     public bool IsCustom { get; init; }
 
@@ -259,6 +307,7 @@ public sealed class FeatureDomainService
         FullName = n.FullName,
         Alias = n.Alias,
         Description = n.Description,
+        BoundedContextName = n.BoundedContextName,
         Layer = n.Layer,
         IsCustom = n.IsCustom,
     };
@@ -270,6 +319,7 @@ public sealed class FeatureSubType
     public string FullName { get; init; } = "";
     public string? Alias { get; init; }
     public string? Description { get; init; }
+    public string? BoundedContextName { get; init; }
     public string? Layer { get; init; }
     public List<FeatureProperty> Properties { get; init; } = [];
 
@@ -279,6 +329,7 @@ public sealed class FeatureSubType
         FullName = n.FullName,
         Alias = n.Alias,
         Description = n.Description,
+        BoundedContextName = n.BoundedContextName,
         Layer = n.Layer,
         Properties = n.Properties.Select(FeatureProperty.FromGraphProperty).ToList(),
     };

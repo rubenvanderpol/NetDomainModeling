@@ -135,4 +135,80 @@ public class FeatureJsonConverterTests
         md.Should().Contain("## Raw feature editor JSON");
         md.Should().Contain(raw);
     }
+
+    [Fact]
+    public void ToDomainGraph_PersistsBoundedContextAndLayerOnEntity()
+    {
+        const string json = """
+            {
+              "nodes": [
+                {
+                  "id": "App.LineItem",
+                  "name": "LineItem",
+                  "kind": "entity",
+                  "isCustom": false,
+                  "boundedContext": "Catalog",
+                  "layer": "Domain",
+                  "props": []
+                }
+              ],
+              "edges": [],
+              "positions": {}
+            }
+            """;
+
+        var g = FeatureJsonConverter.ToDomainGraph(json, "MyFeature");
+        var e = g.BoundedContexts[0].Entities.Should().ContainSingle().Subject;
+        e.FullName.Should().Be("App.LineItem");
+        e.BoundedContextName.Should().Be("Catalog");
+        e.Layer.Should().Be("Domain");
+    }
+
+    [Fact]
+    public void FeatureGraphSliceEnrichment_FillsDescriptionAndBoundedContextFromFullGraph()
+    {
+        var full = new DomainGraph(
+            new BoundedContextNode
+            {
+                Name = "Catalog",
+                Entities =
+                [
+                    new EntityNode
+                    {
+                        Name = "Product",
+                        FullName = "DomainModeling.Example.Domain.Product",
+                        Description = "A sellable item in the catalog.",
+                    },
+                ],
+            });
+
+        const string featureJson = """
+            {
+              "nodes": [
+                {
+                  "id": "DomainModeling.Example.Domain.Product",
+                  "name": "Product",
+                  "kind": "entity",
+                  "isCustom": false,
+                  "props": []
+                }
+              ],
+              "edges": [],
+              "positions": {}
+            }
+            """;
+
+        var slice = FeatureJsonConverter.ToDomainGraph(featureJson, "Pricing");
+        FeatureGraphSliceEnrichment.Apply(slice, full);
+
+        var entity = slice.BoundedContexts[0].Entities.Should().ContainSingle().Subject;
+        entity.Description.Should().Be("A sellable item in the catalog.");
+        entity.BoundedContextName.Should().Be("Catalog");
+
+        var fg = FeatureGraph.FromDomainGraph(slice);
+        var fe = fg.BoundedContexts[0].Entities.Should().ContainSingle().Subject;
+        fe.Description.Should().Be("A sellable item in the catalog.");
+        fe.BoundedContextName.Should().Be("Catalog");
+        fg.BoundedContexts[0].ReferencedBoundedContextNames.Should().Equal("Catalog");
+    }
 }

@@ -36,6 +36,8 @@ internal static class FeatureJsonConverter
                 var isCustom = node.TryGetProperty("isCustom", out var ic) && ic.GetBoolean();
                 var alias = GetOptString(node, "alias");
                 var description = GetOptString(node, "description");
+                var boundedContext = GetOptString(node, "boundedContext");
+                var layer = GetOptString(node, "layer");
                 var properties = ParseProperties(node);
 
                 switch (kind)
@@ -47,6 +49,8 @@ internal static class FeatureJsonConverter
                             FullName = id,
                             Alias = alias,
                             Description = description,
+                            BoundedContextName = boundedContext,
+                            Layer = layer,
                             IsCustom = isCustom,
                             Properties = properties,
                             Methods = ParseMethods(node),
@@ -59,6 +63,8 @@ internal static class FeatureJsonConverter
                             FullName = id,
                             Alias = alias,
                             Description = description,
+                            BoundedContextName = boundedContext,
+                            Layer = layer,
                             IsCustom = isCustom,
                             Properties = properties,
                         });
@@ -70,6 +76,8 @@ internal static class FeatureJsonConverter
                             FullName = id,
                             Alias = alias,
                             Description = description,
+                            BoundedContextName = boundedContext,
+                            Layer = layer,
                             IsCustom = isCustom,
                             Properties = properties,
                         });
@@ -81,6 +89,8 @@ internal static class FeatureJsonConverter
                             FullName = id,
                             Alias = alias,
                             Description = description,
+                            BoundedContextName = boundedContext,
+                            Layer = layer,
                             IsCustom = isCustom,
                             Properties = properties,
                         });
@@ -92,6 +102,8 @@ internal static class FeatureJsonConverter
                             FullName = id,
                             Alias = alias,
                             Description = description,
+                            BoundedContextName = boundedContext,
+                            Layer = layer,
                             IsCustom = isCustom,
                             Properties = properties,
                         });
@@ -104,7 +116,8 @@ internal static class FeatureJsonConverter
                             FullName = id,
                             Alias = alias,
                             Description = description,
-                            Layer = GetOptString(node, "layer"),
+                            BoundedContextName = boundedContext,
+                            Layer = layer,
                             IsCustom = isCustom,
                             Properties = properties,
                         });
@@ -116,6 +129,8 @@ internal static class FeatureJsonConverter
                             FullName = id,
                             Alias = alias,
                             Description = description,
+                            BoundedContextName = boundedContext,
+                            Layer = layer,
                             IsCustom = isCustom,
                         });
                         break;
@@ -126,6 +141,8 @@ internal static class FeatureJsonConverter
                             FullName = id,
                             Alias = alias,
                             Description = description,
+                            BoundedContextName = boundedContext,
+                            Layer = layer,
                             IsCustom = isCustom,
                         });
                         break;
@@ -136,6 +153,8 @@ internal static class FeatureJsonConverter
                             FullName = id,
                             Alias = alias,
                             Description = description,
+                            BoundedContextName = boundedContext,
+                            Layer = layer,
                             IsCustom = isCustom,
                         });
                         break;
@@ -146,6 +165,8 @@ internal static class FeatureJsonConverter
                             FullName = id,
                             Alias = alias,
                             Description = description,
+                            BoundedContextName = boundedContext,
+                            Layer = layer,
                             IsCustom = isCustom,
                         });
                         break;
@@ -156,6 +177,8 @@ internal static class FeatureJsonConverter
                             FullName = id,
                             Alias = alias,
                             Description = description,
+                            BoundedContextName = boundedContext,
+                            Layer = layer,
                             IsCustom = isCustom,
                         });
                         break;
@@ -166,6 +189,8 @@ internal static class FeatureJsonConverter
                             FullName = id,
                             Alias = alias,
                             Description = description,
+                            BoundedContextName = boundedContext,
+                            Layer = layer,
                             Properties = properties,
                         });
                         break;

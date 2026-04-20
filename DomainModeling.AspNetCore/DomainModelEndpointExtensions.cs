@@ -646,8 +646,9 @@ public static class DomainModelEndpointExtensions
                         return Results.NotFound();
 
                     var featureJson = File.ReadAllText(path);
-                    var featureGraph = FeatureGraph.FromDomainGraph(
-                        FeatureJsonConverter.ToDomainGraph(featureJson, safeName));
+                    var slice = FeatureJsonConverter.ToDomainGraph(featureJson, safeName);
+                    FeatureGraphSliceEnrichment.Apply(slice, graph);
+                    var featureGraph = FeatureGraph.FromDomainGraph(slice);
 
                     var content = export.Builder(featureGraph, new FeatureExportContext(featureJson));
                     if (http.Request.Query.TryGetValue("registerCommands", out var rc) && rc.Count > 0)
