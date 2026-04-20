@@ -83,4 +83,56 @@ public class FeatureJsonConverterTests
         var code = FeatureCommandRegistrationScaffold.BuildCSharpRegistrations(graph);
         code.Should().Contain("AddTransient<ICommandHandler<global::Ns.Cmd>, global::Ns.H>();");
     }
+
+    [Fact]
+    public void FeatureLlmImplementationPrompt_IncludesFullGraphJson()
+    {
+        var graph = new FeatureGraph
+        {
+            BoundedContexts =
+            [
+                new FeatureBoundedContext
+                {
+                    Name = "Checkout",
+                    Aggregates =
+                    [
+                        new FeatureAggregate
+                        {
+                            Name = "Order",
+                            FullName = "App.Order",
+                            Properties =
+                            [
+                                new FeatureProperty { Name = "Id", TypeName = "Guid" },
+                            ],
+                        },
+                    ],
+                    Relationships =
+                    [
+                        new FeatureRelationship
+                        {
+                            SourceType = "App.Order",
+                            TargetType = "App.OrderPlaced",
+                            Kind = RelationshipKind.Emits,
+                        },
+                    ],
+                },
+            ],
+        };
+
+        var md = FeatureLlmImplementationPrompt.BuildMarkdown(graph);
+        md.Should().Contain("Implement domain feature: Checkout");
+        md.ToLowerInvariant().Should().Contain("\"fullname\": \"app.order\"");
+        md.Should().Contain("| `App.Order` | Emits | `App.OrderPlaced` |");
+    }
+
+    [Fact]
+    public void FeatureLlmImplementationPrompt_IncludesRawFeatureJsonWhenProvided()
+    {
+        const string raw = """{"readOnly":true,"nodes":[],"edges":[],"positions":{}}""";
+        var graph = new FeatureGraph { BoundedContexts = [new FeatureBoundedContext { Name = "X" }] };
+
+        var md = FeatureLlmImplementationPrompt.BuildMarkdown(graph, raw);
+        md.Should().Contain("## Raw feature editor JSON");
+        md.Should().Contain(raw);
+    }
 }

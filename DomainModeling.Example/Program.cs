@@ -126,6 +126,9 @@ app.MapDomainModel(domainGraph, configure: opts =>
         }
         return string.Join(Environment.NewLine, lines);
     });
+
+    opts.AddFeatureExport("LLM implementation prompt", "md", (graph, ctx) =>
+        FeatureLlmImplementationPrompt.BuildMarkdown(graph, ctx.RawFeatureEditorJson));
 });
 
 // Demo: push a sample trace row to the Trace tab (POST with empty body)
