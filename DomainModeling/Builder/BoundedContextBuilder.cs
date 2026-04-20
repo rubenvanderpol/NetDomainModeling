@@ -28,6 +28,8 @@ public sealed class BoundedContextBuilder
     /// Assemblies scanned for discovery (handlers, IL, references) in this context, but whose
     /// primary building blocks are listed only under the bounded context name passed to
     /// <c>WithSharedAssembly(assembly, boundedContextName)</c> on <see cref="DDDBuilder"/>.
+    /// Domain event types and event handlers that still match the configured conventions in such an assembly
+    /// are merged into discovery (emission matching, generic handler resolution) and domain event nodes.
     /// </summary>
     internal HashSet<Assembly> ExternallyOwnedSharedAssemblies { get; } = new();
 

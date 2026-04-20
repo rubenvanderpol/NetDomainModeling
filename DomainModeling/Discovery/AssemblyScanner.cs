@@ -50,14 +50,28 @@ internal sealed class AssemblyScanner
 
         bool OwnedElsewhere(Type t) => _config.ExternallyOwnedSharedAssemblies.Contains(t.Assembly);
 
-        // Categorize types based on configured conventions (types "owned" by another BC are scanned but not listed here)
+        // Categorize types based on configured conventions. Types in ExternallyOwnedSharedAssemblies are still
+        // scanned for IL and references; domain events (and handler types for generic resolution) that match
+        // conventions there are merged into discovery so emissions and IEventHandler<T> remapping work.
         var entityTypes = allTypes.Where(t => !OwnedElsewhere(t) && _config.EntityConvention.Matches(t)).ToList();
         var aggregateTypes = allTypes.Where(t => !OwnedElsewhere(t) && _config.AggregateConvention.Matches(t)).ToList();
         var valueObjectTypes = allTypes.Where(t => !OwnedElsewhere(t) && _config.ValueObjectConvention.Matches(t)).ToList();
         var domainEventTypes = allTypes.Where(t => !OwnedElsewhere(t) && _config.DomainEventConvention.Matches(t)).ToList();
+        var externallyOwnedDomainEventTypes = allTypes.Where(t => OwnedElsewhere(t) && _config.DomainEventConvention.Matches(t)).ToList();
+        var domainEventTypesForScan = domainEventTypes
+            .Concat(externallyOwnedDomainEventTypes)
+            .GroupBy(t => t.FullName!, StringComparer.Ordinal)
+            .Select(g => g.First())
+            .ToList();
         var integrationEventTypesAll = allTypes.Where(t => _config.IntegrationEventConvention.Matches(t)).ToList();
         var integrationEventTypes = integrationEventTypesAll.Where(t => !OwnedElsewhere(t)).ToList();
         var eventHandlerTypes = allTypes.Where(t => !OwnedElsewhere(t) && _config.EventHandlerConvention.Matches(t)).ToList();
+        var externallyOwnedEventHandlerTypes = allTypes.Where(t => OwnedElsewhere(t) && _config.EventHandlerConvention.Matches(t)).ToList();
+        var eventHandlerTypesForResolution = eventHandlerTypes
+            .Concat(externallyOwnedEventHandlerTypes)
+            .GroupBy(t => t.FullName!, StringComparer.Ordinal)
+            .Select(g => g.First())
+            .ToList();
         var commandHandlerTypes = allTypes.Where(t => !OwnedElsewhere(t) && _config.CommandHandlerConvention.Matches(t)).ToList();
         var queryHandlerTypes = allTypes.Where(t => !OwnedElsewhere(t) && _config.QueryHandlerConvention.Matches(t)).ToList();
         var repositoryTypes = allTypes.Where(t => !OwnedElsewhere(t) && _config.RepositoryConvention.Matches(t)).ToList();
@@ -66,15 +80,15 @@ internal sealed class AssemblyScanner
         // Build a set of all "known domain type" full names for reference detection
         var knownDomainTypes = new HashSet<string>(
             entityTypes.Concat(aggregateTypes).Concat(valueObjectTypes)
-                .Concat(domainEventTypes).Concat(integrationEventTypesAll)
+                .Concat(domainEventTypes).Concat(externallyOwnedDomainEventTypes).Concat(integrationEventTypesAll)
                 .Select(t => t.FullName!)
                 .Where(n => n is not null));
 
         // Build nodes
-        var entityNodes = entityTypes.Select(t => BuildEntityNode(t, domainEventTypes, knownDomainTypes, _config.GetLayer(t))).ToList();
-        var aggregateNodes = aggregateTypes.Select(t => BuildAggregateNode(t, entityTypes, domainEventTypes, knownDomainTypes, _config.GetLayer(t))).ToList();
+        var entityNodes = entityTypes.Select(t => BuildEntityNode(t, domainEventTypesForScan, knownDomainTypes, _config.GetLayer(t))).ToList();
+        var aggregateNodes = aggregateTypes.Select(t => BuildAggregateNode(t, entityTypes, domainEventTypesForScan, knownDomainTypes, _config.GetLayer(t))).ToList();
         var valueObjectNodes = valueObjectTypes.Select(t => BuildValueObjectNode(t, knownDomainTypes, _config.GetLayer(t))).ToList();
-        var domainEventNodes = domainEventTypes.Select(t => BuildDomainEventNode(t, knownDomainTypes, _config.GetLayer(t))).ToList();
+        var domainEventNodes = domainEventTypesForScan.Select(t => BuildDomainEventNode(t, knownDomainTypes, _config.GetLayer(t))).ToList();
         var integrationEventNodes = integrationEventTypes.Select(t => BuildDomainEventNode(t, knownDomainTypes, _config.GetLayer(t))).ToList();
 
         var eventHandlerNodes = eventHandlerTypes.Select(t => BuildHandlerNode(t, knownDomainTypes, _config.GetLayer(t))).ToList();
@@ -97,14 +111,14 @@ internal sealed class AssemblyScanner
         MergeSyntheticClosedGenericEventNodesFromEmittedKeys(
             entityNodes,
             aggregateNodes,
-            domainEventTypes,
+            domainEventTypesForScan,
             domainEventNodes,
             knownDomainTypes,
             eventHandlerNodes);
 
-        EnsureClosedGenericDomainEventNodesFromEventHandlers(domainEventTypes, domainEventNodes, knownDomainTypes, eventHandlerTypes);
+        EnsureClosedGenericDomainEventNodesFromEventHandlers(domainEventTypesForScan, domainEventNodes, knownDomainTypes, eventHandlerTypesForResolution);
 
-        RemapEventHandlerHandlesFromIEventHandlerInterfaces(eventHandlerTypes, domainEventNodes, eventHandlerNodes);
+        RemapEventHandlerHandlesFromIEventHandlerInterfaces(eventHandlerTypesForResolution, domainEventNodes, eventHandlerNodes);
 
         RemoveOpenGenericDomainEventDefinitionNodes(domainEventNodes);
 

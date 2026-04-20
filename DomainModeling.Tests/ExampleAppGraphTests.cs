@@ -204,4 +204,14 @@ public class ExampleAppGraphTests
         var orgHandler = catalog.EventHandlers.Single(h => h.Name == "OrganizationDeletedHandler");
         orgHandler.Handles.Should().Contain(deletedOrg.FullName);
     }
+
+    [Fact]
+    public void Build_SharedKernelDomainEvent_IsDiscovered_WhenTypeExistsOnlyInSharedAssembly()
+    {
+        var graph = BuildExampleGraph();
+        var catalog = graph.BoundedContexts.Single(c => c.Name == "Catalog");
+
+        var evt = catalog.DomainEvents.Single(e => e.Name == "SharedOnlyCatalogEvent");
+        catalog.Aggregates.Single(a => a.Name == "Product").EmittedEvents.Should().Contain(evt.FullName);
+    }
 }

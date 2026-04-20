@@ -35,6 +35,7 @@ public class Product : AggregateRoot
             OldPrice = Price,
             NewPrice = newPrice
         });
+        AddDomainEvent(new SharedOnlyCatalogEvent());
         Price = newPrice;
     }
 }
