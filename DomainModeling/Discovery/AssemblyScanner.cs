@@ -1458,6 +1458,7 @@ internal sealed class AssemblyScanner
                 Name = TypeDisplayNames.ShortName(type),
                 FullName = fullName,
                 Description = _documentationIndexer?.TryGetDomainSummary(type),
+                IsCustom = false,
                 Properties = properties
             });
 

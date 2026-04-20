@@ -152,6 +152,15 @@ export function formatDiagramMethodLine(method) {
   return truncateDiagramText(raw);
 }
 
+/** One-line rule label for diagram nodes (frontend only). */
+export function formatDiagramRuleLine(rule) {
+  if (!rule) return '';
+  const title = String(rule.name || 'Rule').trim() || 'Rule';
+  const body = String(rule.text || '').trim();
+  const raw = body ? `${title}: ${body}` : title;
+  return truncateDiagramText(raw);
+}
+
 function formatDiagramTypeName(typeName) {
   if (!typeName) return '';
   if (typeName.indexOf('`') >= 0 || typeName.indexOf('[[') >= 0) return displayShortName(typeName);
