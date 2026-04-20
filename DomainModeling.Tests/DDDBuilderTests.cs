@@ -598,6 +598,44 @@ public class DDDBuilderTests
     }
 
     [Fact]
+    public void Build_DomainEvents_StructuralConvention_DiscoversEventFromHandleParameter()
+    {
+        var assembly = typeof(Order).Assembly;
+
+        var graph = DDDBuilder.Create()
+            .WithBoundedContext("Sales", ctx => ctx
+                .WithDomainAssembly(assembly)
+                .WithApplicationAssembly(assembly)
+                .EventHandlers(h => h.NameEndsWith("EventHandler"))
+                .DomainEvents(e => e
+                    .Type(t => t.NameEndsWith("EventHandler"))
+                    .HasMethod("Handle")
+                    .Parameters()
+                    .First()
+                    .Type()))
+            .Build();
+
+        var ctx = graph.BoundedContexts.Single();
+        ctx.DomainEvents.Should().Contain(e => e.Name == "CustomerCreatedEvent");
+        ctx.EventHandlers.Should().Contain(h => h.Name == "PublishCustomerRegisteredWhenCreatedEventHandler");
+    }
+
+    [Fact]
+    public void DomainEvents_Type_WithoutNestedPredicates_Throws()
+    {
+        var assembly = typeof(Order).Assembly;
+
+        var act = () => DDDBuilder.Create()
+            .WithBoundedContext("Sales", ctx => ctx
+                .WithDomainAssembly(assembly)
+                .DomainEvents(e => e.Type(_ => { })))
+            .Build();
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*at least one predicate*");
+    }
+
+    [Fact]
     public void Build_EventHandlers_AndConvention_RequiresAllPredicatesInBranch()
     {
         var assembly = typeof(Order).Assembly;
