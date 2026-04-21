@@ -7,6 +7,140 @@
   border-radius: var(--radius-lg);
   overflow: hidden;
 }
+
+/* Floating panel: edit relationship link (description, label override, hide on diagram) */
+.diagram-rel-panel {
+  position: absolute;
+  top: 52px;
+  right: 12px;
+  width: min(320px, calc(100% - 24px));
+  max-height: calc(100% - 140px);
+  overflow-y: auto;
+  z-index: 25;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+}
+.diagram-rel-panel-inner {
+  padding: 12px 14px 14px;
+  font-size: 12px;
+}
+.diagram-rel-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.diagram-rel-panel-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+.diagram-rel-panel-close {
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+.diagram-rel-panel-close:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.diagram-rel-panel-row {
+  margin-bottom: 6px;
+  color: var(--text);
+}
+.diagram-rel-panel-row.muted {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.diagram-rel-panel-row.small {
+  font-size: 10px;
+  color: var(--text-dim);
+  margin-bottom: 10px;
+}
+.diagram-rel-panel-row.small code {
+  font-size: 10px;
+}
+.diagram-rel-panel-k {
+  font-weight: 600;
+  color: var(--accent);
+}
+.diagram-rel-panel-label {
+  display: block;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  margin: 10px 0 4px;
+}
+.diagram-rel-panel-textarea,
+.diagram-rel-panel-input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  padding: 8px 10px;
+}
+.diagram-rel-panel-textarea {
+  resize: vertical;
+  min-height: 64px;
+}
+.diagram-rel-panel-hint {
+  font-size: 10px;
+  color: var(--text-dim);
+  margin: 4px 0 0;
+  line-height: 1.35;
+}
+.diagram-rel-panel-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.diagram-rel-panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+.diagram-rel-panel-btn {
+  border: 1px solid var(--border);
+  background: var(--bg-hover);
+  color: var(--text-muted);
+  border-radius: var(--radius);
+  padding: 6px 12px;
+  font-size: 11px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.diagram-rel-panel-btn:hover {
+  background: var(--border);
+  color: var(--text);
+}
+.diagram-rel-panel-btn.primary {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.diagram-rel-panel-btn.primary:hover {
+  filter: brightness(1.05);
+}
 .diagram-wrap svg { width: 100%; height: 100%; cursor: grab; }
 .diagram-wrap svg.dragging { cursor: grabbing; }
 .diagram-wrap svg.dragging-node { cursor: grabbing; }

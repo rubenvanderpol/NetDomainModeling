@@ -205,11 +205,18 @@ public static class DomainModelEndpointExtensions
         // Custom metadata store (alias / description per type) persisted as JSON files on disk
         var metadataDir = Path.GetFullPath(options.MetadataStoragePath);
         var metadata = new System.Collections.Concurrent.ConcurrentDictionary<string, TypeMetadata>();
+        const string relationshipMetadataFileName = "relationship-metadata.json";
+        var relationshipMetadataFilePath = Path.Combine(metadataDir, relationshipMetadataFileName);
+        var relationshipMetadata = LoadRelationshipMetadata(relationshipMetadataFilePath);
+
         if (Directory.Exists(metadataDir))
         {
             foreach (var file in Directory.GetFiles(metadataDir, "*.json"))
             {
                 var fileName = Path.GetFileNameWithoutExtension(file);
+                if (string.Equals(fileName, relationshipMetadataFileName, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
                 if (!TryDecodeMetadataFileName(fileName, out var fullName))
                     continue;
 
@@ -225,6 +232,30 @@ public static class DomainModelEndpointExtensions
                     continue;
 
                 metadata[fullName] = entry;
+            }
+        }
+
+        static JsonSerializerOptions RelationshipMetadataJsonOptions() => new()
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            WriteIndented = true,
+            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+        };
+
+        static RelationshipMetadataDocument LoadRelationshipMetadata(string path)
+        {
+            if (!File.Exists(path))
+                return new RelationshipMetadataDocument();
+
+            try
+            {
+                var text = File.ReadAllText(path);
+                var doc = JsonSerializer.Deserialize<RelationshipMetadataDocument>(text, RelationshipMetadataJsonOptions());
+                return doc ?? new RelationshipMetadataDocument();
+            }
+            catch (JsonException)
+            {
+                return new RelationshipMetadataDocument();
             }
         }
 
@@ -244,6 +275,60 @@ public static class DomainModelEndpointExtensions
             }))
             .ExcludeFromDescription()
             .WithName("DomainModelMetadata");
+
+        // GET /domain-model/relationship-metadata — per-edge notes, hide-on-diagram, optional label override
+        endpoints.MapGet($"{routePrefix}/relationship-metadata", () =>
+            Results.Json(relationshipMetadata, RelationshipMetadataJsonOptions()))
+            .ExcludeFromDescription()
+            .WithName("DomainModelRelationshipMetadata");
+
+        // PUT /domain-model/relationship-metadata — replace entire relationship metadata document
+        endpoints.MapPut($"{routePrefix}/relationship-metadata", async (HttpContext ctx) =>
+        {
+            using var reader = new StreamReader(ctx.Request.Body);
+            var body = await reader.ReadToEndAsync();
+            RelationshipMetadataDocument? doc;
+            try
+            {
+                doc = JsonSerializer.Deserialize<RelationshipMetadataDocument>(body, RelationshipMetadataJsonOptions());
+            }
+            catch (JsonException)
+            {
+                return Results.BadRequest("Invalid JSON");
+            }
+
+            if (doc is null)
+                return Results.BadRequest("Invalid document");
+
+            doc.Edges ??= new Dictionary<string, RelationshipEdgeMetadata>(StringComparer.Ordinal);
+
+            // Prune empty entries
+            var cleaned = new Dictionary<string, RelationshipEdgeMetadata>(StringComparer.Ordinal);
+            foreach (var (key, edge) in doc.Edges)
+            {
+                if (string.IsNullOrWhiteSpace(key))
+                    continue;
+
+                var hasDesc = !string.IsNullOrWhiteSpace(edge.Description);
+                var hasHidden = edge.HiddenOnDiagram == true;
+                var hasOverride = !string.IsNullOrWhiteSpace(edge.LabelOverride);
+                if (!hasDesc && !hasHidden && !hasOverride)
+                    continue;
+
+                cleaned[key] = edge;
+            }
+
+            doc.Edges = cleaned;
+            relationshipMetadata.Edges = cleaned;
+
+            Directory.CreateDirectory(metadataDir);
+            var toWrite = JsonSerializer.Serialize(doc, RelationshipMetadataJsonOptions());
+            await File.WriteAllTextAsync(relationshipMetadataFilePath, toWrite);
+
+            return Results.Ok(new { saved = true });
+        })
+        .ExcludeFromDescription()
+        .WithName("DomainModelRelationshipMetadataPut");
 
         // GET /domain-model/exports — list available exports
         if (options.Exports.Count > 0)

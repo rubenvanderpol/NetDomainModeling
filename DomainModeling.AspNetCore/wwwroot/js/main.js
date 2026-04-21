@@ -8,7 +8,7 @@ import {
   diagramDownloadSvg, diagramToggleAliases, diagramToggleLayers, diagramToggleEdgeKind, diagramToggleEdgeFilter,
   diagramToggleKindFilter, diagramShowAllKinds, diagramHideAllKinds, setDiagramLayoutBaseUrl, setServerDiagramLayoutCache,
   isDiagramNodeHidden, getDiagramState, metadataImpliesDiagramHiddenByDefault, reapplyDiagramVisibilityAfterMetadataChange,
-  removeLegacyHiddenNodeId,
+  removeLegacyHiddenNodeId, clearEdgeSelection, applyEdgeMetadataEdits, clearEdgeMetadata,
 } from './diagram.js';
 
 const API_URL = window.__config?.apiUrl || '/domain-model/json';
@@ -91,6 +91,27 @@ async function init() {
       metadata = legacyMetadata;
     }
     window.__metadata = metadata;
+
+    try {
+      const relRes = await fetch(`${BASE_URL}/relationship-metadata`);
+      if (relRes.ok) {
+        const relDoc = await relRes.json();
+        if (relDoc && typeof relDoc === 'object' && !Array.isArray(relDoc)) {
+          window.__relationshipMetadata = relDoc;
+          if (!window.__relationshipMetadata.edges || typeof window.__relationshipMetadata.edges !== 'object') {
+            window.__relationshipMetadata.edges = {};
+          }
+        } else {
+          window.__relationshipMetadata = { edges: {} };
+        }
+      } else {
+        window.__relationshipMetadata = window.__relationshipMetadata || { edges: {} };
+        if (!window.__relationshipMetadata.edges) window.__relationshipMetadata.edges = {};
+      }
+    } catch {
+      window.__relationshipMetadata = window.__relationshipMetadata || { edges: {} };
+      if (!window.__relationshipMetadata.edges) window.__relationshipMetadata.edges = {};
+    }
 
     setDiagramLayoutBaseUrl(BASE_URL);
     try {
@@ -526,8 +547,15 @@ window.__diagram = {
   toggleKindFilter: diagramToggleKindFilter,
   showAllKinds: diagramShowAllKinds,
   hideAllKinds: diagramHideAllKinds,
+  clearEdgeSelection,
+  applyEdgeMetadataEdits,
+  clearEdgeMetadata,
 };
 window.__metadata = metadata;
+if (!window.__relationshipMetadata || typeof window.__relationshipMetadata !== 'object') {
+  window.__relationshipMetadata = { edges: {} };
+}
+if (!window.__relationshipMetadata.edges) window.__relationshipMetadata.edges = {};
 
 // ── Testing globals (wired after lazy-load) ──────────────
 function wireTestingGlobals() {
@@ -597,6 +625,8 @@ function wireFeatureEditorGlobals() {
     hideAllFeKinds: featureEditorModule.hideAllFeKinds,
     toggleFeEdgeKind: featureEditorModule.toggleFeEdgeKind,
     onDiagramViewFlagsChanged: featureEditorModule.onDiagramViewFlagsChanged,
+    applyFeEdgeRelationshipMetadata: featureEditorModule.applyFeEdgeRelationshipMetadata,
+    clearFeEdgeRelationshipMetadata: featureEditorModule.clearFeEdgeRelationshipMetadata,
   };
 }
 // ── Go! ──────────────────────────────────────────────

@@ -400,12 +400,137 @@ function saveEdgeWaypoints(edgeWaypoints) {
   scheduleFlushDiagramLayout();
 }
 
-function edgeKey(e) {
+export function relationshipEdgeKey(e) {
   return `${e.source}|${e.target}|${e.kind}`;
+}
+
+function edgeKey(e) {
+  return relationshipEdgeKey(e);
+}
+
+/** @param {Record<string, any>|null|undefined} edgesMap */
+export function relationshipMetaEntryForEdge(e, edgesMap) {
+  if (!edgesMap || typeof edgesMap !== 'object') return null;
+  let m = edgesMap[edgeKey(e)];
+  if (m) return m;
+  // Merge scanner duplicates that share the same endpoints and kind
+  for (const k of Object.keys(edgesMap)) {
+    const parts = k.split('|');
+    if (parts.length < 3) continue;
+    const kind = parts[parts.length - 1];
+    const target = parts[parts.length - 2];
+    const source = parts.slice(0, -2).join('|');
+    if (source === e.source && target === e.target && kind === e.kind) {
+      return edgesMap[k];
+    }
+  }
+  return null;
+}
+
+/** @param {any[]} edges @param {{ edges?: Record<string, any> }|null|undefined} doc */
+export function applyRelationshipMetadataToEdges(edges, doc) {
+  const map = doc && doc.edges && typeof doc.edges === 'object' ? doc.edges : {};
+  for (const e of edges) {
+    const entry = relationshipMetaEntryForEdge(e, map);
+    e.relDescription = entry && entry.description ? String(entry.description) : '';
+    e.relLabelOverride = entry && entry.labelOverride ? String(entry.labelOverride) : '';
+    e.relHiddenOnDiagram = entry && entry.hiddenOnDiagram === true;
+  }
+}
+
+function diagramEdgeDisplayLabel(e) {
+  const ov = e.relLabelOverride && String(e.relLabelOverride).trim();
+  if (ov) return ov;
+  const base = e.label && String(e.label).trim();
+  return base || e.kind;
+}
+
+/** @type {{ edges: Record<string, any> }} */
+export function emptyRelationshipMetadataDoc() {
+  return { edges: {} };
+}
+
+/** Apply `window.__relationshipMetadata` to the given edge objects (mutates). */
+export function mergeWindowRelationshipMetadataIntoEdges(edges) {
+  const w = typeof window !== 'undefined' && window.__relationshipMetadata;
+  const doc = w && typeof w === 'object' && !Array.isArray(w) ? w : emptyRelationshipMetadataDoc();
+  if (!doc.edges || typeof doc.edges !== 'object') doc.edges = {};
+  applyRelationshipMetadataToEdges(edges, doc);
+}
+
+/**
+ * Merge relationship metadata from `window.__relationshipMetadata` into `dgState.allEdges`
+ * and refresh the visible edge list.
+ */
+export function reapplyRelationshipMetadataFromWindow() {
+  if (!dgState) return;
+  const w = typeof window !== 'undefined' && window.__relationshipMetadata;
+  dgState.relationshipMetadata = w && typeof w === 'object' && !Array.isArray(w)
+    ? w
+    : emptyRelationshipMetadataDoc();
+  if (!dgState.relationshipMetadata.edges || typeof dgState.relationshipMetadata.edges !== 'object') {
+    dgState.relationshipMetadata.edges = {};
+  }
+  applyRelationshipMetadataToEdges(dgState.allEdges, dgState.relationshipMetadata);
+  applyDiagramVisibility();
+  renderSvg();
+  refreshDiagramRelPanel();
+}
+
+let relationshipMetaFlushTimer = null;
+export function scheduleFlushRelationshipMetadata() {
+  if (!diagramLayoutBaseUrl) return;
+  if (relationshipMetaFlushTimer) clearTimeout(relationshipMetaFlushTimer);
+  relationshipMetaFlushTimer = setTimeout(() => {
+    relationshipMetaFlushTimer = null;
+    void flushRelationshipMetadataToServer();
+  }, FLUSH_MS);
+}
+
+async function flushRelationshipMetadataToServer() {
+  if (!diagramLayoutBaseUrl) return;
+  const doc = (typeof window !== 'undefined' && window.__relationshipMetadata) || emptyRelationshipMetadataDoc();
+  try {
+    const res = await fetch(`${diagramLayoutBaseUrl}/relationship-metadata`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(doc),
+    });
+    if (!res.ok) return;
+  } catch { /* ignore */ }
+}
+
+/**
+ * Update one edge's metadata (description, hide on main diagram, optional label override).
+ * Persists the full document to disk when the API base URL is configured.
+ */
+export async function persistRelationshipEdgeMetadata(edgeKey, patch) {
+  const doc = (typeof window !== 'undefined' && window.__relationshipMetadata) || emptyRelationshipMetadataDoc();
+  if (!doc.edges || typeof doc.edges !== 'object') doc.edges = {};
+
+  const desc = patch && patch.description != null ? String(patch.description).trim() : '';
+  const labelOv = patch && patch.labelOverride != null ? String(patch.labelOverride).trim() : '';
+  const hidden = patch && patch.hiddenOnDiagram === true;
+
+  if (!desc && !labelOv && !hidden) {
+    delete doc.edges[edgeKey];
+  } else {
+    doc.edges[edgeKey] = {
+      ...(hidden ? { hiddenOnDiagram: true } : {}),
+      ...(desc ? { description: desc } : {}),
+      ...(labelOv ? { labelOverride: labelOv } : {}),
+    };
+  }
+
+  if (typeof window !== 'undefined') window.__relationshipMetadata = doc;
+  reapplyRelationshipMetadataFromWindow();
+  scheduleFlushRelationshipMetadata();
 }
 
 // ── Module state ─────────────────────────────────────
 let dgState = null;
+/** @type {string|null} */
+let dgSelectedEdgeKey = null;
 
 /** @type {Set<string>} */
 let traceHighlightIds = new Set();
@@ -575,6 +700,7 @@ export function renderDiagramView(opts = {}) {
   html += '</div>';
 
   html += '<svg id="diagramSvg"></svg>';
+  html += '<div id="diagramRelPanel" class="diagram-rel-panel" style="display:none"></div>';
   html += '</div>';
   return html;
 }
@@ -584,6 +710,7 @@ export function initDiagram(ctx, boundedContexts) {
   if (!ctx) return;
 
   migrateLegacyDiagramLocalStorage();
+  dgSelectedEdgeKey = null;
 
   const nodes = [];
   const edges = [];
@@ -647,6 +774,12 @@ export function initDiagram(ctx, boundedContexts) {
       edges.push({ source: rel.sourceType, target: rel.targetType, kind: rel.kind, label: rel.label || '' });
     }
   }
+
+  const relMeta = (typeof window !== 'undefined' && window.__relationshipMetadata && typeof window.__relationshipMetadata === 'object' && !Array.isArray(window.__relationshipMetadata))
+    ? window.__relationshipMetadata
+    : emptyRelationshipMetadataDoc();
+  if (!relMeta.edges || typeof relMeta.edges !== 'object') relMeta.edges = {};
+  applyRelationshipMetadataToEdges(edges, relMeta);
 
   const contextName = ctx.name;
   let posSource = 'none';
@@ -730,6 +863,7 @@ export function initDiagram(ctx, boundedContexts) {
       nodes, edges, nMap, allNodes: nodes, allEdges: edges,
       zoom: 1, panX: 0, panY: 0, contextName,
       hiddenKinds, hiddenNodeIds, hiddenEdgeKinds, edgeWaypoints,
+      relationshipMetadata: relMeta,
     };
     applyDiagramVisibility();
 
@@ -929,8 +1063,12 @@ function applyDiagramVisibility() {
     return true;
   });
   dgState.edges = dgState.allEdges.filter(e =>
-    visibleIds.has(e.source) && visibleIds.has(e.target) && !dgState.hiddenEdgeKinds.has(e.kind)
+    visibleIds.has(e.source) && visibleIds.has(e.target) && !dgState.hiddenEdgeKinds.has(e.kind) && !e.relHiddenOnDiagram
   );
+  if (dgSelectedEdgeKey && !dgState.edges.some(e => edgeKey(e) === dgSelectedEdgeKey)) {
+    dgSelectedEdgeKey = null;
+    refreshDiagramRelPanel();
+  }
 }
 
 // ── Auto-layout (row-based + forces) ─────────────────
@@ -1136,6 +1274,9 @@ function renderSvg() {
     const markerEnd = (e.kind === 'References' || e.kind === 'ReferencesById') ? '' : ` marker-end="url(#arrow-${e.kind})"`;
 
     const ek = edgeKey(e);
+    const edgeSelected = dgSelectedEdgeKey === ek;
+    const sw = edgeSelected ? 3 : 1.5;
+    const op = edgeSelected ? 1 : 0.65;
     const waypoints = (dgState.edgeWaypoints && dgState.edgeWaypoints[ek]) || [];
 
     if (waypoints.length === 0) {
@@ -1143,9 +1284,9 @@ function renderSvg() {
       const p2 = rectEdge(tgtCx, tgtCy, tgt.w + 8, tgt.h + 8, srcCx, srcCy);
       // Invisible hit area for double-click to add waypoints
       s += `<line class="dg-edge-hit" data-edge-key="${escAttr(ek)}" x1="${p1.x}" y1="${p1.y}" x2="${p2.x}" y2="${p2.y}" stroke="transparent" stroke-width="12" fill="none" style="cursor:pointer" />`;
-      s += `<line x1="${p1.x}" y1="${p1.y}" x2="${p2.x}" y2="${p2.y}" stroke="${color}" stroke-width="1.5"${dashed}${markerStart}${markerEnd} opacity="0.65" pointer-events="none" />`;
+      s += `<line x1="${p1.x}" y1="${p1.y}" x2="${p2.x}" y2="${p2.y}" stroke="${color}" stroke-width="${sw}"${dashed}${markerStart}${markerEnd} opacity="${op}" pointer-events="none" />`;
       const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
-      const label = e.label || e.kind;
+      const label = diagramEdgeDisplayLabel(e);
       s += `<text x="${mx}" y="${my - 6}" text-anchor="middle" fill="${color}" font-size="9" font-family="-apple-system,sans-serif" opacity="0.7" pointer-events="none">${esc(label)}</text>`;
     } else {
       const firstWp = waypoints[0];
@@ -1162,14 +1303,14 @@ function renderSvg() {
       }
       // Invisible hit area
       s += `<path class="dg-edge-hit" data-edge-key="${escAttr(ek)}" d="${pathD}" stroke="transparent" stroke-width="12" fill="none" style="cursor:pointer" />`;
-      s += `<path d="${pathD}" stroke="${color}" stroke-width="1.5"${dashed}${markerStart}${markerEnd} opacity="0.65" fill="none" pointer-events="none" />`;
+      s += `<path d="${pathD}" stroke="${color}" stroke-width="${sw}"${dashed}${markerStart}${markerEnd} opacity="${op}" fill="none" pointer-events="none" />`;
 
       // Label at midpoint of entire path
       const midIdx = Math.floor(allPts.length / 2);
       const mPrev = allPts[midIdx - 1] || allPts[0];
       const mNext = allPts[midIdx] || allPts[allPts.length - 1];
       const mx = (mPrev.x + mNext.x) / 2, my = (mPrev.y + mNext.y) / 2;
-      const label = e.label || e.kind;
+      const label = diagramEdgeDisplayLabel(e);
       s += `<text x="${mx}" y="${my - 6}" text-anchor="middle" fill="${color}" font-size="9" font-family="-apple-system,sans-serif" opacity="0.7" pointer-events="none">${esc(label)}</text>`;
 
       // Waypoint handles
@@ -1272,10 +1413,14 @@ function setupInteraction() {
     if (wpEl) {
       ev.preventDefault();
       ev.stopPropagation();
+      dgSelectedEdgeKey = null;
+      refreshDiagramRelPanel();
       dragWp = { edgeKey: wpEl.dataset.edgeKey, wpIdx: parseInt(wpEl.dataset.wpIdx, 10) };
       svg.classList.add('dragging-node');
     } else if (nodeEl) {
       ev.preventDefault();
+      dgSelectedEdgeKey = null;
+      refreshDiagramRelPanel();
       const n = dgState.nMap[nodeEl.dataset.id];
       if (!n) return;
       dragNode = n;
@@ -1284,6 +1429,8 @@ function setupInteraction() {
       svg.classList.add('dragging-node');
     } else if (ctxEl) {
       ev.preventDefault();
+      dgSelectedEdgeKey = null;
+      refreshDiagramRelPanel();
       const ctxName = ctxEl.dataset.ctx;
       dragCtx = ctxName;
       const pt = svgPoint(svg, ev);
@@ -1296,6 +1443,16 @@ function setupInteraction() {
       }
       svg.classList.add('dragging-node');
     } else {
+      const edgeHit = ev.target.closest('.dg-edge-hit');
+      if (edgeHit && edgeHit.dataset.edgeKey) {
+        ev.preventDefault();
+        dgSelectedEdgeKey = edgeHit.dataset.edgeKey;
+        renderSvg();
+        refreshDiagramRelPanel();
+        return;
+      }
+      dgSelectedEdgeKey = null;
+      refreshDiagramRelPanel();
       panning = true;
       panStartX = ev.clientX; panStartY = ev.clientY;
       panOrigX = dgState.panX; panOrigY = dgState.panY;
@@ -1487,6 +1644,8 @@ export function diagramResetLayout(ctx) {
   saveHiddenNodeIds(dgState.hiddenNodeIds);
   dgState.edgeWaypoints = {};
   saveEdgeWaypoints(dgState.edgeWaypoints);
+  dgSelectedEdgeKey = null;
+  refreshDiagramRelPanel();
   applyAutoLayout(dgState.allNodes, dgState.allEdges, dgState.nMap);
   applyDiagramVisibility();
   renderSvg();
@@ -1663,4 +1822,77 @@ function diagramDisplayName(n) {
   const meta = window.__metadata || {};
   const entry = meta[n.id];
   return (entry && entry.alias && entry.alias.trim()) ? entry.alias : n.name;
+}
+
+function refreshDiagramRelPanel() {
+  const panel = document.getElementById('diagramRelPanel');
+  if (!panel) return;
+  if (!dgState || !dgSelectedEdgeKey) {
+    panel.style.display = 'none';
+    panel.innerHTML = '';
+    return;
+  }
+  const e = dgState.allEdges.find(edge => edgeKey(edge) === dgSelectedEdgeKey);
+  if (!e) {
+    panel.style.display = 'none';
+    panel.innerHTML = '';
+    dgSelectedEdgeKey = null;
+    return;
+  }
+  const entry = relationshipMetaEntryForEdge(e, dgState.relationshipMetadata?.edges);
+  const desc = (entry && entry.description) ? String(entry.description) : '';
+  const labelOv = (entry && entry.labelOverride) ? String(entry.labelOverride) : '';
+  const hidden = entry && entry.hiddenOnDiagram === true;
+  const scannerLabel = e.label && String(e.label).trim() ? String(e.label) : e.kind;
+
+  let h = '<div class="diagram-rel-panel-inner">';
+  h += '<div class="diagram-rel-panel-header">';
+  h += '<span class="diagram-rel-panel-title">Relationship</span>';
+  h += `<button type="button" class="diagram-rel-panel-close" onclick="window.__diagram.clearEdgeSelection()" title="Close">✕</button>`;
+  h += '</div>';
+  h += `<div class="diagram-rel-panel-row"><span class="diagram-rel-panel-k">${esc(e.kind)}</span></div>`;
+  h += `<div class="diagram-rel-panel-row muted">${esc(shortName(e.source))} → ${esc(shortName(e.target))}</div>`;
+  h += `<div class="diagram-rel-panel-row small">Scanner label: <code>${esc(scannerLabel)}</code></div>`;
+
+  h += '<label class="diagram-rel-panel-label">Description</label>';
+  h += `<textarea class="diagram-rel-panel-textarea" rows="3" id="dgRelDescInput" placeholder="Notes for this link…">${esc(desc)}</textarea>`;
+
+  h += '<label class="diagram-rel-panel-label">Label on diagram (optional)</label>';
+  h += `<input type="text" class="diagram-rel-panel-input" id="dgRelLabelInput" value="${escAttr(labelOv)}" placeholder="Leave empty to use scanner label / kind" />`;
+  h += '<div class="diagram-rel-panel-hint">Overrides the short text drawn on the edge. Does not change the underlying domain model.</div>';
+
+  h += '<label class="diagram-rel-panel-check">';
+  h += `<input type="checkbox" id="dgRelHideInput"${hidden ? ' checked' : ''} />`;
+  h += 'Hide this link on the main diagram</label>';
+
+  h += '<div class="diagram-rel-panel-actions">';
+  h += `<button type="button" class="diagram-rel-panel-btn primary" onclick="window.__diagram.applyEdgeMetadataEdits()">Apply</button>`;
+  h += `<button type="button" class="diagram-rel-panel-btn" onclick="window.__diagram.clearEdgeMetadata()">Clear overrides</button>`;
+  h += '</div>';
+  h += '</div>';
+
+  panel.innerHTML = h;
+  panel.style.display = 'block';
+}
+
+export function clearEdgeSelection() {
+  dgSelectedEdgeKey = null;
+  if (dgState) renderSvg();
+  refreshDiagramRelPanel();
+}
+
+export function applyEdgeMetadataEdits() {
+  if (!dgSelectedEdgeKey) return;
+  const descEl = document.getElementById('dgRelDescInput');
+  const labelEl = document.getElementById('dgRelLabelInput');
+  const hideEl = document.getElementById('dgRelHideInput');
+  const desc = descEl ? descEl.value : '';
+  const labelOverride = labelEl ? labelEl.value : '';
+  const hiddenOnDiagram = hideEl ? hideEl.checked : false;
+  void persistRelationshipEdgeMetadata(dgSelectedEdgeKey, { description: desc, labelOverride, hiddenOnDiagram });
+}
+
+export function clearEdgeMetadata() {
+  if (!dgSelectedEdgeKey) return;
+  void persistRelationshipEdgeMetadata(dgSelectedEdgeKey, { description: '', labelOverride: '', hiddenOnDiagram: false });
 }

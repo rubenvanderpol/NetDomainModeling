@@ -440,6 +440,40 @@
   padding: 3px 0;
 }
 
+.fe-rel-hidden-badge {
+  color: var(--text-dim);
+  font-size: 11px;
+  margin-left: 2px;
+}
+
+.fe-panel-pre {
+  white-space: pre-wrap;
+}
+
+.fe-panel-inline-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 500;
+}
+
+.fe-panel-actions-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.fe-panel-actions-row .fe-btn {
+  width: 100%;
+  justify-content: center;
+}
+
 .fe-panel-prop {
   font-size: 12px;
   padding: 2px 0;

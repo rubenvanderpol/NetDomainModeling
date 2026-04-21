@@ -26,6 +26,11 @@ import {
   diagramToggleAliases,
   diagramToggleLayers,
   syncDiagramToolbarToggles,
+  relationshipEdgeKey,
+  relationshipMetaEntryForEdge,
+  mergeWindowRelationshipMetadataIntoEdges,
+  persistRelationshipEdgeMetadata,
+  scheduleFlushRelationshipMetadata,
 } from './diagram.js';
 
 // ── Constants ────────────────────────────────────────
@@ -159,6 +164,44 @@ try {
   viewModeOnly = sessionStorage.getItem(FEATURE_EDITOR_VIEW_MODE_KEY) === '1';
 } catch { viewModeOnly = false; }
 
+function feApplyRelationshipMetaToEdges() {
+  if (!st) return;
+  mergeWindowRelationshipMetadataIntoEdges(st.edges);
+}
+
+function feEdgeDisplayLabel(e) {
+  const ov = e.relLabelOverride && String(e.relLabelOverride).trim();
+  if (ov) return ov;
+  const base = e.label && String(e.label).trim();
+  return base || e.kind;
+}
+
+/** Rewire relationship-metadata keys when a node id changes (e.g. custom type rename). */
+function feMigrateRelationshipMetadataKeys(oldId, newId) {
+  const doc = typeof window !== 'undefined' ? window.__relationshipMetadata : null;
+  if (!doc || typeof doc !== 'object') return;
+  if (!doc.edges || typeof doc.edges !== 'object') doc.edges = {};
+  const entries = Object.entries(doc.edges);
+  let changed = false;
+  for (const [key, val] of entries) {
+    const parts = key.split('|');
+    if (parts.length < 3) continue;
+    const kind = parts[parts.length - 1];
+    const target = parts[parts.length - 2];
+    const source = parts.slice(0, -2).join('|');
+    let s = source;
+    let t = target;
+    if (s === oldId) s = newId;
+    if (t === oldId) t = newId;
+    if (s === source && t === target) continue;
+    const nk = `${s}|${t}|${kind}`;
+    delete doc.edges[key];
+    doc.edges[nk] = val;
+    changed = true;
+  }
+  if (changed) scheduleFlushRelationshipMetadata();
+}
+
 function isViewModeOnly() {
   return viewModeOnly === true;
 }
@@ -268,6 +311,13 @@ function feDomainMethodsToStructured(methods) {
 export async function initFeatureEditor(apiBaseUrl, data) {
   baseUrl = apiBaseUrl;
   domainData = data;
+  try {
+    const res = await fetch(`${baseUrl}/relationship-metadata`);
+    if (res.ok) {
+      const doc = await res.json();
+      if (typeof window !== 'undefined') window.__relationshipMetadata = doc;
+    }
+  } catch { /* optional */ }
   await loadFeatureList();
   await loadFeatureExports();
 }
@@ -872,7 +922,8 @@ function renderPropertiesPanel() {
       for (const e of rels) {
         const other = e.source === n.id ? shortName(e.target) : shortName(e.source);
         const dir = e.source === n.id ? '→' : '←';
-        h += `<div class="fe-panel-rel">${dir} <span style="color:${EDGE_COLORS[e.kind] || '#888'}">${e.kind}</span> ${esc(other)}</div>`;
+        const hid = e.relHiddenOnDiagram ? ' <span class="fe-rel-hidden-badge" title="Hidden on main diagram">⊘</span>' : '';
+        h += `<div class="fe-panel-rel">${dir} <span style="color:${EDGE_COLORS[e.kind] || '#888'}">${e.kind}</span> ${esc(other)}${hid}</div>`;
       }
     }
 
@@ -890,6 +941,12 @@ function renderPropertiesPanel() {
     const e = st.edges[st.selectedEdge];
     if (!e) return renderPanelInstructions();
 
+    const metaMap = (typeof window !== 'undefined' && window.__relationshipMetadata?.edges) || {};
+    const entry = relationshipMetaEntryForEdge(e, metaMap);
+    const desc = (entry && entry.description) ? String(entry.description) : '';
+    const labelOv = (entry && entry.labelOverride) ? String(entry.labelOverride) : '';
+    const hiddenMain = entry && entry.hiddenOnDiagram === true;
+
     let h = `<div class="fe-panel-title" style="color:${EDGE_COLORS[e.kind] || '#888'}">Relationship</div>`;
     h += `<div class="fe-panel-field"><label>Source</label><div class="fe-panel-value">${esc(shortName(e.source))}</div></div>`;
     h += `<div class="fe-panel-field"><label>Target</label><div class="fe-panel-value">${esc(shortName(e.target))}</div></div>`;
@@ -898,7 +955,31 @@ function renderPropertiesPanel() {
       ? `<div class="fe-panel-value">${esc(e.kind)}</div>`
       : renderRelKindDropdown(e.kind, st.selectedEdge);
     h += '</div>';
-    if (e.label) h += `<div class="fe-panel-field"><label>Label</label><div class="fe-panel-value">${esc(e.label)}</div></div>`;
+    if (e.label) h += `<div class="fe-panel-field"><label>Scanner label</label><div class="fe-panel-value">${esc(e.label)}</div></div>`;
+    h += '<div class="fe-panel-section">Link notes (saved globally)</div>';
+    h += `<div class="fe-panel-field"><label>Description</label>`;
+    h += readOnly
+      ? `<div class="fe-panel-value fe-panel-pre">${desc ? esc(desc) : '—'}</div>`
+      : `<textarea class="fe-input" rows="3" id="feRelDescInput" placeholder="Describe this relationship…">${esc(desc)}</textarea>`;
+    h += '</div>';
+    h += `<div class="fe-panel-field"><label>Label on diagrams</label>`;
+    h += readOnly
+      ? `<div class="fe-panel-value">${labelOv ? esc(labelOv) : '—'}</div>`
+      : `<input type="text" class="fe-input" id="feRelLabelInput" value="${escAttr(labelOv)}" placeholder="Optional; overrides short edge text" />`;
+    h += '</div>';
+    h += `<div class="fe-panel-field"><label>Main diagram</label>`;
+    if (readOnly) {
+      h += `<div class="fe-panel-value">${hiddenMain ? 'Hidden' : 'Visible'}</div>`;
+    } else {
+      h += `<label class="fe-panel-inline-check"><input type="checkbox" id="feRelHideInput"${hiddenMain ? ' checked' : ''} /> Hide this link on the main diagram</label>`;
+    }
+    h += '</div>';
+    if (!readOnly) {
+      h += '<div class="fe-panel-actions-row">';
+      h += `<button type="button" class="fe-btn primary" onclick="window.__featureEditor.applyFeEdgeRelationshipMetadata()">Apply link settings</button>`;
+      h += `<button type="button" class="fe-btn" onclick="window.__featureEditor.clearFeEdgeRelationshipMetadata()">Clear link settings</button>`;
+      h += '</div>';
+    }
     if (!readOnly) {
       h += '<div class="fe-panel-section">Actions</div>';
       h += `<button class="fe-btn danger" onclick="window.__featureEditor.removeEdge(${st.selectedEdge})">✕ Remove Relation</button>`;
@@ -938,6 +1019,7 @@ function getEmittedEventsForNode(nodeId) {
       if (e.source !== nodeId || e.kind !== 'Emits') return false;
       if (!isViewModeOnly()) return true;
       if (st.hiddenEdgeKinds.has('Emits')) return false;
+      if (e.relHiddenOnDiagram) return false;
       const tgt = st.nMap[e.target];
       if (!tgt || st.hiddenKinds.has(tgt.kind)) return false;
       return true;
@@ -1274,6 +1356,7 @@ function loadFeatureState(feature) {
       st.edges.push({ source: saved.source, target: saved.target, kind: saved.kind, label: saved.label || '' });
     }
   }
+  feApplyRelationshipMetaToEdges();
 
   const fixedFromSaved = new Set();
   for (const n of st.nodes) {
@@ -1538,6 +1621,7 @@ function finishConnect(targetId) {
   // Show kind picker overlay
   showRelationKindPicker((kind) => {
     st.edges.push({ source: sourceId, target: targetId, kind, label: '' });
+    feApplyRelationshipMetaToEdges();
     recalcNodeHeights();
     markDirty();
     renderSvg();
@@ -1684,6 +1768,8 @@ export function renameCustomType(nodeId, newShortName) {
     if (e.source === nodeId) e.source = newId;
     if (e.target === nodeId) e.target = newId;
   }
+  feMigrateRelationshipMetadataKeys(nodeId, newId);
+  feApplyRelationshipMetaToEdges();
   if (connecting && connecting.sourceId === nodeId) connecting.sourceId = newId;
   if (st.selectedNode === nodeId) st.selectedNode = newId;
 
@@ -1797,7 +1883,17 @@ function toggleDropdownById(menuId, wrapperId) {
 export function removeEdge(idx) {
   if (isReadOnlyFeature()) return;
   if (!st) return;
+  const removed = st.edges[idx];
+  if (removed && typeof window !== 'undefined' && window.__relationshipMetadata) {
+    if (!window.__relationshipMetadata.edges || typeof window.__relationshipMetadata.edges !== 'object') {
+      window.__relationshipMetadata.edges = {};
+    }
+    const k = relationshipEdgeKey(removed);
+    delete window.__relationshipMetadata.edges[k];
+    scheduleFlushRelationshipMetadata();
+  }
   st.edges.splice(idx, 1);
+  feApplyRelationshipMetaToEdges();
   st.selectedEdge = null;
   recalcNodeHeights();
   markDirty();
@@ -1809,11 +1905,53 @@ export function removeEdge(idx) {
 export function changeEdgeKind(idx, kind) {
   if (isReadOnlyFeature()) return;
   if (!st || !st.edges[idx]) return;
-  st.edges[idx].kind = kind;
+  const e = st.edges[idx];
+  const oldKey = relationshipEdgeKey(e);
+  e.kind = kind;
+  const newKey = relationshipEdgeKey(e);
+  if (oldKey !== newKey && typeof window !== 'undefined' && window.__relationshipMetadata) {
+    const doc = window.__relationshipMetadata;
+    if (!doc.edges || typeof doc.edges !== 'object') doc.edges = {};
+    if (doc.edges[oldKey]) {
+      doc.edges[newKey] = doc.edges[oldKey];
+      delete doc.edges[oldKey];
+      scheduleFlushRelationshipMetadata();
+    }
+  }
+  feApplyRelationshipMetaToEdges();
   recalcNodeHeights();
   markDirty();
   renderSvg();
   if (isViewModeOnly()) refreshFeViewFilters();
+}
+
+/** Persist description / label override / hide-on-main-diagram for the selected feature edge (global store). */
+export function applyFeEdgeRelationshipMetadata() {
+  if (!st || st.selectedEdge === null) return;
+  const e = st.edges[st.selectedEdge];
+  if (!e) return;
+  const descEl = document.getElementById('feRelDescInput');
+  const labelEl = document.getElementById('feRelLabelInput');
+  const hideEl = document.getElementById('feRelHideInput');
+  const desc = descEl ? descEl.value : '';
+  const labelOverride = labelEl ? labelEl.value : '';
+  const hiddenOnDiagram = hideEl ? hideEl.checked : false;
+  void persistRelationshipEdgeMetadata(relationshipEdgeKey(e), { description: desc, labelOverride, hiddenOnDiagram });
+  feApplyRelationshipMetaToEdges();
+  markDirty();
+  renderSvg();
+  refreshPanel();
+}
+
+export function clearFeEdgeRelationshipMetadata() {
+  if (!st || st.selectedEdge === null) return;
+  const e = st.edges[st.selectedEdge];
+  if (!e) return;
+  void persistRelationshipEdgeMetadata(relationshipEdgeKey(e), { description: '', labelOverride: '', hiddenOnDiagram: false });
+  feApplyRelationshipMetaToEdges();
+  markDirty();
+  renderSvg();
+  refreshPanel();
 }
 
 /** Recalculate all node heights (needed when edges change since Emits affects height). */
@@ -1838,6 +1976,7 @@ function importAllRelationshipsFromDomain() {
       st.edges.push({ source: rel.sourceType, target: rel.targetType, kind: rel.kind, label: rel.label || '' });
     }
   }
+  feApplyRelationshipMetaToEdges();
 }
 
 function findDomainItem(fullName, kind) {
@@ -2072,6 +2211,7 @@ function renderSvg() {
     if (!src || !tgt) continue;
     if (vm) {
       if (st.hiddenEdgeKinds.has(e.kind)) continue;
+      if (e.relHiddenOnDiagram) continue;
       if (!visibleNodeIds.has(src.id) || !visibleNodeIds.has(tgt.id)) continue;
     }
     const srcCx = src.x + src.w / 2, srcCy = src.y + src.h / 2;
@@ -2091,7 +2231,7 @@ function renderSvg() {
     }
     s += `<line class="fe-edge-vis" data-idx="${ei}" x1="${p1.x}" y1="${p1.y}" x2="${p2.x}" y2="${p2.y}" stroke="${color}" stroke-width="${sw}"${dashed}${markerStart}${markerEnd} opacity="${op}" style="pointer-events:none" />`;
     const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
-    s += `<text x="${mx}" y="${my - 6}" text-anchor="middle" fill="${color}" font-size="9" font-family="-apple-system,sans-serif" opacity="0.7" style="pointer-events:none">${esc(e.label || e.kind)}</text>`;
+    s += `<text x="${mx}" y="${my - 6}" text-anchor="middle" fill="${color}" font-size="9" font-family="-apple-system,sans-serif" opacity="0.7" style="pointer-events:none">${esc(feEdgeDisplayLabel(e))}</text>`;
   }
 
   // Connection line being drawn
