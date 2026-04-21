@@ -10,9 +10,13 @@ public sealed class DomainGraph
 {
     public List<BoundedContextNode> BoundedContexts { get; init; }
 
-    internal DomainGraph(List<BoundedContextNode> boundedContexts)
+    /// <summary>
+    /// Creates a graph from a list (used by the builder and JSON deserialization).
+    /// </summary>
+    [JsonConstructor]
+    public DomainGraph(List<BoundedContextNode> boundedContexts)
     {
-        BoundedContexts = boundedContexts;
+        BoundedContexts = boundedContexts ?? [];
     }
 
     /// <summary>
@@ -20,7 +24,7 @@ public sealed class DomainGraph
     /// </summary>
     public DomainGraph(params BoundedContextNode[] boundedContexts)
     {
-        BoundedContexts = [..boundedContexts];
+        BoundedContexts = boundedContexts is { Length: > 0 } ? [..boundedContexts] : [];
     }
 
     /// <summary>
@@ -29,6 +33,18 @@ public sealed class DomainGraph
     public string ToJson()
     {
         return System.Text.Json.JsonSerializer.Serialize(this, JsonOptions.Default);
+    }
+
+    /// <summary>
+    /// Deserializes a domain graph from JSON produced by <see cref="ToJson"/> (e.g. after developer edits).
+    /// </summary>
+    public static DomainGraph FromJson(string json)
+    {
+        ArgumentNullException.ThrowIfNull(json);
+        var graph = System.Text.Json.JsonSerializer.Deserialize<DomainGraph>(json, JsonOptions.Default);
+        if (graph is null || graph.BoundedContexts is null)
+            throw new System.Text.Json.JsonException("Invalid domain graph JSON.");
+        return graph;
     }
 }
 

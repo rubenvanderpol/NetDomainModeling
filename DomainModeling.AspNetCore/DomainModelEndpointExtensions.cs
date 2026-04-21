@@ -170,6 +170,7 @@ public static class DomainModelEndpointExtensions
     /// <para>
     /// <c>GET {routePrefix}</c> — serves the interactive HTML explorer.<br/>
     /// <c>GET {routePrefix}/json</c> — returns the raw domain graph JSON.<br/>
+    /// <c>GET {routePrefix}/ubiquitous-language</c> — returns structured ubiquitous language JSON for the explorer Language tab.<br/>
     /// <c>GET {routePrefix}/assets/**</c> — serves CSS and JS modules.
     /// </para>
     /// When <see cref="DomainModelOptions.EnableDeveloperView"/> is <c>true</c>,
@@ -234,6 +235,33 @@ public static class DomainModelEndpointExtensions
         endpoints.MapGet($"{routePrefix}/json", () => Results.Content(json, "application/json"))
             .ExcludeFromDescription()
             .WithName("DomainModelJson");
+
+        DomainGraph ResolveGraphForDerivedViews()
+        {
+            try
+            {
+                return DomainGraph.FromJson(json);
+            }
+            catch
+            {
+                return graph;
+            }
+        }
+
+        // GET /domain-model/ubiquitous-language — structured ubiquitous language (matches Markdown export rules)
+        endpoints.MapGet($"{routePrefix}/ubiquitous-language", () =>
+        {
+            var doc = UbiquitousLanguageDocumentBuilder.Build(ResolveGraphForDerivedViews());
+            return Results.Json(doc, new JsonSerializerOptions
+            {
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                WriteIndented = false,
+                DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+                Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() },
+            });
+        })
+        .ExcludeFromDescription()
+        .WithName("DomainModelUbiquitousLanguage");
 
         // GET /domain-model/metadata — return all custom type metadata
         endpoints.MapGet($"{routePrefix}/metadata", () =>

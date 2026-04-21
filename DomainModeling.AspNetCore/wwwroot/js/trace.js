@@ -173,7 +173,7 @@ export function clearTracePanel() {
 export function renderTraceView() {
   let html = '<div class="trace-layout">';
   html += '<div class="trace-diagram-pane">';
-  html += renderDiagramView({ traceLayout: true });
+  html += renderDiagramView({ traceLayout: true, activeTab: 'trace' });
   html += '</div>';
   html += '<aside class="trace-panel" id="tracePanel">';
   html += '<div class="trace-panel-header">';

@@ -3,6 +3,7 @@
  */
 import { esc, escAttr, shortName, ALL_SECTIONS, SECTION_META, SECTION_TO_DIAGRAM_KIND } from './helpers.js';
 import { renderDetailView } from './views.js';
+import { renderUbiquitousLanguageView, mountUbiquitousLanguage } from './ubiquitous-language.js';
 import {
   renderDiagramView, initDiagram, diagramZoom, diagramFit, diagramResetLayout, diagramToggleKind, diagramShowAll,
   diagramDownloadSvg, diagramToggleAliases, diagramToggleLayers, diagramToggleEdgeKind, diagramToggleEdgeFilter,
@@ -295,6 +296,10 @@ function renderSidebar() {
     <div class="nav-item${currentView === 'diagram' ? ' active' : ''}" onclick="window.__nav.switchTab('diagram')">
       <span class="nav-dot" style="background:var(--clr-relationship)"></span>
       Diagram
+    </div>
+    <div class="nav-item${currentView === 'ubiquitous-language' ? ' active' : ''}" onclick="window.__nav.switchTab('ubiquitous-language')">
+      <span class="nav-dot" style="background:#c4a574"></span>
+      Language
     </div>`;
 
   if (FEATURE_EDITOR_MODE) {
@@ -421,6 +426,12 @@ function renderMain() {
     main.innerHTML = traceModule.renderTraceView();
     const selectedCtxs = (data.boundedContexts || []).filter(c => selectedContextNames.has(c.name));
     traceModule.mountTrace(currentCtx, selectedCtxs);
+    return;
+  }
+
+  if (currentView === 'ubiquitous-language') {
+    main.innerHTML = renderUbiquitousLanguageView();
+    void mountUbiquitousLanguage(BASE_URL, selectedContextNames);
     return;
   }
 

@@ -4,7 +4,8 @@
 
 export function renderTabBar(activeTab) {
   const tabs = [
-    { id: 'diagram',       label: 'Diagram' },
+    { id: 'diagram', label: 'Diagram' },
+    { id: 'ubiquitous-language', label: 'Language' },
   ];
 
   if (window.__config?.featureEditorMode) {

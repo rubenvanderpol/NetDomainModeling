@@ -535,7 +535,8 @@ export function setDiagramTraceHighlights(fullNames) {
  */
 export function renderDiagramView(opts = {}) {
   const traceLayout = opts.traceLayout === true;
-  let html = renderTabBar(traceLayout ? 'trace' : 'diagram');
+  const activeTab = opts.activeTab || (traceLayout ? 'trace' : 'diagram');
+  let html = renderTabBar(activeTab);
 
   const wrapClass = traceLayout ? 'diagram-wrap trace-diagram-inner' : 'diagram-wrap';
   html += `<div class="${wrapClass}" id="diagramWrap">`;
