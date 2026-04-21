@@ -54,6 +54,8 @@ builder.Services.AddSingleton<IRepository<Carrier>, CarrierRepository>();
 
 var app = builder.Build();
 
+UbiquitousLanguageDefinition ubiquitousLanguageDefinition = UbiquitousLanguageDefinition.CreateDefault();
+
 // Mount the domain model explorer UI at /domain-model (with developer editor and testing enabled)
 app.MapDomainModel(domainGraph, configure: opts =>
 {
@@ -65,6 +67,32 @@ app.MapDomainModel(domainGraph, configure: opts =>
         .Add()
         .Update()
         .Delete());
+
+    opts.UseUbiquitousLanguage(b => b
+        .UseDefaultLanguage("en")
+        .Language("nl", p => p
+            .WithTitle("Ubiquit taal")
+            .WithIntroduction("Gegenereerd uit het domeinmodel.")
+            .WithMarkdownSectionAggregates("Aggregaten")
+            .WithMarkdownSectionDomainEvents("Domeingebeurtenissen")
+            .WithMarkdownBoundedContextHeadingFormat("Begrensd domein: {0}")
+            .WithNoAggregatesInContext("Geen aggregaten in deze context.")
+            .WithNoDomainEventsInContext("Geen domeingebeurtenissen in deze context.")
+            .WithNoRelationsFromConcept("Geen relaties vanaf dit concept.")
+            .WithMarkdownRelationsHeading("Relaties")
+            .WithMarkdownTypePrefix("Type")
+            .WithMarkdownRelationshipViaWord("via")
+            .WithKindAggregate("aggregaat")
+            .WithKindEntity("entiteit")
+            .WithKindValueObject("waardeobject")
+            .WithKindSubType("subtype")
+            .WithRelationshipHas("heeft")
+            .WithRelationshipHasMany("heeft veel")
+            .WithRelationshipContains("bevat")
+            .WithRelationshipReferences("verwijst naar")
+            .WithRelationshipReferencesById("verwijst naar via id")));
+
+    ubiquitousLanguageDefinition = opts.UbiquitousLanguage;
 
     opts.AddExport("Summary", "txt", graph =>
     {
@@ -81,7 +109,8 @@ app.MapDomainModel(domainGraph, configure: opts =>
         return string.Join(Environment.NewLine, lines);
     });
 
-    opts.AddExport("Ubiquitous Language", "md", UbiquitousLanguageMarkdownExport.Build);
+    opts.AddExport("Ubiquitous Language", "md", graph =>
+        UbiquitousLanguageMarkdownExport.Build(graph, ubiquitousLanguageDefinition, language: null));
 
     opts.AddFeatureExport("Summary", "md", graph =>
     {

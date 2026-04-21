@@ -67,6 +67,24 @@ public sealed class DomainModelOptions
     /// </summary>
     public DomainModelTestingOptions Testing { get; } = new();
 
+    /// <summary>
+    /// Phrases and languages for ubiquitous language JSON, Markdown export, and the Language tab.
+    /// Replace with <see cref="UseUbiquitousLanguage"/> to add translations or change copy.
+    /// </summary>
+    public UbiquitousLanguageDefinition UbiquitousLanguage { get; set; } = UbiquitousLanguageDefinition.CreateDefault();
+
+    /// <summary>
+    /// Replaces <see cref="UbiquitousLanguage"/> using a fluent builder (add languages, change defaults).
+    /// </summary>
+    public DomainModelOptions UseUbiquitousLanguage(Action<UbiquitousLanguageDefinitionBuilder> configure)
+    {
+        ArgumentNullException.ThrowIfNull(configure);
+        var builder = UbiquitousLanguageDefinitionBuilder.Create();
+        configure(builder);
+        UbiquitousLanguage = builder.Build();
+        return this;
+    }
+
     internal List<ExportRegistration> Exports { get; } = [];
 
     internal List<FeatureExportRegistration> FeatureExports { get; } = [];
@@ -248,10 +266,14 @@ public static class DomainModelEndpointExtensions
             }
         }
 
-        // GET /domain-model/ubiquitous-language — structured ubiquitous language (matches Markdown export rules)
-        endpoints.MapGet($"{routePrefix}/ubiquitous-language", () =>
+        // GET /domain-model/ubiquitous-language?lang=nl — structured ubiquitous language (matches Markdown export rules)
+        endpoints.MapGet($"{routePrefix}/ubiquitous-language", (HttpRequest http) =>
         {
-            var doc = UbiquitousLanguageDocumentBuilder.Build(ResolveGraphForDerivedViews());
+            var lang = http.Query["lang"].FirstOrDefault();
+            var doc = UbiquitousLanguageDocumentBuilder.Build(
+                ResolveGraphForDerivedViews(),
+                options.UbiquitousLanguage,
+                lang);
             return Results.Json(doc, new JsonSerializerOptions
             {
                 PropertyNamingPolicy = JsonNamingPolicy.CamelCase,

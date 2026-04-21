@@ -8,12 +8,19 @@ namespace DomainModeling.Graph;
 public static class UbiquitousLanguageMarkdownExport
 {
     /// <summary>
-    /// Creates Markdown suitable for download or documentation (e.g. registered via <c>AddExport</c> in ASP.NET Core).
+    /// Creates Markdown using the default English ubiquitous language definition.
     /// </summary>
-    public static string Build(DomainGraph graph)
+    public static string Build(DomainGraph graph) =>
+        Build(UbiquitousLanguageDocumentBuilder.Build(graph));
+
+    /// <summary>
+    /// Creates Markdown with a custom definition and optional language key (<c>null</c> = definition default).
+    /// </summary>
+    public static string Build(DomainGraph graph, UbiquitousLanguageDefinition definition, string? language = null)
     {
         ArgumentNullException.ThrowIfNull(graph);
-        return Build(UbiquitousLanguageDocumentBuilder.Build(graph));
+        ArgumentNullException.ThrowIfNull(definition);
+        return Build(UbiquitousLanguageDocumentBuilder.Build(graph, definition, language));
     }
 
     /// <summary>
@@ -33,17 +40,22 @@ public static class UbiquitousLanguageMarkdownExport
         }
 
         foreach (var ctx in doc.BoundedContexts)
-            AppendBoundedContext(sb, ctx);
+            AppendBoundedContext(sb, ctx, doc);
 
         return sb.ToString();
     }
 
-    private static void AppendBoundedContext(StringBuilder sb, UbiquitousLanguageBoundedContext ctx)
+    private static void AppendBoundedContext(StringBuilder sb, UbiquitousLanguageBoundedContext ctx, UbiquitousLanguageDocument doc)
     {
-        sb.AppendLine($"## Bounded context: {ctx.Name}");
+        var bcHeading = string.Format(doc.BoundedContextMarkdownHeadingFormat, ctx.Name);
+        if (!bcHeading.StartsWith('#'))
+            sb.AppendLine($"## {bcHeading}");
+        else
+            sb.AppendLine(bcHeading);
+
         sb.AppendLine();
 
-        sb.AppendLine("### Aggregates");
+        sb.AppendLine($"### {doc.AggregatesSectionLabel}");
         sb.AppendLine();
 
         if (!string.IsNullOrEmpty(ctx.Aggregates.EmptyMessage))
@@ -54,10 +66,10 @@ public static class UbiquitousLanguageMarkdownExport
         else
         {
             foreach (var root in ctx.Aggregates.Roots)
-                AppendConceptTree(sb, root, indent: "");
+                AppendConceptTree(sb, root, doc, indent: "");
         }
 
-        sb.AppendLine("### Domain events");
+        sb.AppendLine($"### {doc.DomainEventsSectionLabel}");
         sb.AppendLine();
 
         if (!string.IsNullOrEmpty(ctx.DomainEvents.EmptyMessage))
@@ -77,16 +89,13 @@ public static class UbiquitousLanguageMarkdownExport
                     sb.AppendLine();
                 }
 
-                sb.AppendLine($"_Type:_ `{ev.TypeName}`");
+                sb.AppendLine($"_{doc.TypeLabelPrefix}:_ `{ev.TypeName}`");
                 sb.AppendLine();
             }
         }
     }
 
-    /// <summary>
-    /// Aggregate roots use <c>####</c> headings; nested linked concepts use indented bold lines (max 4 heading levels in the file).
-    /// </summary>
-    private static void AppendConceptTree(StringBuilder sb, UbiquitousLanguageConceptBlock block, string indent)
+    private static void AppendConceptTree(StringBuilder sb, UbiquitousLanguageConceptBlock block, UbiquitousLanguageDocument doc, string indent)
     {
         if (block.Depth == 0)
         {
@@ -107,24 +116,28 @@ public static class UbiquitousLanguageMarkdownExport
             sb.AppendLine();
         }
 
-        sb.AppendLine($"{indent}_Type:_ `{block.TypeName}`");
+        sb.AppendLine($"{indent}_{doc.TypeLabelPrefix}:_ `{block.TypeName}`");
         sb.AppendLine();
 
-        AppendRelationsMarkdown(sb, block.Relations, indent);
+        AppendRelationsMarkdown(sb, block.Relations, doc, indent);
 
         var childIndent = indent + "  ";
         foreach (var child in block.LinkedConcepts)
-            AppendConceptTree(sb, child, childIndent);
+            AppendConceptTree(sb, child, doc, childIndent);
     }
 
-    private static void AppendRelationsMarkdown(StringBuilder sb, UbiquitousLanguageRelationsBlock rel, string indent)
+    private static void AppendRelationsMarkdown(
+        StringBuilder sb,
+        UbiquitousLanguageRelationsBlock rel,
+        UbiquitousLanguageDocument doc,
+        string indent)
     {
-        sb.AppendLine($"{indent}**Relations**");
+        sb.AppendLine($"{indent}**{doc.RelationsHeadingLabel}**");
         sb.AppendLine();
 
         if (rel.Items.Count == 0)
         {
-            sb.AppendLine($"{indent}_None from this concept._");
+            sb.AppendLine($"{indent}_{doc.NoRelationsMessage}_");
             sb.AppendLine();
             return;
         }
@@ -132,7 +145,9 @@ public static class UbiquitousLanguageMarkdownExport
         foreach (var r in rel.Items)
         {
             var target = $"`{r.TargetDisplayName}`";
-            var via = string.IsNullOrWhiteSpace(r.ViaLabel) ? "" : $" _(via `{r.ViaLabel}`)_";
+            var via = string.IsNullOrWhiteSpace(r.ViaLabel)
+                ? ""
+                : $" _({doc.RelationshipViaWord} `{r.ViaLabel}`)_";
             sb.AppendLine($"{indent}- **{r.Phrase}** {target}{via}");
         }
 

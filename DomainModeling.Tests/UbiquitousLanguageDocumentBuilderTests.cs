@@ -33,6 +33,8 @@ public class UbiquitousLanguageDocumentBuilderTests
 
         var doc = UbiquitousLanguageDocumentBuilder.Build(graph);
 
+        doc.Language.Should().Be("en");
+        doc.AvailableLanguages.Should().Contain("en");
         doc.BoundedContexts.Should().ContainSingle().Which.Name.Should().Be("Shop");
         var bc = doc.BoundedContexts[0];
         bc.Aggregates.Roots.Should().ContainSingle().Which.DisplayName.Should().Be("Basket");
