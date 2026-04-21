@@ -129,7 +129,6 @@ public class OrderLine : BaseEntity
 
 /// <summary>
 /// The primary sales order aggregate used in scanner tests.
-/// <domain>emits <see cref="OrderPlacedEvent"/></domain>
 /// </summary>
 public class Order : BaseAggregateRoot
 {
@@ -140,13 +139,6 @@ public class Order : BaseAggregateRoot
     public void Place()
     {
         Raise(new OrderPlacedEvent { OrderId = Id });
-    }
-
-    /// <summary>
-    /// <domain>emits <see cref="OrderPlacedEvent"/></domain>
-    /// </summary>
-    public void PlaceFromDocumentationOnly()
-    {
     }
 
     public void Ship()
@@ -161,8 +153,7 @@ public class Order : BaseAggregateRoot
 }
 
 /// <summary>
-/// <domain>emits <see cref="EntityDeletedEvent{Customer}"/></domain>
-/// <domain>When deleted: notifies <see cref="EntityDeletedEvent{Customer}"/></domain>
+/// Customer aggregate used in scanner tests.
 /// </summary>
 public class Customer : BaseAggregateRoot
 {

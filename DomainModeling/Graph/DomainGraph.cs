@@ -86,6 +86,12 @@ public sealed class EntityNode
 
     public List<PropertyInfo> Properties { get; init; } = [];
 
+    /// <summary>Public methods on this entity (from reflection or the feature editor).</summary>
+    public List<MethodInfo> Methods { get; init; } = [];
+
+    /// <summary>Free-form rules or invariants (e.g. from the feature editor).</summary>
+    public List<DomainRuleInfo> Rules { get; init; } = [];
+
     /// <summary>Domain events this entity can raise (detected via methods / fields).</summary>
     public List<string> EmittedEvents { get; init; } = [];
 
@@ -122,6 +128,10 @@ public sealed class AggregateNode
 
     public List<PropertyInfo> Properties { get; init; } = [];
     public List<MethodInfo> Methods { get; init; } = [];
+
+    /// <summary>Free-form rules or invariants (e.g. from the feature editor).</summary>
+    public List<DomainRuleInfo> Rules { get; init; } = [];
+
     public List<string> ChildEntities { get; init; } = [];
     public List<string> EmittedEvents { get; init; } = [];
     public List<EventEmissionInfo> EventEmissions { get; init; } = [];
@@ -162,6 +172,12 @@ public sealed class ValueObjectNode
     public bool IsCustom { get; init; }
 
     public List<PropertyInfo> Properties { get; init; } = [];
+
+    /// <summary>Public methods on this value object (from the feature editor).</summary>
+    public List<MethodInfo> Methods { get; init; } = [];
+
+    /// <summary>Free-form rules or invariants (e.g. from the feature editor).</summary>
+    public List<DomainRuleInfo> Rules { get; init; } = [];
 }
 
 /// <summary>
@@ -339,7 +355,25 @@ public sealed class SubTypeNode
     /// <summary>The architectural layer this type belongs to (Domain, Application, Infrastructure).</summary>
     public string? Layer { get; init; }
 
+    /// <summary>When <c>true</c>, indicates this type was manually created in the feature editor rather than discovered from assemblies.</summary>
+    public bool IsCustom { get; init; }
+
     public List<PropertyInfo> Properties { get; init; } = [];
+
+    /// <summary>Public methods on this sub-type (from the feature editor).</summary>
+    public List<MethodInfo> Methods { get; init; } = [];
+
+    /// <summary>Free-form rules or invariants (e.g. from the feature editor).</summary>
+    public List<DomainRuleInfo> Rules { get; init; } = [];
+}
+
+/// <summary>
+/// A named rule or invariant attached to a domain type (feature editor / documentation).
+/// </summary>
+public sealed class DomainRuleInfo
+{
+    public required string Name { get; init; }
+    public required string Text { get; init; }
 }
 
 /// <summary>

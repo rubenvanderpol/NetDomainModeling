@@ -1,7 +1,6 @@
 using System.Reflection;
 using System.Text.Json;
 using DomainModeling.Builder;
-using DomainModeling.Discovery;
 using DomainModeling.Graph;
 using DomainModeling.Tests.SampleDomain;
 using FluentAssertions;
@@ -17,7 +16,7 @@ public class DDDBuilderTests
 
         return DDDBuilder.Create()
             .WithBoundedContext("Sales", ctx => ctx
-                .WithDomainAssembly(assembly, scanAssemblyForDocumentation: true)
+                .WithDomainAssembly(assembly)
                 .WithApplicationAssembly(assembly)
                 .WithInfrastructureAssembly(assembly)
                 .Entities(e => e.InheritsFrom<BaseEntity>())
@@ -72,11 +71,10 @@ public class DDDBuilderTests
         var graph = BuildSampleGraph();
         var ctx = graph.BoundedContexts.Single();
 
-        ctx.DomainEvents.Should().HaveCount(6);
+        ctx.DomainEvents.Should().HaveCount(5);
         ctx.DomainEvents.Select(e => e.Name).Should()
             .Contain(["OrderPlacedEvent", "OrderShippedEvent", "CustomerCreatedEvent", "InvoiceCreatedEvent"]);
         ctx.DomainEvents.Should().Contain(e => e.Name.StartsWith("EntityDeletedEvent", StringComparison.Ordinal));
-        ctx.DomainEvents.Should().Contain(e => e.Name == "EntityDeletedEvent<Customer>");
     }
 
     [Fact]
@@ -188,9 +186,6 @@ public class DDDBuilderTests
         order.EventEmissions.Should().Contain(e =>
             e.EventType.Contains("OrderPlacedEvent") &&
             e.MethodName == "Place");
-        order.EventEmissions.Should().Contain(e =>
-            e.EventType.Contains("OrderPlacedEvent") &&
-            e.MethodName == "PlaceFromDocumentationOnly");
         order.EventEmissions.Should().Contain(e =>
             e.EventType.Contains("OrderShippedEvent") &&
             e.MethodName == "Ship");
@@ -334,10 +329,15 @@ public class DDDBuilderTests
         var genericEvent = ctx.DomainEvents.Single(e =>
             e.Name.StartsWith("EntityDeletedEvent", StringComparison.Ordinal) && !e.Name.Contains('<'));
         genericEvent.HandledBy.Should().Contain(h => h.Contains("OrderDeletedEventHandler"));
+        genericEvent.HandledBy.Should().Contain(h => h.Contains("CustomerDeletedEventHandler"));
 
         ctx.Relationships.Should().Contain(r =>
             r.Kind == RelationshipKind.Handles &&
             r.SourceType.Contains("OrderDeletedEventHandler", StringComparison.Ordinal) &&
+            r.TargetType == genericEvent.FullName);
+        ctx.Relationships.Should().Contain(r =>
+            r.Kind == RelationshipKind.Handles &&
+            r.SourceType.Contains("CustomerDeletedEventHandler", StringComparison.Ordinal) &&
             r.TargetType == genericEvent.FullName);
     }
 
@@ -356,80 +356,7 @@ public class DDDBuilderTests
     }
 
     [Fact]
-    public void Build_TypeDocumentedEmits_RoslynIndexerFindsTypeEmissions()
-    {
-        // Clear the cache to avoid stale entries
-        var assembly = typeof(Order).Assembly;
-        var projectPath = AssemblyDocumentationDiscovery.TryFindProjectForDocumentation(assembly);
-        projectPath.Should().NotBeNull("should find the csproj for the test assembly");
-
-        var indexer = RoslynDocumentationIndexer.TryCreate([projectPath!]);
-        indexer.Should().NotBeNull("should create indexer from the test project");
-
-        var customerType = typeof(Customer);
-        var emissions = indexer!.TryGetTypeDocumentedEmissions(customerType);
-        emissions.Should().NotBeEmpty("Customer has <domain>emits <see cref=\"EntityDeletedEvent{{Customer}}\"/></domain>");
-
-        var (canonicalFullName, displayName) = emissions[0];
-        canonicalFullName.Should().Contain("EntityDeletedEvent");
-        canonicalFullName.Should().Contain("Customer");
-        displayName.Should().Be("EntityDeletedEvent<Customer>");
-    }
-
-    [Fact]
-    public void Build_TypeDocumentedEmits_CreatesSyntheticClosedGenericEventNode()
-    {
-        var graph = BuildSampleGraph();
-        var ctx = graph.BoundedContexts.Single();
-
-        ctx.DomainEvents.Should().Contain(e =>
-            e.Name == "EntityDeletedEvent<Customer>" &&
-            e.FullName.Contains("EntityDeletedEvent") &&
-            e.FullName.Contains("Customer"));
-    }
-
-    [Fact]
-    public void Build_TypeDocumentedEmits_EmitterHasEmitsRelationship()
-    {
-        var graph = BuildSampleGraph();
-        var ctx = graph.BoundedContexts.Single();
-
-        var syntheticEvent = ctx.DomainEvents.Single(e => e.Name == "EntityDeletedEvent<Customer>");
-
-        ctx.Relationships.Should().Contain(r =>
-            r.Kind == RelationshipKind.Emits &&
-            r.SourceType.Contains("Customer") &&
-            r.TargetType == syntheticEvent.FullName);
-    }
-
-    [Fact]
-    public void Build_TypeDocumentedEmits_HandlerLinksToClosedGenericEventNode()
-    {
-        var graph = BuildSampleGraph();
-        var ctx = graph.BoundedContexts.Single();
-
-        var syntheticEvent = ctx.DomainEvents.Single(e => e.Name == "EntityDeletedEvent<Customer>");
-        syntheticEvent.HandledBy.Should().Contain(h => h.Contains("CustomerDeletedEventHandler"));
-
-        ctx.Relationships.Should().Contain(r =>
-            r.Kind == RelationshipKind.Handles &&
-            r.SourceType.Contains("CustomerDeletedEventHandler") &&
-            r.TargetType == syntheticEvent.FullName);
-    }
-
-    [Fact]
-    public void Build_TypeDocumentedEmits_AggregateEmittedEventsContainsClosedGeneric()
-    {
-        var graph = BuildSampleGraph();
-        var ctx = graph.BoundedContexts.Single();
-
-        var customer = ctx.Aggregates.Single(a => a.Name == "Customer");
-        var syntheticEvent = ctx.DomainEvents.Single(e => e.Name == "EntityDeletedEvent<Customer>");
-        customer.EmittedEvents.Should().Contain(syntheticEvent.FullName);
-    }
-
-    [Fact]
-    public void Build_TypeDocumentedEmits_OpenGenericNodeStillExistsAndHandlerStillLinked()
+    public void Build_GenericDomainEvent_OpenGenericNodeStillExistsAndHandlerStillLinked()
     {
         var graph = BuildSampleGraph();
         var ctx = graph.BoundedContexts.Single();
@@ -439,20 +366,6 @@ public class DDDBuilderTests
             !e.Name.Contains("<"));
         openGenericEvent.HandledBy.Should().Contain(h => h.Contains("OrderDeletedEventHandler"));
         openGenericEvent.EmittedBy.Should().Contain(e => e.Contains("Order"));
-    }
-
-    [Fact]
-    public void Build_DomainTagDescription_ShowsGenericDisplayName_ForAllLinkKinds()
-    {
-        var graph = BuildSampleGraph();
-        var ctx = graph.BoundedContexts.Single();
-
-        var customer = ctx.Aggregates.Single(a => a.Name == "Customer");
-        customer.Description.Should().NotBeNull();
-        customer.Description.Should().Contain("EntityDeletedEvent<Customer>",
-            "generic types in domain tags should show display name, not metadata name like EntityDeletedEvent`1");
-        customer.Description.Should().NotContain("`1",
-            "open generic metadata names should be replaced by display names");
     }
 
     [Fact]
@@ -782,22 +695,6 @@ public class DDDBuilderTests
         graph.BoundedContexts.Should().HaveCount(2);
         graph.BoundedContexts.Select(c => c.Name).Should().Contain(["Sales", "Catalog"]);
         graph.BoundedContexts.Should().OnlyContain(c => c.Aggregates.Any(a => a.Name == "Order"));
-    }
-
-    [Fact]
-    public void WithDomainAssembly_ScanForDocs_LoadsDomainTagFromDiscoveredCsproj()
-    {
-        var assembly = typeof(Order).Assembly;
-
-        var graph = DDDBuilder.Create()
-            .WithBoundedContext("Sales", ctx => ctx
-                .WithDomainAssembly(assembly, scanAssemblyForDocumentation: true)
-                .Aggregates(a => a.InheritsFrom<BaseAggregateRoot>()))
-            .Build();
-
-        var ctx = graph.BoundedContexts.Single();
-        var order = ctx.Aggregates.Should().ContainSingle(a => a.Name == "Order").Subject;
-        order.Description.Should().Be("emits DomainModeling.Tests.SampleDomain.OrderPlacedEvent");
     }
 
     // ─── Integration Events ─────────────────────────────────────────

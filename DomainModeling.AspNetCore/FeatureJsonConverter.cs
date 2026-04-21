@@ -54,6 +54,7 @@ internal static class FeatureJsonConverter
                             IsCustom = isCustom,
                             Properties = properties,
                             Methods = ParseMethods(node),
+                            Rules = ParseRules(node),
                         });
                         break;
                     case "entity":
@@ -67,6 +68,8 @@ internal static class FeatureJsonConverter
                             Layer = layer,
                             IsCustom = isCustom,
                             Properties = properties,
+                            Methods = ParseMethods(node),
+                            Rules = ParseRules(node),
                         });
                         break;
                     case "valueObject":
@@ -80,6 +83,8 @@ internal static class FeatureJsonConverter
                             Layer = layer,
                             IsCustom = isCustom,
                             Properties = properties,
+                            Methods = ParseMethods(node),
+                            Rules = ParseRules(node),
                         });
                         break;
                     case "event":
@@ -191,7 +196,10 @@ internal static class FeatureJsonConverter
                             Description = description,
                             BoundedContextName = boundedContext,
                             Layer = layer,
+                            IsCustom = isCustom,
                             Properties = properties,
+                            Methods = ParseMethods(node),
+                            Rules = ParseRules(node),
                         });
                         break;
                 }
@@ -362,16 +370,60 @@ internal static class FeatureJsonConverter
             else
             {
                 var str = m.GetString() ?? "";
-                // Format: "MethodName(ParamType, ParamType)"
+                // Format: "ReturnType MethodName(...)" or "MethodName(...)"
                 var parenIdx = str.IndexOf('(');
-                var methodName = parenIdx > 0 ? str[..parenIdx] : str;
+                var head = parenIdx >= 0 ? str[..parenIdx].Trim() : str.Trim();
+                var headParts = head.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                string returnTypeName = "void";
+                string methodName = head;
+                if (headParts.Length >= 2)
+                {
+                    methodName = headParts[^1];
+                    returnTypeName = string.Join(' ', headParts[..^1]);
+                }
+                else if (headParts.Length == 1)
+                {
+                    methodName = headParts[0];
+                }
+
                 result.Add(new MethodDto
                 {
                     Name = methodName,
-                    ReturnTypeName = "void",
+                    ReturnTypeName = returnTypeName,
                 });
             }
         }
         return result.Select(d => d.ToGraphMethod()).ToList();
+    }
+
+    private static List<DomainRuleInfo> ParseRules(JsonElement node)
+    {
+        if (!node.TryGetProperty("rules", out var rulesEl) || rulesEl.ValueKind != JsonValueKind.Array)
+            return [];
+
+        var list = new List<DomainRuleInfo>();
+        foreach (var r in rulesEl.EnumerateArray())
+        {
+            if (r.ValueKind == JsonValueKind.Object)
+            {
+                var ruleName = r.TryGetProperty("name", out var nEl) ? nEl.GetString() ?? "" : "";
+                var ruleText = r.TryGetProperty("text", out var tEl) ? tEl.GetString() ?? "" : "";
+                if (string.IsNullOrWhiteSpace(ruleName) && string.IsNullOrWhiteSpace(ruleText))
+                    continue;
+                list.Add(new DomainRuleInfo
+                {
+                    Name = string.IsNullOrWhiteSpace(ruleName) ? "Rule" : ruleName.Trim(),
+                    Text = ruleText ?? "",
+                });
+            }
+            else if (r.ValueKind == JsonValueKind.String)
+            {
+                var s = r.GetString() ?? "";
+                if (string.IsNullOrWhiteSpace(s)) continue;
+                list.Add(new DomainRuleInfo { Name = "Rule", Text = s.Trim() });
+            }
+        }
+
+        return list;
     }
 }
