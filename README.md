@@ -73,22 +73,55 @@ If you omit conventions for a role, nothing is classified for that role (no impl
 
 The scanner derives many edges from **metadata** (interfaces, properties, generic arguments on repositories). It also uses **IL inspection** where needed—for example domain event construction inside methods, integration events published from handlers, and aggregate method calls from command handlers—so the picture stays closer to real control flow than naming alone.
 
-#### How links between types are detected
+#### How links between graph objects are created (and named)
 
-Relationships are edges in `DomainGraph.Relationships` with a `RelationshipKind`. Only types that match your **configured conventions** participate as nodes; edges are inferred as follows.
+Each link is a `Relationship` in `BoundedContextNode.Relationships` with:
+
+- `SourceType`
+- `TargetType`
+- `Kind` (`RelationshipKind`)
+- optional `Label`
+
+Only types that match your configured conventions participate as nodes.
+
+##### 1) All creation paths
+
+| Creation path | What it does |
+|---|---|
+| **Reflection + IL scanning (`AssemblyScanner`)** | Creates the primary relationship set: `Contains`, `Has`, `HasMany`, `ReferencesById`, `Handles`, `References`, `Manages`, `Emits`, `Publishes`. |
+| **Cross-context integration event stitching (`DDDBuilder.CrossReferenceIntegrationEvents`)** | After each bounded context is scanned, adds missing cross-context `Handles` / `Publishes` links for integration events so each context shows complete wiring. |
+| **Feature JSON / Feature Editor** | Parses saved feature `edges[]` directly into `Relationship` entries. Manual edges drawn in the editor are preserved as-is and exported back as relationships. The editor can also import discovered relationships when both endpoints are present on the feature canvas. |
+
+##### 2) Automatic detection rules by relationship kind
 
 | Kind | Detection |
-|------|-----------|
-| **Contains** | An aggregate has a public instance property whose type (or collection element type) is a classified **entity**—those entities are treated as children of the aggregate. |
-| **Has** / **HasMany** | On entities, aggregates, value objects, command-handler targets, and discovered **sub-types** (custom property types that are not framework primitives): a public instance property whose type is another **known domain type**, or a **custom** non-primitive type in your assemblies (not `System.*` / `Microsoft.*`), yields an edge labeled with the property name. Collections use **HasMany**; scalars use **Has**. |
-| **ReferencesById** | If a property is named `{Something}Id` (suffix `Id`), has no object reference above, and `{Something}` matches the **name** of a classified entity or aggregate, an association to that type is inferred (foreign-key style). |
-| **Handles** | For event, command, and query handlers: types taken from **generic arguments** of implemented interfaces (for example `IHandler<T>`), or—if none are found—from **public method parameters** that match known domain types. Event handlers also get **Handles** to command DTOs when IL shows **`new`** on those types. |
-| **References** | **Command handlers** calling **instance methods** on classified aggregates (for example `order.Place()`), including inside async state machines. **Event handlers** calling instance methods on **command handler** types (for example dispatching to another handler). |
-| **Manages** | **Repositories**: the aggregate type is taken from a **generic interface argument** on `IRepository<T>`-style interfaces that matches a classified aggregate. |
-| **Emits** | **Domain events** constructed in entity/aggregate IL (`new` / calls resolved to event constructors), including compiler-generated nested types for async/lambdas. |
-| **Publishes** | **Integration events** constructed in event-handler IL (same emission scan as domain events, applied to integration event types). |
+|---|---|
+| **Contains** | Aggregate has a property whose type (or collection element type) is a discovered entity. |
+| **Has** / **HasMany** | Property reference from entity/aggregate/value object/command-target/sub-type to another known domain type (or discovered custom sub-type). Collection => `HasMany`, scalar => `Has`. |
+| **ReferencesById** | Property ends with `Id` (for example `OrganizationId`) and the `{Name}` part matches a known aggregate/entity name. |
+| **Handles** | Handler generic arguments (for example `IHandler<T>`), or fallback to handler public method parameters. Also used when IL shows an event handler creates a command DTO (`new`). |
+| **References** | IL shows instance method calls from a command handler to an aggregate (for example `order.Place()`), or from an event handler to a command handler. |
+| **Manages** | Repository generic argument points to a known aggregate (for example `IRepository<TAggregate>`). |
+| **Emits** | IL scan finds domain event construction/usage in entities/aggregates (including compiler-generated async/lambda types). |
+| **Publishes** | IL scan finds integration event construction/usage in event handlers. |
 
-Cross-references on event nodes (who emits or handles an event) are derived from these same rules. Command DTOs surfaced via `.Commands(...)` appear as nodes so **Handles** edges from handlers have endpoints even when nothing else references the type yet.
+##### 3) How labels are assigned
+
+| Kind | Label assigned |
+|---|---|
+| **Contains** | `"contains"` |
+| **Emits** | `"emits via {MethodName}()"` |
+| **Handles** (handler wiring) | `"handles"` |
+| **Handles** (event handler creates command) | `"creates command"` |
+| **References** (method call) | `"invokes {MethodName}()"` |
+| **Manages** | `"manages"` |
+| **Publishes** | `"publishes"` |
+| **Has / HasMany / ReferencesById** | Property name (for example `ShippingAddress`, `Lines`, `CustomerId`) |
+| **Feature JSON edge** | Uses the edge `label` if non-empty; otherwise `null` |
+
+In the UI, if a label is empty, the edge kind is shown as the visible caption.
+
+Cross-references on event nodes (`EmittedBy`, `HandledBy`) are derived from these same relationships. Command DTOs surfaced via `.Commands(...)` appear as graph nodes so `Handles` edges from handlers always have endpoints.
 
 ### 4. Optional: ASP.NET Core explorer
 
