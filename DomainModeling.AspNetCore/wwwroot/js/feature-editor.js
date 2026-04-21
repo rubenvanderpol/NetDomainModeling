@@ -12,7 +12,7 @@
  */
 import {
   esc, escAttr, shortName, ALL_SECTIONS,
-  formatDiagramPropertyLine, formatDiagramMethodLine, formatDiagramEventBadgeLine,
+  formatDiagramPropertyLine, formatDiagramMethodLine, formatDiagramRuleLine, formatDiagramEventBadgeLine,
 } from './helpers.js';
 import { renderTabBar } from './tabs.js';
 import {
@@ -32,9 +32,37 @@ import {
 const NODE_W = 200;
 const PROP_H = 17;
 const HEADER_H = 26;
-const NAME_H = 24;
+const NAME_LINE_H = 18;
+const NAME_PAD = 6;
 const DIVIDER_H = 8;
 const PAD = 12;
+const MAX_NAME_CHARS = 22;
+
+/** Split a name into lines that fit within the node width (same rules as the main Diagram tab). */
+function wrapName(text) {
+  if (!text || text.length <= MAX_NAME_CHARS) return [text || ''];
+  const words = text.includes(' ')
+    ? text.split(' ')
+    : text.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2').split(' ');
+  const lines = [];
+  let line = '';
+  for (const w of words) {
+    const candidate = line ? line + (text.includes(' ') ? ' ' : '') + w : w;
+    if (candidate.length > MAX_NAME_CHARS && line) {
+      lines.push(line);
+      line = w;
+    } else {
+      line = candidate;
+    }
+  }
+  if (line) lines.push(line);
+  return lines.length ? lines : [text];
+}
+
+function nodeNameHeight(n) {
+  const lines = wrapName(feDisplayName(n));
+  return NAME_PAD + lines.length * NAME_LINE_H;
+}
 
 const KIND_CFG = {
   aggregate:        { stereotype: '«Aggregate»',        color: '#d4a0ff', bg: '#1f1828', border: '#7c5aa8' },
@@ -72,7 +100,7 @@ const SECTION_TO_KIND = {};
 for (const [k, v] of Object.entries(KIND_TO_SECTION)) SECTION_TO_KIND[v] = k;
 
 const KIND_LABELS = {
-  aggregate: 'Aggregate', entity: 'Entity', valueObject: 'Value Object',
+  aggregate: 'Aggregate', entity: 'Entity', valueObject: 'Value Object', subType: 'Sub Type',
   event: 'Domain Event', integrationEvent: 'Integration Event',
   commandHandlerTarget: 'Cmd handler target', eventHandler: 'Event Handler',
   commandHandler: 'Command Handler', queryHandler: 'Query Handler',
@@ -105,6 +133,11 @@ const FE_KIND_DROPDOWN_LABEL = {
 };
 
 const FEATURE_EDITOR_VIEW_MODE_KEY = 'domain-model-feature-editor-view-mode';
+/** Last bounded context / layer used when placing new types (localStorage). */
+const FE_LAST_BC_KEY = 'domain-model-feature-editor-last-bc';
+const FE_LAST_LAYER_KEY = 'domain-model-feature-editor-last-layer';
+
+const FE_METHOD_RULE_KINDS = new Set(['aggregate', 'entity', 'valueObject', 'subType']);
 
 // ── Module state ─────────────────────────────────────
 let baseUrl = '';
@@ -128,6 +161,106 @@ try {
 
 function isViewModeOnly() {
   return viewModeOnly === true;
+}
+
+function feLoadLastBoundedContext() {
+  try {
+    const v = localStorage.getItem(FE_LAST_BC_KEY);
+    return v && v.trim() ? v.trim() : '';
+  } catch {
+    return '';
+  }
+}
+
+function feLoadLastLayer() {
+  try {
+    const v = localStorage.getItem(FE_LAST_LAYER_KEY);
+    return v && v.trim() ? v.trim() : '';
+  } catch {
+    return '';
+  }
+}
+
+function feRememberLastContext(boundedContext, layer) {
+  try {
+    if (boundedContext && String(boundedContext).trim()) {
+      localStorage.setItem(FE_LAST_BC_KEY, String(boundedContext).trim());
+    }
+    if (layer && String(layer).trim()) {
+      localStorage.setItem(FE_LAST_LAYER_KEY, String(layer).trim());
+    }
+  } catch { /* ignore */ }
+}
+
+/** @returns {{ returnTypeName: string, name: string, parameters: { name: string, typeName: string }[] }} */
+function feParseMethodSignatureInput(sig) {
+  const s = String(sig || '').trim();
+  if (!s) return { returnTypeName: 'void', name: 'Method', parameters: [] };
+  const paren = s.indexOf('(');
+  const head = paren >= 0 ? s.slice(0, paren).trim() : s;
+  const tail = paren >= 0 ? s.slice(paren) : '';
+  const headParts = head.split(/\s+/).filter(Boolean);
+  let returnTypeName = 'void';
+  let name = 'Method';
+  if (headParts.length === 1) {
+    name = headParts[0];
+  } else if (headParts.length >= 2) {
+    returnTypeName = headParts.slice(0, -1).join(' ');
+    name = headParts[headParts.length - 1];
+  }
+  const parameters = [];
+  if (tail.startsWith('(') && tail.endsWith(')')) {
+    const inner = tail.slice(1, -1).trim();
+    if (inner) {
+      inner.split(',').forEach((part, i) => {
+        const p = part.trim();
+        if (!p) return;
+        const ps = p.split(/\s+/);
+        if (ps.length >= 2) {
+          const pName = ps[ps.length - 1];
+          const pType = ps.slice(0, -1).join(' ');
+          parameters.push({ name: pName, typeName: pType });
+        } else {
+          parameters.push({ name: `arg${i + 1}`, typeName: p });
+        }
+      });
+    }
+  }
+  return { returnTypeName, name, parameters };
+}
+
+function feRebuildMethodDisplayLines(n) {
+  const list = n.structuredMethods || [];
+  n.methods = list.map(m => formatDiagramMethodLine(m));
+}
+
+function feRebuildRuleDisplayLines(n) {
+  const list = n.structuredRules || [];
+  n.ruleLines = list.map(r => formatDiagramRuleLine(r));
+}
+
+function feEnsureMethodRuleStructures(n) {
+  if (!n.structuredMethods) n.structuredMethods = [];
+  if (!n.structuredRules) n.structuredRules = [];
+  if (!Array.isArray(n.methods)) n.methods = [];
+  if (!Array.isArray(n.ruleLines)) n.ruleLines = [];
+}
+
+/** Map domain JSON method objects to structured methods for the feature editor. */
+function feDomainMethodsToStructured(methods) {
+  if (!methods || !methods.length) return [];
+  return methods.map(m => {
+    if (m && typeof m === 'object' && m.name) {
+      return {
+        returnTypeName: m.returnTypeName || 'void',
+        name: m.name,
+        parameters: Array.isArray(m.parameters)
+          ? m.parameters.map(p => ({ name: p.name || '', typeName: p.typeName || '' }))
+          : [],
+      };
+    }
+    return feParseMethodSignatureInput(String(m || ''));
+  });
 }
 
 // ── Public API ───────────────────────────────────────
@@ -602,8 +735,22 @@ function renderPropertiesPanel() {
     const cfg = KIND_CFG[n.kind];
 
     let h = `<div class="fe-panel-title" style="color:${cfg.color}">${cfg.stereotype}</div>`;
-    h += `<div class="fe-panel-field"><label>Name</label><div class="fe-panel-value">${esc(n.name)}</div></div>`;
-    h += `<div class="fe-panel-field"><label>Full Name</label><div class="fe-panel-value">${esc(n.id)}</div></div>`;
+    h += `<div class="fe-panel-field"><label>Name</label>`;
+    if (readOnly) {
+      h += `<div class="fe-panel-value">${esc(n.name)}</div></div>`;
+    } else if (n.isCustom) {
+      h += `<input type="text" class="fe-input" value="${escAttr(n.name)}" placeholder="Short type name…" `;
+      h += `onchange="window.__featureEditor.renameCustomType('${escAttr(n.id)}', this.value)" /></div>`;
+    } else {
+      h += `<div class="fe-panel-value">${esc(n.name)}</div></div>`;
+    }
+
+    h += `<div class="fe-panel-field"><label>Full Name</label>`;
+    if (readOnly || !n.isCustom) {
+      h += `<div class="fe-panel-value">${esc(n.id)}</div></div>`;
+    } else {
+      h += `<div class="fe-panel-value" style="opacity:0.9"><span style="color:var(--text-dim)">${esc('Custom.')}</span>${esc(n.name)}</div></div>`;
+    }
 
     // Alias
     h += `<div class="fe-panel-field"><label>Alias</label>`;
@@ -659,6 +806,54 @@ function renderPropertiesPanel() {
       h += '<input type="text" class="fe-input fe-input-sm" id="feNewPropType" placeholder="type" />';
       h += `<button class="fe-btn-icon fe-btn-add" onclick="window.__featureEditor.addProperty('${escAttr(n.id)}')" title="Add property">+</button>`;
       h += '</div>';
+    }
+
+    // Methods & rules (aggregates, entities, value objects, sub types)
+    if (FE_METHOD_RULE_KINDS.has(n.kind)) {
+      feEnsureMethodRuleStructures(n);
+      h += '<div class="fe-panel-section">Methods</div>';
+      if (n.structuredMethods.length > 0) {
+        for (let i = 0; i < n.structuredMethods.length; i++) {
+          const line = n.methods[i] || formatDiagramMethodLine(n.structuredMethods[i]);
+          h += `<div class="fe-panel-prop-row">`;
+          h += `<span class="fe-panel-prop-text">${esc(line)}</span>`;
+          if (!readOnly) {
+            h += `<button class="fe-btn-icon" onclick="window.__featureEditor.removeMethod('${escAttr(n.id)}', ${i})" title="Remove method">✕</button>`;
+          }
+          h += `</div>`;
+        }
+      } else {
+        h += '<div class="fe-panel-prop-empty">No methods</div>';
+      }
+      if (!readOnly) {
+        h += '<div class="fe-add-prop-row">';
+        h += '<input type="text" class="fe-input" id="feNewMethodSig" placeholder="void DoSomething(int x) or DoSomething()" />';
+        h += `<button class="fe-btn-icon fe-btn-add" onclick="window.__featureEditor.addMethod('${escAttr(n.id)}')" title="Add method">+</button>`;
+        h += '</div>';
+      }
+
+      h += '<div class="fe-panel-section">Rules</div>';
+      if (n.structuredRules.length > 0) {
+        for (let i = 0; i < n.structuredRules.length; i++) {
+          const r = n.structuredRules[i];
+          const line = n.ruleLines[i] || formatDiagramRuleLine(r);
+          h += `<div class="fe-panel-prop-row">`;
+          h += `<span class="fe-panel-prop-text">${esc(line)}</span>`;
+          if (!readOnly) {
+            h += `<button class="fe-btn-icon" onclick="window.__featureEditor.removeRule('${escAttr(n.id)}', ${i})" title="Remove rule">✕</button>`;
+          }
+          h += `</div>`;
+        }
+      } else {
+        h += '<div class="fe-panel-prop-empty">No rules</div>';
+      }
+      if (!readOnly) {
+        h += '<div class="fe-add-prop-row">';
+        h += '<input type="text" class="fe-input fe-input-sm" id="feNewRuleName" placeholder="name" />';
+        h += '<input type="text" class="fe-input" id="feNewRuleText" placeholder="description / invariant" />';
+        h += `<button class="fe-btn-icon fe-btn-add" onclick="window.__featureEditor.addRule('${escAttr(n.id)}')" title="Add rule">+</button>`;
+        h += '</div>';
+      }
     }
 
     // Emitted events (derived from Emits edges)
@@ -797,8 +992,80 @@ export function removeProperty(nodeId, idx) {
   refreshPanel();
 }
 
+export function addMethod(nodeId) {
+  if (isReadOnlyFeature()) return;
+  if (!st) return;
+  const n = st.nMap[nodeId];
+  if (!n || !FE_METHOD_RULE_KINDS.has(n.kind)) return;
+  const input = document.getElementById('feNewMethodSig');
+  if (!input) return;
+  const sig = input.value.trim();
+  if (!sig) return;
+  feEnsureMethodRuleStructures(n);
+  n.structuredMethods.push(feParseMethodSignatureInput(sig));
+  feRebuildMethodDisplayLines(n);
+  n.h = nodeHeight(n);
+  input.value = '';
+  markDirty();
+  renderSvg();
+  refreshPanel();
+}
+
+export function removeMethod(nodeId, idx) {
+  if (isReadOnlyFeature()) return;
+  if (!st) return;
+  const n = st.nMap[nodeId];
+  if (!n || !FE_METHOD_RULE_KINDS.has(n.kind) || !n.structuredMethods) return;
+  n.structuredMethods.splice(idx, 1);
+  feRebuildMethodDisplayLines(n);
+  n.h = nodeHeight(n);
+  markDirty();
+  renderSvg();
+  refreshPanel();
+}
+
+export function addRule(nodeId) {
+  if (isReadOnlyFeature()) return;
+  if (!st) return;
+  const n = st.nMap[nodeId];
+  if (!n || !FE_METHOD_RULE_KINDS.has(n.kind)) return;
+  const nameInput = document.getElementById('feNewRuleName');
+  const textInput = document.getElementById('feNewRuleText');
+  if (!nameInput || !textInput) return;
+  const ruleName = nameInput.value.trim() || 'Rule';
+  const ruleText = textInput.value.trim();
+  if (!ruleText) return;
+  feEnsureMethodRuleStructures(n);
+  n.structuredRules.push({ name: ruleName, text: ruleText });
+  feRebuildRuleDisplayLines(n);
+  n.h = nodeHeight(n);
+  nameInput.value = '';
+  textInput.value = '';
+  markDirty();
+  renderSvg();
+  refreshPanel();
+}
+
+export function removeRule(nodeId, idx) {
+  if (isReadOnlyFeature()) return;
+  if (!st) return;
+  const n = st.nMap[nodeId];
+  if (!n || !FE_METHOD_RULE_KINDS.has(n.kind) || !n.structuredRules) return;
+  n.structuredRules.splice(idx, 1);
+  feRebuildRuleDisplayLines(n);
+  n.h = nodeHeight(n);
+  markDirty();
+  renderSvg();
+  refreshPanel();
+}
+
 function rebuildDisplayProps(n) {
   n.props = (n.structuredProps || []).map(p => formatDiagramPropertyLine(p.name, p.type));
+  if (FE_METHOD_RULE_KINDS.has(n.kind)) {
+    feEnsureMethodRuleStructures(n);
+    feRebuildMethodDisplayLines(n);
+    feRebuildRuleDisplayLines(n);
+  }
   n.h = nodeHeight(n);
 }
 
@@ -926,7 +1193,9 @@ function serializeFeature() {
       alias: n.alias || null, description: n.description || null,
       boundedContext: n.boundedContext || '', layer: n.layer || '',
       props: n.props, structuredProps: n.structuredProps || [],
-      methods: n.methods, events: n.events,
+      methods: FE_METHOD_RULE_KINDS.has(n.kind) ? (n.structuredMethods || []) : n.methods,
+      rules: FE_METHOD_RULE_KINDS.has(n.kind) ? (n.structuredRules || []) : undefined,
+      events: n.events,
     })),
     edges: st.edges.map(e => ({
       source: e.source, target: e.target, kind: e.kind, label: e.label || '',
@@ -961,7 +1230,10 @@ function loadFeatureState(feature) {
       cfg,
       structuredProps: saved.structuredProps || [],
       props: saved.props || [],
-      methods: saved.methods || [],
+      methods: [],
+      structuredMethods: [],
+      structuredRules: [],
+      ruleLines: [],
       events: saved.events || [],
       x: 0, y: 0, vx: 0, vy: 0,
       w: NODE_W, h: 0,
@@ -969,6 +1241,21 @@ function loadFeatureState(feature) {
     // If we have structured props, rebuild display props from them
     if (n.structuredProps.length > 0 && n.props.length === 0) {
       n.props = n.structuredProps.map(p => formatDiagramPropertyLine(p.name, p.type));
+    }
+    if (FE_METHOD_RULE_KINDS.has(n.kind)) {
+      const rawMethods = saved.structuredMethods || saved.methods || [];
+      n.structuredMethods = feDomainMethodsToStructured(rawMethods);
+      feRebuildMethodDisplayLines(n);
+      const rawRules = saved.rules || [];
+      n.structuredRules = rawRules.map(r => {
+        if (r && typeof r === 'object') {
+          return { name: (r.name && String(r.name).trim()) ? String(r.name).trim() : 'Rule', text: r.text != null ? String(r.text) : '' };
+        }
+        return { name: 'Rule', text: String(r || '') };
+      }).filter(r => r.name || r.text);
+      feRebuildRuleDisplayLines(n);
+    } else {
+      n.methods = Array.isArray(saved.methods) ? saved.methods : [];
     }
     n.h = nodeHeight(n);
     // Restore position
@@ -1029,7 +1316,7 @@ function buildFeatureNodeFromDomain(fullName, kind) {
     id: fullName,
     name: item ? item.name : shortName(fullName),
     kind,
-    isCustom: false,
+    isCustom: item?.isCustom === true,
     alias: globalMeta.alias,
     description: globalMeta.description || (item && item.description) || null,
     boundedContext: findDomainContext(fullName) || '',
@@ -1037,10 +1324,27 @@ function buildFeatureNodeFromDomain(fullName, kind) {
     cfg,
     structuredProps: item ? (item.properties || []).map(p => ({ name: p.name, type: p.typeName })) : [],
     props: item ? (item.properties || []).map(p => formatDiagramPropertyLine(p.name, p.typeName)) : [],
-    methods: item ? (item.methods || []).map(m => formatDiagramMethodLine(m)) : [],
+    structuredMethods: [],
+    structuredRules: [],
+    methods: [],
+    ruleLines: [],
     events: [],
     x: 0, y: 0, vx: 0, vy: 0, w: NODE_W, h: 0,
   };
+  if (FE_METHOD_RULE_KINDS.has(kind)) {
+    n.structuredMethods = feDomainMethodsToStructured(item ? (item.methods || []) : []);
+    feRebuildMethodDisplayLines(n);
+    const dr = item && item.rules ? item.rules : [];
+    n.structuredRules = dr.map(r => {
+      if (r && typeof r === 'object' && 'name' in r) {
+        return { name: (r.name && String(r.name).trim()) ? String(r.name).trim() : 'Rule', text: r.text != null ? String(r.text) : '' };
+      }
+      return { name: 'Rule', text: String(r || '') };
+    }).filter(r => r.name || r.text);
+    feRebuildRuleDisplayLines(n);
+  } else {
+    n.methods = item ? (item.methods || []).map(m => formatDiagramMethodLine(m)) : [];
+  }
   n.h = nodeHeight(n);
   return n;
 }
@@ -1051,6 +1355,7 @@ export function addExistingType(fullName, kind) {
   if (!n) return;
 
   placeNewNode(n);
+  feRememberLastContext(n.boundedContext, n.layer);
   st.nodes.push(n);
   st.nMap[n.id] = n;
 
@@ -1102,6 +1407,7 @@ export function addAllFromBoundedContext() {
       const n = buildFeatureNodeFromDomain(item.fullName, kind);
       if (!n) continue;
       placeNewNodeAtBulkIndex(n, bulkIndex++);
+      feRememberLastContext(ctxName, n.layer);
       st.nodes.push(n);
       st.nMap[n.id] = n;
       added++;
@@ -1135,6 +1441,17 @@ export function addNewType() {
   if (st.nMap[fullName]) { alert('A type with that name already exists in this feature.'); return; }
 
   const cfg = KIND_CFG[kind];
+  let lastBc = '';
+  let lastLayer = '';
+  if (st.selectedNode) {
+    const sel = st.nMap[st.selectedNode];
+    if (sel) {
+      lastBc = sel.boundedContext || '';
+      lastLayer = sel.layer || '';
+    }
+  }
+  if (!lastBc) lastBc = feLoadLastBoundedContext();
+  if (!lastLayer) lastLayer = feLoadLastLayer();
   const n = {
     id: fullName,
     name,
@@ -1142,15 +1459,25 @@ export function addNewType() {
     isCustom: true,
     alias: null,
     description: null,
-    boundedContext: '',
-    layer: '',
+    boundedContext: lastBc,
+    layer: lastLayer,
     cfg,
     structuredProps: [],
-    props: [], methods: [], events: [],
+    props: [],
+    structuredMethods: [],
+    structuredRules: [],
+    methods: [],
+    ruleLines: [],
+    events: [],
     x: 0, y: 0, vx: 0, vy: 0, w: NODE_W, h: 0,
   };
+  if (FE_METHOD_RULE_KINDS.has(kind)) {
+    feRebuildMethodDisplayLines(n);
+    feRebuildRuleDisplayLines(n);
+  }
   n.h = nodeHeight(n);
   placeNewNode(n);
+  feRememberLastContext(n.boundedContext, n.layer);
 
   st.nodes.push(n);
   st.nMap[n.id] = n;
@@ -1323,6 +1650,49 @@ function renderBoundedContextDropdown(node) {
   return h;
 }
 
+/**
+ * Rename a custom type: updates id to `Custom.{shortName}` and rewires edges / selection.
+ * Domain-discovered types keep a fixed full name and cannot be renamed here.
+ */
+export function renameCustomType(nodeId, newShortName) {
+  if (isReadOnlyFeature()) return;
+  if (!st) return;
+  const n = st.nMap[nodeId];
+  if (!n || !n.isCustom) return;
+
+  const short = String(newShortName ?? '').trim();
+  if (!short) {
+    alert('Name cannot be empty.');
+    refreshPanel();
+    return;
+  }
+
+  const newId = `Custom.${short}`;
+  if (newId === nodeId) return;
+  if (st.nMap[newId]) {
+    alert('A type with that name already exists in this feature.');
+    refreshPanel();
+    return;
+  }
+
+  delete st.nMap[nodeId];
+  n.id = newId;
+  n.name = short;
+  st.nMap[newId] = n;
+
+  for (const e of st.edges) {
+    if (e.source === nodeId) e.source = newId;
+    if (e.target === nodeId) e.target = newId;
+  }
+  if (connecting && connecting.sourceId === nodeId) connecting.sourceId = newId;
+  if (st.selectedNode === nodeId) st.selectedNode = newId;
+
+  markDirty();
+  renderSvg();
+  refreshPalette();
+  refreshPanel();
+}
+
 export function changeAlias(nodeId, value) {
   if (isReadOnlyFeature()) return;
   if (!st) return;
@@ -1350,6 +1720,7 @@ export function changeBoundedContext(nodeId, ctxName) {
   const n = st.nMap[nodeId];
   if (!n) return;
   n.boundedContext = ctxName;
+  if (st.selectedNode === nodeId) feRememberLastContext(n.boundedContext, n.layer);
   markDirty();
   refreshPanel();
 }
@@ -1394,6 +1765,7 @@ export function changeLayer(nodeId, layer) {
   const n = st.nMap[nodeId];
   if (!n) return;
   n.layer = layer;
+  if (st.selectedNode === nodeId) feRememberLastContext(n.boundedContext, n.layer);
   markDirty();
   refreshPanel();
 }
@@ -1526,7 +1898,7 @@ function applyAutoLayout(nodes, edges, nMap, fixedNodeIds) {
   const isFixed = (n) => fixed && fixed.has(n.id);
 
   const kindRow = {
-    aggregate: 0, entity: 1, valueObject: 1, event: 2, integrationEvent: 2,
+    aggregate: 0, entity: 1, valueObject: 1, subType: 1, event: 2, integrationEvent: 2,
     eventHandler: 3, commandHandlerTarget: 2, commandHandler: 3, queryHandler: 3, repository: 4, service: 4,
   };
   const rowBuckets = {};
@@ -1576,9 +1948,11 @@ function applyAutoLayout(nodes, edges, nMap, fixedNodeIds) {
 
 function nodeHeight(n) {
   const derivedEvents = getEmittedEventsForNode(n.id);
-  let h = PAD + HEADER_H + NAME_H;
+  const ruleLines = (n.ruleLines && n.ruleLines.length) ? n.ruleLines : [];
+  let h = PAD + HEADER_H + nodeNameHeight(n);
   if (n.props.length > 0) h += DIVIDER_H + n.props.length * PROP_H;
   if (n.methods.length > 0) h += DIVIDER_H + n.methods.length * PROP_H;
+  if (ruleLines.length > 0) h += DIVIDER_H + ruleLines.length * PROP_H;
   if (derivedEvents.length > 0) h += DIVIDER_H + derivedEvents.length * PROP_H;
   return h + PAD;
 }
@@ -1755,9 +2129,14 @@ function renderSvg() {
 
     let ty = 20;
     s += `<text x="${n.w / 2}" y="${ty}" text-anchor="middle" fill="${c.color}" font-size="10" font-family="-apple-system,sans-serif" opacity="0.85">${c.stereotype}</text>`;
-    ty += 22;
-    const displayName = feDisplayName(n);
-    s += `<text class="fe-name" x="${n.w / 2}" y="${ty}" text-anchor="middle" fill="#f0f2f7" font-size="14" font-weight="600" font-family="-apple-system,sans-serif">${esc(displayName)}</text>`;
+    ty += NAME_PAD;
+    const nameLines = wrapName(feDisplayName(n));
+    s += `<text class="fe-name" x="${n.w / 2}" text-anchor="middle" fill="#f0f2f7" font-size="14" font-weight="600" font-family="-apple-system,sans-serif">`;
+    for (const ln of nameLines) {
+      ty += NAME_LINE_H;
+      s += `<tspan x="${n.w / 2}" y="${ty}">${esc(ln)}</tspan>`;
+    }
+    s += '</text>';
     if (n.props.length > 0) {
       ty += 8;
       s += `<line x1="12" y1="${ty}" x2="${n.w - 12}" y2="${ty}" stroke="${c.border}" stroke-width="0.5" />`;
@@ -1769,6 +2148,13 @@ function renderSvg() {
       s += `<line x1="12" y1="${ty}" x2="${n.w - 12}" y2="${ty}" stroke="${c.border}" stroke-width="0.5" />`;
       ty += 4;
       for (const m of n.methods) { ty += 17; s += `<text x="16" y="${ty}" fill="#a78bfa" font-size="11" font-family="'SF Mono','Cascadia Code','Fira Code',monospace">${esc(m)}</text>`; }
+    }
+    const ruleLines = n.ruleLines || [];
+    if (ruleLines.length > 0) {
+      ty += 8;
+      s += `<line x1="12" y1="${ty}" x2="${n.w - 12}" y2="${ty}" stroke="${c.border}" stroke-width="0.5" />`;
+      ty += 4;
+      for (const rl of ruleLines) { ty += 17; s += `<text x="16" y="${ty}" fill="#94a3b8" font-size="11" font-family="'SF Mono','Cascadia Code','Fira Code',monospace">${esc(rl)}</text>`; }
     }
     // Derived emitted events from Emits edges
     const derivedEvents = getEmittedEventsForNode(n.id);

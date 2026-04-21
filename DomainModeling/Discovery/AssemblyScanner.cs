@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text;
+using DomainModeling;
 using DomainModeling.Builder;
 using DomainModeling.Graph;
 using MethodInfo = DomainModeling.Graph.MethodInfo;
@@ -59,6 +60,8 @@ internal sealed class AssemblyScanner
         var queryHandlerTypes = allTypes.Where(t => !OwnedElsewhere(t) && _config.QueryHandlerConvention.Matches(t)).ToList();
         var repositoryTypes = allTypes.Where(t => !OwnedElsewhere(t) && _config.RepositoryConvention.Matches(t)).ToList();
         var domainServiceTypes = allTypes.Where(t => !OwnedElsewhere(t) && _config.DomainServiceConvention.Matches(t)).ToList();
+
+        MergeStructuralDomainEvents(allTypes, OwnedElsewhere, domainEventTypes);
 
         // Build a set of all "known domain type" full names for reference detection
         var knownDomainTypes = new HashSet<string>(
@@ -329,6 +332,34 @@ internal sealed class AssemblyScanner
         };
     }
 
+    /// <summary>
+    /// Adds domain event types derived from <see cref="BoundedContextBuilder.DomainEventConvention"/> structural rules
+    /// (e.g. first parameter of <c>Handle</c> on types matching a nested convention).
+    /// </summary>
+    private void MergeStructuralDomainEvents(
+        List<Type> allTypes,
+        Func<Type, bool> ownedElsewhere,
+        List<Type> domainEventTypes)
+    {
+        var rules = _config.DomainEventConvention.StructuralRules;
+        if (rules.Count == 0)
+            return;
+
+        var existing = new HashSet<string>(domainEventTypes.Select(t => t.FullName!).Where(n => n is not null), StringComparer.Ordinal);
+        foreach (var rule in rules)
+        {
+            foreach (var eventType in rule.EnumerateEventTypes(allTypes))
+            {
+                if (ownedElsewhere(eventType))
+                    continue;
+                var fullName = eventType.FullName;
+                if (fullName is null || !existing.Add(fullName))
+                    continue;
+                domainEventTypes.Add(eventType);
+            }
+        }
+    }
+
     // ─── Node builders ───────────────────────────────────────────────
 
     private EntityNode BuildEntityNode(Type type, List<Type> eventTypes, HashSet<string> knownDomainTypes, string? layer)
@@ -336,7 +367,7 @@ internal sealed class AssemblyScanner
         var emissions = DetectEventEmissions(type, eventTypes);
         return new EntityNode
         {
-            Name = type.Name,
+            Name = TypeDisplayNames.ShortName(type),
             FullName = type.FullName!,
             Layer = layer,
             Properties = GetProperties(type, knownDomainTypes),
@@ -361,7 +392,7 @@ internal sealed class AssemblyScanner
 
         return new AggregateNode
         {
-            Name = type.Name,
+            Name = TypeDisplayNames.ShortName(type),
             FullName = type.FullName!,
             Layer = layer,
             Properties = properties,
@@ -376,7 +407,7 @@ internal sealed class AssemblyScanner
     {
         return new ValueObjectNode
         {
-            Name = type.Name,
+            Name = TypeDisplayNames.ShortName(type),
             FullName = type.FullName!,
             Layer = layer,
             Properties = GetProperties(type, knownDomainTypes)
@@ -387,7 +418,7 @@ internal sealed class AssemblyScanner
     {
         return new DomainEventNode
         {
-            Name = type.Name,
+            Name = TypeDisplayNames.ShortName(type),
             FullName = type.FullName!,
             Layer = layer,
             Properties = GetProperties(type, knownDomainTypes)
@@ -425,7 +456,7 @@ internal sealed class AssemblyScanner
 
         return new HandlerNode
         {
-            Name = type.Name,
+            Name = TypeDisplayNames.ShortName(type),
             FullName = type.FullName!,
             Layer = layer,
             Handles = handledTypes.ToList()
@@ -444,7 +475,7 @@ internal sealed class AssemblyScanner
 
         return new RepositoryNode
         {
-            Name = type.Name,
+            Name = TypeDisplayNames.ShortName(type),
             FullName = type.FullName!,
             Layer = layer,
             ManagesAggregate = managedAggregate?.FullName
@@ -455,7 +486,7 @@ internal sealed class AssemblyScanner
     {
         return new DomainServiceNode
         {
-            Name = type.Name,
+            Name = TypeDisplayNames.ShortName(type),
             FullName = type.FullName!,
             Layer = layer,
         };
@@ -583,7 +614,7 @@ internal sealed class AssemblyScanner
 
     private CommandHandlerTargetNode BuildCommandHandlerTargetNode(Type type, HashSet<string> knownDomainTypes) => new()
     {
-        Name = type.Name,
+        Name = TypeDisplayNames.ShortName(type),
         FullName = type.FullName!,
         Layer = _config.GetLayer(type),
         Properties = GetProperties(type, knownDomainTypes)
@@ -672,43 +703,16 @@ internal sealed class AssemblyScanner
             .Select(m => new MethodInfo
             {
                 Name = m.Name,
-                ReturnTypeName = FormatTypeName(m.ReturnType),
+                ReturnTypeName = TypeDisplayNames.FormatTypeReference(m.ReturnType),
                 Parameters = m.GetParameters()
                     .Select(p => new MethodParameterInfo
                     {
                         Name = p.Name ?? "arg",
-                        TypeName = FormatTypeName(p.ParameterType),
+                        TypeName = TypeDisplayNames.FormatTypeReference(p.ParameterType),
                     })
                     .ToList()
             })
             .ToList();
-    }
-
-    private static string FormatTypeName(Type type)
-    {
-        if (type == typeof(void)) return "void";
-        if (type == typeof(string)) return "string";
-        if (type == typeof(int)) return "int";
-        if (type == typeof(long)) return "long";
-        if (type == typeof(bool)) return "bool";
-        if (type == typeof(double)) return "double";
-        if (type == typeof(decimal)) return "decimal";
-        if (type == typeof(float)) return "float";
-        if (type == typeof(Guid)) return "Guid";
-
-        if (type.IsGenericType)
-        {
-            var baseName = StripGenericArity(type.Name);
-            var args = string.Join(", ", type.GetGenericArguments().Select(FormatTypeName));
-            return $"{baseName}<{args}>";
-        }
-
-        if (type.IsArray)
-        {
-            return FormatTypeName(type.GetElementType()!) + "[]";
-        }
-
-        return type.Name;
     }
 
     private static (string TypeName, bool IsCollection, Type? ElementType) AnalyzePropertyType(Type type)
@@ -717,7 +721,7 @@ internal sealed class AssemblyScanner
         if (type.IsArray)
         {
             var elem = type.GetElementType()!;
-            return ($"{elem.Name}[]", true, elem);
+            return ($"{TypeDisplayNames.FormatTypeReference(elem)}[]", true, elem);
         }
 
         // Check for generic collections (IEnumerable<T>, ICollection<T>, List<T>, etc.)
@@ -728,15 +732,16 @@ internal sealed class AssemblyScanner
 
             if (args.Length == 1 && IsCollectionType(genericDef))
             {
-                return ($"ICollection<{args[0].Name}>", true, args[0]);
+                return ($"ICollection<{TypeDisplayNames.FormatTypeReference(args[0])}>", true, args[0]);
             }
 
             // Generic but not a collection (e.g. Nullable<T>)
-            var argNames = string.Join(", ", args.Select(a => a.Name));
-            return ($"{StripGenericArity(type.Name)}<{argNames}>", false, null);
+            var argNames = string.Join(", ", args.Select(TypeDisplayNames.FormatTypeReference));
+            var defName = StripGenericArity(type.Name);
+            return ($"{defName}<{argNames}>", false, null);
         }
 
-        return (type.Name, false, null);
+        return (TypeDisplayNames.FormatTypeReference(type), false, null);
     }
 
     private static bool IsCollectionType(Type genericDef)
@@ -1394,7 +1399,7 @@ internal sealed class AssemblyScanner
             var properties = GetProperties(type, knownDomainTypes);
             subTypeNodes.Add(new SubTypeNode
             {
-                Name = type.Name,
+                Name = TypeDisplayNames.ShortName(type),
                 FullName = fullName,
                 Properties = properties
             });

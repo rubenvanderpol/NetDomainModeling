@@ -4,8 +4,88 @@
 
 export function shortName(fullName) {
   if (!fullName) return '';
-  const parts = fullName.split('.');
+  const s = String(fullName);
+  if (s.indexOf('`') >= 0 || s.indexOf('[[') >= 0) return displayShortName(s);
+  const parts = s.split('.');
   return parts[parts.length - 1];
+}
+
+/**
+ * Human-readable short name for a CLR type string (reflection FullName / relationship keys).
+ * e.g. Namespace.EntityDeletedEvent`1[[Ns.User, Asm,...]] → EntityDeletedEvent<User>
+ */
+export function displayShortName(fullName) {
+  if (!fullName) return '';
+  const s = String(fullName);
+  const lastDot = s.lastIndexOf('.');
+  const segment = lastDot >= 0 ? s.slice(lastDot + 1) : s;
+  return formatClrTypeSegment(segment);
+}
+
+/**
+ * Formats one namespace-less CLR type segment (may include `arity and [[assembly-qualified args]]`).
+ */
+export function formatClrTypeSegment(segment) {
+  if (!segment) return '';
+  const tick = segment.indexOf('`');
+  if (tick < 0) return segment;
+
+  const base = segment.slice(0, tick);
+  let i = tick + 1;
+  while (i < segment.length && segment[i] >= '0' && segment[i] <= '9') i++;
+  if (i >= segment.length || segment.slice(i, i + 2) !== '[[') return base;
+
+  const args = [];
+  let pos = i;
+  while (pos < segment.length && segment.slice(pos, pos + 2) === '[[') {
+    const innerEnd = matchDoubleBracketContentEnd(segment, pos + 2);
+    if (innerEnd < 0) break;
+    const inner = segment.slice(pos + 2, innerEnd);
+    args.push(parseAssemblyQualifiedTypeName(inner));
+    pos = innerEnd + 2;
+    while (pos < segment.length && (segment[pos] === ',' || segment[pos] === ' ')) pos++;
+  }
+  return args.length ? `${base}<${args.join(', ')}>` : base;
+}
+
+/**
+ * Content starts after opening `[[`. Returns index of first `]` of the matching closing `]]`.
+ */
+function matchDoubleBracketContentEnd(s, contentStart) {
+  let depth = 1;
+  let i = contentStart;
+  while (i < s.length && depth > 0) {
+    if (i + 1 < s.length && s[i] === '[' && s[i + 1] === '[') {
+      depth++;
+      i += 2;
+    } else if (i + 1 < s.length && s[i] === ']' && s[i + 1] === ']') {
+      depth--;
+      i += 2;
+    } else i++;
+  }
+  return depth === 0 ? i - 2 : -1;
+}
+
+function parseAssemblyQualifiedTypeName(inner) {
+  const typePart = stripAssemblyQualifier(inner.trim());
+  if (!typePart) return '';
+  if (typePart.indexOf('`') >= 0) return formatClrTypeSegment(typePart);
+  const parts = typePart.split('.');
+  return parts[parts.length - 1] || typePart;
+}
+
+/** Removes `, Assembly` / `, Version=` suffix from a CLR assembly-qualified type string. */
+function stripAssemblyQualifier(s) {
+  if (!s) return '';
+  const v = s.indexOf(', Version=');
+  if (v > 0) return s.slice(0, v).trim();
+  const c = s.indexOf(', Culture=');
+  if (c > 0) return s.slice(0, c).trim();
+  const pk = s.indexOf(', PublicKeyToken=');
+  if (pk > 0) return s.slice(0, pk).trim();
+  const simple = s.indexOf(', ');
+  if (simple > 0 && s.indexOf('`') < 0) return s.slice(0, simple).trim();
+  return s.trim();
 }
 
 /**
@@ -58,21 +138,39 @@ export function truncateDiagramText(str, maxChars = DIAGRAM_NODE_TEXT_MAX_CHARS)
 
 /** Display string for a property row on the diagram canvas (frontend only). */
 export function formatDiagramPropertyLine(propName, typeName) {
-  const raw = `${propName || ''}: ${stripGenericTypeArgs(typeName || '')}`;
+  const t = formatDiagramTypeName(typeName || '');
+  const raw = `${propName || ''}: ${t}`;
   return truncateDiagramText(raw);
 }
 
 /** Display string for a method signature row on the diagram canvas (frontend only). */
 export function formatDiagramMethodLine(method) {
   if (!method) return '';
-  const params = (method.parameters || []).map(p => stripGenericTypeArgs(p.typeName || '')).join(', ');
-  const raw = `${method.name || ''}(${params})`;
+  const ret = formatDiagramTypeName(method.returnTypeName || '');
+  const params = (method.parameters || []).map(p => formatDiagramTypeName(p.typeName || '')).join(', ');
+  const raw = `${ret} ${method.name || ''}(${params})`;
   return truncateDiagramText(raw);
+}
+
+/** One-line rule label for diagram nodes (frontend only). */
+export function formatDiagramRuleLine(rule) {
+  if (!rule) return '';
+  const title = String(rule.name || 'Rule').trim() || 'Rule';
+  const body = String(rule.text || '').trim();
+  const raw = body ? `${title}: ${body}` : title;
+  return truncateDiagramText(raw);
+}
+
+function formatDiagramTypeName(typeName) {
+  if (!typeName) return '';
+  if (typeName.indexOf('`') >= 0 || typeName.indexOf('[[') >= 0) return displayShortName(typeName);
+  return stripGenericTypeArgs(typeName);
 }
 
 /** Event row from domain `emittedEvents` full names (shortName + ellipsis). */
 export function formatDiagramEmittedEventLine(eventFullName) {
-  return formatDiagramEventBadgeLine(shortName(eventFullName || ''));
+  const label = formatDiagramTypeName(eventFullName || '') || shortName(eventFullName || '');
+  return formatDiagramEventBadgeLine(label);
 }
 
 /** Event row when the label is already a display name (feature editor derived events). */
@@ -139,6 +237,22 @@ export const ALL_SECTIONS = [
   'eventHandlers', 'commandHandlers', 'queryHandlers',
   'repositories', 'domainServices'
 ];
+
+/** Maps explorer section keys to main-diagram node `kind` strings (see `diagram.js` KIND_CFG). */
+export const SECTION_TO_DIAGRAM_KIND = {
+  aggregates: 'aggregate',
+  entities: 'entity',
+  valueObjects: 'valueObject',
+  subTypes: 'subType',
+  domainEvents: 'event',
+  integrationEvents: 'integrationEvent',
+  commandHandlerTargets: 'commandHandlerTarget',
+  eventHandlers: 'eventHandler',
+  commandHandlers: 'commandHandler',
+  queryHandlers: 'queryHandler',
+  repositories: 'repository',
+  domainServices: 'service',
+};
 
 /** Section metadata used in sidebar + overview. */
 export const SECTION_META = [

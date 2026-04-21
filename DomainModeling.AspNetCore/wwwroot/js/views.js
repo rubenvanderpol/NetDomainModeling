@@ -1,7 +1,10 @@
 /**
  * Overview + Cards + Detail views.
  */
-import { esc, escAttr, shortName, kindMeta, relKindColor, syntaxHighlight, SECTION_META } from './helpers.js';
+import {
+  esc, escAttr, shortName, kindMeta, relKindColor, syntaxHighlight, SECTION_META, SECTION_TO_DIAGRAM_KIND,
+} from './helpers.js';
+import { isDiagramNodeHidden, getDiagramState } from './diagram.js';
 import { renderTabBar } from './tabs.js';
 
 // ── Overview ─────────────────────────────────────────
@@ -122,12 +125,29 @@ function renderCard(item, sec) {
 export function renderDetailView(kind, item, ctx, metadata, saveMetadataFn) {
   const meta = kindMeta(kind);
   const existing = (metadata || {})[item.fullName] || {};
+  const diagramKind = SECTION_TO_DIAGRAM_KIND[kind];
+  const st = getDiagramState();
+  const kindFiltered = diagramKind && st && st.hiddenKinds.has(diagramKind);
+  const perTypeHidden = diagramKind && isDiagramNodeHidden(item.fullName);
+  const diagramHidden = kindFiltered || perTypeHidden;
+  const detailCbDisabled = kindFiltered ? ' disabled' : '';
 
   let html = '<div class="detail-panel">';
   html += `<div class="detail-back" onclick="window.__nav.switchTab('diagram')">← Back to diagram</div>`;
   html += `<div style="margin-bottom:4px"><span class="card-tag" style="color:${meta.color};background:${meta.bg}">${meta.tag}</span></div>`;
   html += `<h2 class="detail-title">${esc(item.name)}</h2>`;
   html += `<div class="detail-fullname">${esc(item.fullName)}</div>`;
+
+  if (diagramKind) {
+    html += `<div class="detail-section detail-diagram-visibility">
+      <label class="detail-diagram-visibility-label">
+        <input type="checkbox" id="detailDiagramVisible"${diagramHidden ? '' : ' checked'}${detailCbDisabled}
+               onchange="window.__nav.toggleDiagramVisibility('${escAttr(item.fullName)}', this.checked)" />
+        <span>Show on main diagram</span>
+      </label>
+      ${kindFiltered ? '<p class="detail-diagram-visibility-note">This node type is hidden via the diagram toolbar; turn the type back on to show this item.</p>' : ''}
+    </div>`;
+  }
 
   if (item.description) {
     html += `<div class="detail-desc">${esc(item.description)}</div>`;
