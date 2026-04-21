@@ -66,43 +66,16 @@ internal sealed partial class AssemblyScanner
             .Select(m => new MethodInfo
             {
                 Name = m.Name,
-                ReturnTypeName = FormatTypeName(m.ReturnType),
+                ReturnTypeName = TypeDisplayNames.FormatTypeReference(m.ReturnType),
                 Parameters = m.GetParameters()
                     .Select(p => new MethodParameterInfo
                     {
                         Name = p.Name ?? "arg",
-                        TypeName = FormatTypeName(p.ParameterType),
+                        TypeName = TypeDisplayNames.FormatTypeReference(p.ParameterType),
                     })
                     .ToList()
             })
             .ToList();
-    }
-
-    private static string FormatTypeName(Type type)
-    {
-        if (type == typeof(void)) return "void";
-        if (type == typeof(string)) return "string";
-        if (type == typeof(int)) return "int";
-        if (type == typeof(long)) return "long";
-        if (type == typeof(bool)) return "bool";
-        if (type == typeof(double)) return "double";
-        if (type == typeof(decimal)) return "decimal";
-        if (type == typeof(float)) return "float";
-        if (type == typeof(Guid)) return "Guid";
-
-        if (type.IsGenericType)
-        {
-            var baseName = StripGenericArity(type.Name);
-            var args = string.Join(", ", type.GetGenericArguments().Select(FormatTypeName));
-            return $"{baseName}<{args}>";
-        }
-
-        if (type.IsArray)
-        {
-            return FormatTypeName(type.GetElementType()!) + "[]";
-        }
-
-        return type.Name;
     }
 
     private static (string TypeName, bool IsCollection, Type? ElementType) AnalyzePropertyType(Type type)
@@ -110,7 +83,7 @@ internal sealed partial class AssemblyScanner
         if (type.IsArray)
         {
             var elem = type.GetElementType()!;
-            return ($"{elem.Name}[]", true, elem);
+            return ($"{TypeDisplayNames.FormatTypeReference(elem)}[]", true, elem);
         }
 
         if (type.IsGenericType)
@@ -120,14 +93,15 @@ internal sealed partial class AssemblyScanner
 
             if (args.Length == 1 && IsCollectionType(genericDef))
             {
-                return ($"ICollection<{args[0].Name}>", true, args[0]);
+                return ($"ICollection<{TypeDisplayNames.FormatTypeReference(args[0])}>", true, args[0]);
             }
 
-            var argNames = string.Join(", ", args.Select(a => a.Name));
-            return ($"{StripGenericArity(type.Name)}<{argNames}>", false, null);
+            var argNames = string.Join(", ", args.Select(TypeDisplayNames.FormatTypeReference));
+            var defName = StripGenericArity(type.Name);
+            return ($"{defName}<{argNames}>", false, null);
         }
 
-        return (type.Name, false, null);
+        return (TypeDisplayNames.FormatTypeReference(type), false, null);
     }
 
     private static bool IsCollectionType(Type genericDef)

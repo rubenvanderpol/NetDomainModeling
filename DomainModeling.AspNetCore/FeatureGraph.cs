@@ -69,6 +69,8 @@ public sealed class FeatureEntity
     public string? Layer { get; init; }
     public bool IsCustom { get; init; }
     public List<FeatureProperty> Properties { get; init; } = [];
+    public List<FeatureMethod> Methods { get; init; } = [];
+    public List<FeatureRule> Rules { get; init; } = [];
     public List<string> EmittedEvents { get; init; } = [];
     public List<FeatureEventEmission> EventEmissions { get; init; } = [];
 
@@ -81,6 +83,8 @@ public sealed class FeatureEntity
         Layer = n.Layer,
         IsCustom = n.IsCustom,
         Properties = n.Properties.Select(FeatureProperty.FromGraphProperty).ToList(),
+        Methods = n.Methods.Select(FeatureMethod.FromGraphMethod).ToList(),
+        Rules = n.Rules.Select(FeatureRule.FromGraphRule).ToList(),
         EmittedEvents = [..n.EmittedEvents],
         EventEmissions = n.EventEmissions.Select(FeatureEventEmission.FromGraphEmission).ToList(),
     };
@@ -96,6 +100,7 @@ public sealed class FeatureAggregate
     public bool IsCustom { get; init; }
     public List<FeatureProperty> Properties { get; init; } = [];
     public List<FeatureMethod> Methods { get; init; } = [];
+    public List<FeatureRule> Rules { get; init; } = [];
     public List<string> ChildEntities { get; init; } = [];
     public List<string> EmittedEvents { get; init; } = [];
     public List<FeatureEventEmission> EventEmissions { get; init; } = [];
@@ -110,6 +115,7 @@ public sealed class FeatureAggregate
         IsCustom = n.IsCustom,
         Properties = n.Properties.Select(FeatureProperty.FromGraphProperty).ToList(),
         Methods = n.Methods.Select(FeatureMethod.FromGraphMethod).ToList(),
+        Rules = n.Rules.Select(FeatureRule.FromGraphRule).ToList(),
         ChildEntities = [..n.ChildEntities],
         EmittedEvents = [..n.EmittedEvents],
         EventEmissions = n.EventEmissions.Select(FeatureEventEmission.FromGraphEmission).ToList(),
@@ -137,6 +143,8 @@ public sealed class FeatureValueObject
     public string? Layer { get; init; }
     public bool IsCustom { get; init; }
     public List<FeatureProperty> Properties { get; init; } = [];
+    public List<FeatureMethod> Methods { get; init; } = [];
+    public List<FeatureRule> Rules { get; init; } = [];
 
     internal static FeatureValueObject FromValueObjectNode(ValueObjectNode n) => new()
     {
@@ -147,6 +155,8 @@ public sealed class FeatureValueObject
         Layer = n.Layer,
         IsCustom = n.IsCustom,
         Properties = n.Properties.Select(FeatureProperty.FromGraphProperty).ToList(),
+        Methods = n.Methods.Select(FeatureMethod.FromGraphMethod).ToList(),
+        Rules = n.Rules.Select(FeatureRule.FromGraphRule).ToList(),
     };
 }
 
@@ -271,7 +281,10 @@ public sealed class FeatureSubType
     public string? Alias { get; init; }
     public string? Description { get; init; }
     public string? Layer { get; init; }
+    public bool IsCustom { get; init; }
     public List<FeatureProperty> Properties { get; init; } = [];
+    public List<FeatureMethod> Methods { get; init; } = [];
+    public List<FeatureRule> Rules { get; init; } = [];
 
     internal static FeatureSubType FromSubTypeNode(SubTypeNode n) => new()
     {
@@ -280,7 +293,10 @@ public sealed class FeatureSubType
         Alias = n.Alias,
         Description = n.Description,
         Layer = n.Layer,
+        IsCustom = n.IsCustom,
         Properties = n.Properties.Select(FeatureProperty.FromGraphProperty).ToList(),
+        Methods = n.Methods.Select(FeatureMethod.FromGraphMethod).ToList(),
+        Rules = n.Rules.Select(FeatureRule.FromGraphRule).ToList(),
     };
 }
 
@@ -300,6 +316,21 @@ public sealed class FeatureProperty
         TypeName = p.TypeName,
         IsCollection = p.IsCollection,
         ReferenceTypeName = p.ReferenceTypeName,
+    };
+}
+
+/// <summary>
+/// A named rule on a feature type (invariant / policy text).
+/// </summary>
+public sealed class FeatureRule
+{
+    public string Name { get; init; } = "";
+    public string Text { get; init; } = "";
+
+    internal static FeatureRule FromGraphRule(DomainRuleInfo r) => new()
+    {
+        Name = r.Name,
+        Text = r.Text,
     };
 }
 

@@ -9,13 +9,12 @@ internal sealed partial class AssemblyScanner
 {
     private EntityNode BuildEntityNode(Type type, List<Type> eventTypes, HashSet<string> knownDomainTypes, string? layer)
     {
-        var emissions = DetectEventEmissions(type, eventTypes, _documentationIndexer);
+        var emissions = DetectEventEmissions(type, eventTypes);
         return new EntityNode
         {
-            Name = type.Name,
+            Name = TypeDisplayNames.ShortName(type),
             FullName = type.FullName!,
             Layer = layer,
-            Description = _documentationIndexer?.TryGetDomainSummary(type),
             Properties = GetProperties(type, knownDomainTypes),
             EmittedEvents = emissions.Select(e => e.EventType).Distinct().ToList(),
             EventEmissions = emissions
@@ -25,7 +24,7 @@ internal sealed partial class AssemblyScanner
     private AggregateNode BuildAggregateNode(Type type, List<Type> entityTypes, List<Type> eventTypes, HashSet<string> knownDomainTypes, string? layer)
     {
         var properties = GetProperties(type, knownDomainTypes);
-        var emissions = DetectEventEmissions(type, eventTypes, _documentationIndexer);
+        var emissions = DetectEventEmissions(type, eventTypes);
 
         var entityFullNames = new HashSet<string>(entityTypes.Select(e => e.FullName!));
         var childEntities = properties
@@ -36,10 +35,9 @@ internal sealed partial class AssemblyScanner
 
         return new AggregateNode
         {
-            Name = type.Name,
+            Name = TypeDisplayNames.ShortName(type),
             FullName = type.FullName!,
             Layer = layer,
-            Description = _documentationIndexer?.TryGetDomainSummary(type),
             Properties = properties,
             Methods = GetMethods(type),
             ChildEntities = childEntities,
@@ -52,10 +50,9 @@ internal sealed partial class AssemblyScanner
     {
         return new ValueObjectNode
         {
-            Name = type.Name,
+            Name = TypeDisplayNames.ShortName(type),
             FullName = type.FullName!,
             Layer = layer,
-            Description = _documentationIndexer?.TryGetDomainSummary(type),
             Properties = GetProperties(type, knownDomainTypes)
         };
     }
@@ -64,10 +61,9 @@ internal sealed partial class AssemblyScanner
     {
         return new DomainEventNode
         {
-            Name = type.Name,
+            Name = TypeDisplayNames.ShortName(type),
             FullName = type.FullName!,
             Layer = layer,
-            Description = _documentationIndexer?.TryGetDomainSummary(type),
             Properties = GetProperties(type, knownDomainTypes)
         };
     }
@@ -101,10 +97,9 @@ internal sealed partial class AssemblyScanner
 
         return new HandlerNode
         {
-            Name = type.Name,
+            Name = TypeDisplayNames.ShortName(type),
             FullName = type.FullName!,
             Layer = layer,
-            Description = _documentationIndexer?.TryGetDomainSummary(type),
             Handles = handledTypes.ToList()
         };
     }
@@ -120,10 +115,9 @@ internal sealed partial class AssemblyScanner
 
         return new RepositoryNode
         {
-            Name = type.Name,
+            Name = TypeDisplayNames.ShortName(type),
             FullName = type.FullName!,
             Layer = layer,
-            Description = _documentationIndexer?.TryGetDomainSummary(type),
             ManagesAggregate = managedAggregate?.FullName
         };
     }
@@ -132,10 +126,9 @@ internal sealed partial class AssemblyScanner
     {
         return new DomainServiceNode
         {
-            Name = type.Name,
+            Name = TypeDisplayNames.ShortName(type),
             FullName = type.FullName!,
             Layer = layer,
-            Description = _documentationIndexer?.TryGetDomainSummary(type)
         };
     }
 
@@ -253,10 +246,9 @@ internal sealed partial class AssemblyScanner
 
     private CommandHandlerTargetNode BuildCommandHandlerTargetNode(Type type, HashSet<string> knownDomainTypes) => new()
     {
-        Name = type.Name,
+        Name = TypeDisplayNames.ShortName(type),
         FullName = type.FullName!,
         Layer = _config.GetLayer(type),
-        Description = _documentationIndexer?.TryGetDomainSummary(type),
         Properties = GetProperties(type, knownDomainTypes)
     };
 

@@ -39,16 +39,6 @@ internal sealed partial class AssemblyScanner
         var domainServiceNodes = categories.DomainServiceTypes.Select(t =>
             BuildDomainServiceNode(t, _config.GetLayer(t))).ToList();
 
-        if (_documentationIndexer is not null)
-        {
-            MergeSyntheticGenericEventNodes(
-                categories.EntityTypes.Concat(categories.AggregateTypes),
-                domainEventNodes,
-                knownDomainTypes,
-                eventHandlerNodes,
-                _documentationIndexer);
-        }
-
         var commandHandlerTargetNodes = DiscoverCommandHandlerTargets(
             allTypes,
             knownDomainTypes,
@@ -159,6 +149,8 @@ internal sealed partial class AssemblyScanner
         var repositoryTypes = allTypes.Where(t => !OwnedElsewhere(t) && _config.RepositoryConvention.Matches(t)).ToList();
         var domainServiceTypes = allTypes.Where(t => !OwnedElsewhere(t) && _config.DomainServiceConvention.Matches(t)).ToList();
 
+        MergeStructuralDomainEvents(allTypes, OwnedElsewhere, domainEventTypes);
+
         return new DomainTypeCategories(
             entityTypes,
             aggregateTypes,
@@ -204,18 +196,6 @@ internal sealed partial class AssemblyScanner
 
         AddAggregateContainsRelationships(aggregateNodes, relationships);
         AddEntityAndAggregateEmitsRelationships(entityNodes, aggregateNodes, relationships);
-
-        if (_documentationIndexer is not null)
-        {
-            MergeTypeDocumentedEmissions(
-                categories.EntityTypes,
-                categories.AggregateTypes,
-                entityNodes,
-                aggregateNodes,
-                domainEventNodes,
-                relationships,
-                _documentationIndexer);
-        }
 
         CrossReferenceEvents(domainEventNodes, entityNodes, aggregateNodes, eventHandlerNodes);
 

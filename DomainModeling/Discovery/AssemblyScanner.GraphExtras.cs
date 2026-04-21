@@ -57,9 +57,8 @@ internal sealed partial class AssemblyScanner
             var properties = GetProperties(type, knownDomainTypes);
             subTypeNodes.Add(new SubTypeNode
             {
-                Name = type.Name,
+                Name = TypeDisplayNames.ShortName(type),
                 FullName = fullName,
-                Description = _documentationIndexer?.TryGetDomainSummary(type),
                 Properties = properties
             });
 

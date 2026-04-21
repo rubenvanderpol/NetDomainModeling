@@ -76,3 +76,24 @@ internal sealed class MethodDto
         Parameters = m.Parameters.Select(MethodParameterDto.FromGraphParameter).ToList(),
     };
 }
+
+/// <summary>
+/// Serialization-friendly DTO for a named rule on a domain type.
+/// </summary>
+internal sealed class RuleDto
+{
+    public string Name { get; set; } = "";
+    public string Text { get; set; } = "";
+
+    public Graph.DomainRuleInfo ToGraphRule() => new()
+    {
+        Name = Name,
+        Text = Text,
+    };
+
+    public static RuleDto FromGraphRule(Graph.DomainRuleInfo r) => new()
+    {
+        Name = r.Name,
+        Text = r.Text,
+    };
+}
