@@ -1,183 +1,13 @@
-using System.Reflection;
 using DomainModeling.Graph;
 
 namespace DomainModeling.Discovery;
 
-internal sealed partial class AssemblyScanner
+/// <summary>
+/// Assembles <see cref="Relationship"/> edges from built nodes and IL scan results.
+/// </summary>
+internal static class GraphRelationshipBuilder
 {
-    public BoundedContextNode Scan()
-    {
-        var assemblies = _config.GetAllAssemblies();
-        var assemblyOrder = BuildAssemblyOrderIndex(assemblies);
-
-        var allTypes = DeduplicateTypesByFullName(
-            assemblies.SelectMany(SafeGetTypes).Where(t => t is { IsAbstract: false, IsInterface: false }),
-            assemblyOrder);
-
-        var categories = CategorizeDomainTypes(allTypes);
-        var knownDomainTypes = BuildKnownDomainTypeSet(categories);
-
-        var entityNodes = categories.EntityTypes.Select(t =>
-            BuildEntityNode(t, categories.DomainEventTypes, knownDomainTypes, _config.GetLayer(t))).ToList();
-        var aggregateNodes = categories.AggregateTypes.Select(t =>
-            BuildAggregateNode(t, categories.EntityTypes, categories.DomainEventTypes, knownDomainTypes, _config.GetLayer(t))).ToList();
-        var valueObjectNodes = categories.ValueObjectTypes.Select(t =>
-            BuildValueObjectNode(t, knownDomainTypes, _config.GetLayer(t))).ToList();
-        var domainEventNodes = categories.DomainEventTypes.Select(t =>
-            BuildDomainEventNode(t, knownDomainTypes, _config.GetLayer(t))).ToList();
-        var integrationEventNodes = categories.IntegrationEventTypes.Select(t =>
-            BuildDomainEventNode(t, knownDomainTypes, _config.GetLayer(t))).ToList();
-
-        var eventHandlerNodes = categories.EventHandlerTypes.Select(t =>
-            BuildHandlerNode(t, knownDomainTypes, _config.GetLayer(t))).ToList();
-        var commandHandlerNodes = categories.CommandHandlerTypes.Select(t =>
-            BuildHandlerNode(t, knownDomainTypes, _config.GetLayer(t))).ToList();
-        var queryHandlerNodes = categories.QueryHandlerTypes.Select(t =>
-            BuildHandlerNode(t, knownDomainTypes, _config.GetLayer(t))).ToList();
-        var repositoryNodes = categories.RepositoryTypes.Select(t =>
-            BuildRepositoryNode(t, categories.AggregateTypes, _config.GetLayer(t))).ToList();
-        var domainServiceNodes = categories.DomainServiceTypes.Select(t =>
-            BuildDomainServiceNode(t, _config.GetLayer(t))).ToList();
-
-        var commandHandlerTargetNodes = DiscoverCommandHandlerTargets(
-            allTypes,
-            knownDomainTypes,
-            entityNodes,
-            aggregateNodes,
-            valueObjectNodes,
-            domainEventNodes,
-            integrationEventNodes,
-            eventHandlerNodes,
-            commandHandlerNodes,
-            queryHandlerNodes,
-            repositoryNodes,
-            domainServiceNodes);
-        MergeRegisteredCommands(
-            allTypes,
-            knownDomainTypes,
-            entityNodes,
-            aggregateNodes,
-            valueObjectNodes,
-            domainEventNodes,
-            integrationEventNodes,
-            eventHandlerNodes,
-            commandHandlerNodes,
-            queryHandlerNodes,
-            repositoryNodes,
-            domainServiceNodes,
-            commandHandlerTargetNodes);
-
-        var relationships = BuildRelationships(
-            categories,
-            entityNodes,
-            aggregateNodes,
-            valueObjectNodes,
-            domainEventNodes,
-            integrationEventNodes,
-            eventHandlerNodes,
-            commandHandlerNodes,
-            queryHandlerNodes,
-            repositoryNodes,
-            domainServiceNodes,
-            commandHandlerTargetNodes,
-            knownDomainTypes);
-
-        foreach (var cmdTarget in commandHandlerTargetNodes)
-            knownDomainTypes.Add(cmdTarget.FullName);
-
-        var subTypeNodes = DiscoverSubTypes(
-            entityNodes, aggregateNodes, valueObjectNodes,
-            knownDomainTypes, allTypes, relationships);
-
-        return new BoundedContextNode
-        {
-            Name = _config.Name,
-            Entities = entityNodes,
-            Aggregates = aggregateNodes,
-            ValueObjects = valueObjectNodes,
-            DomainEvents = domainEventNodes,
-            IntegrationEvents = integrationEventNodes,
-            EventHandlers = eventHandlerNodes,
-            CommandHandlerTargets = commandHandlerTargetNodes,
-            CommandHandlers = commandHandlerNodes,
-            QueryHandlers = queryHandlerNodes,
-            Repositories = repositoryNodes,
-            DomainServices = domainServiceNodes,
-            SubTypes = subTypeNodes,
-            Relationships = relationships
-        };
-    }
-
-    private static Dictionary<Assembly, int> BuildAssemblyOrderIndex(IReadOnlyList<Assembly> assemblies)
-    {
-        var assemblyOrder = new Dictionary<Assembly, int>();
-        for (var i = 0; i < assemblies.Count; i++)
-        {
-            if (!assemblyOrder.ContainsKey(assemblies[i]))
-                assemblyOrder[assemblies[i]] = i;
-        }
-
-        return assemblyOrder;
-    }
-
-    private readonly record struct DomainTypeCategories(
-        List<Type> EntityTypes,
-        List<Type> AggregateTypes,
-        List<Type> ValueObjectTypes,
-        List<Type> DomainEventTypes,
-        List<Type> IntegrationEventTypesAll,
-        List<Type> IntegrationEventTypes,
-        List<Type> EventHandlerTypes,
-        List<Type> CommandHandlerTypes,
-        List<Type> QueryHandlerTypes,
-        List<Type> RepositoryTypes,
-        List<Type> DomainServiceTypes);
-
-    private DomainTypeCategories CategorizeDomainTypes(List<Type> allTypes)
-    {
-        bool OwnedElsewhere(Type t) => _config.ExternallyOwnedSharedAssemblies.Contains(t.Assembly);
-
-        var entityTypes = allTypes.Where(t => !OwnedElsewhere(t) && _config.EntityConvention.Matches(t)).ToList();
-        var aggregateTypes = allTypes.Where(t => !OwnedElsewhere(t) && _config.AggregateConvention.Matches(t)).ToList();
-        var valueObjectTypes = allTypes.Where(t => !OwnedElsewhere(t) && _config.ValueObjectConvention.Matches(t)).ToList();
-        var domainEventTypes = allTypes.Where(t => !OwnedElsewhere(t) && _config.DomainEventConvention.Matches(t)).ToList();
-        var integrationEventTypesAll = allTypes.Where(t => _config.IntegrationEventConvention.Matches(t)).ToList();
-        var integrationEventTypes = integrationEventTypesAll.Where(t => !OwnedElsewhere(t)).ToList();
-        var eventHandlerTypes = allTypes.Where(t => !OwnedElsewhere(t) && _config.EventHandlerConvention.Matches(t)).ToList();
-        var commandHandlerTypes = allTypes.Where(t => !OwnedElsewhere(t) && _config.CommandHandlerConvention.Matches(t)).ToList();
-        var queryHandlerTypes = allTypes.Where(t => !OwnedElsewhere(t) && _config.QueryHandlerConvention.Matches(t)).ToList();
-        var repositoryTypes = allTypes.Where(t => !OwnedElsewhere(t) && _config.RepositoryConvention.Matches(t)).ToList();
-        var domainServiceTypes = allTypes.Where(t => !OwnedElsewhere(t) && _config.DomainServiceConvention.Matches(t)).ToList();
-
-        MergeStructuralDomainEvents(allTypes, OwnedElsewhere, domainEventTypes);
-
-        return new DomainTypeCategories(
-            entityTypes,
-            aggregateTypes,
-            valueObjectTypes,
-            domainEventTypes,
-            integrationEventTypesAll,
-            integrationEventTypes,
-            eventHandlerTypes,
-            commandHandlerTypes,
-            queryHandlerTypes,
-            repositoryTypes,
-            domainServiceTypes);
-    }
-
-    private static HashSet<string> BuildKnownDomainTypeSet(DomainTypeCategories categories)
-    {
-        return new HashSet<string>(
-            categories.EntityTypes
-                .Concat(categories.AggregateTypes)
-                .Concat(categories.ValueObjectTypes)
-                .Concat(categories.DomainEventTypes)
-                .Concat(categories.IntegrationEventTypesAll)
-                .Select(t => t.FullName!)
-                .Where(n => n is not null));
-    }
-
-    private List<Relationship> BuildRelationships(
+    public static List<Relationship> Build(
         DomainTypeCategories categories,
         List<EntityNode> entityNodes,
         List<AggregateNode> aggregateNodes,
@@ -197,14 +27,14 @@ internal sealed partial class AssemblyScanner
         AddAggregateContainsRelationships(aggregateNodes, relationships);
         AddEntityAndAggregateEmitsRelationships(entityNodes, aggregateNodes, relationships);
 
-        CrossReferenceEvents(domainEventNodes, entityNodes, aggregateNodes, eventHandlerNodes);
+        EventGraphLinker.CrossReferenceEvents(domainEventNodes, entityNodes, aggregateNodes, eventHandlerNodes);
 
         var handlerPublishedEvents = DetectHandlerPublishedIntegrationEvents(
             categories.EventHandlerTypes,
             categories.IntegrationEventTypesAll);
 
-        CrossReferenceEvents(integrationEventNodes, entityNodes, aggregateNodes, eventHandlerNodes);
-        CrossReferencePublishedEvents(integrationEventNodes, handlerPublishedEvents);
+        EventGraphLinker.CrossReferenceEvents(integrationEventNodes, entityNodes, aggregateNodes, eventHandlerNodes);
+        EventGraphLinker.CrossReferencePublishedEvents(integrationEventNodes, handlerPublishedEvents);
 
         AddHandlerToEventHandlesRelationships(
             domainEventNodes,
@@ -225,7 +55,7 @@ internal sealed partial class AssemblyScanner
             commandHandlerNodes,
             relationships);
 
-        CrossReferenceCommandHandlerTargets(commandHandlerTargetNodes, commandHandlerNodes);
+        DomainGraphBuilder.CrossReferenceCommandHandlerTargets(commandHandlerTargetNodes, commandHandlerNodes);
 
         AddRepositoryManagesRelationships(repositoryNodes, relationships);
         AddHandlerPublishesIntegrationEvents(handlerPublishedEvents, relationships);
@@ -318,7 +148,7 @@ internal sealed partial class AssemblyScanner
         var handlerPublishedEvents = new Dictionary<string, List<string>>();
         foreach (var handlerType in eventHandlerTypes)
         {
-            var published = DetectPublishedEvents(handlerType, integrationEventTypesAll);
+            var published = EventEmissionScanner.DetectPublishedEvents(handlerType, integrationEventTypesAll);
             if (published.Count > 0)
                 handlerPublishedEvents[handlerType.FullName!] = published;
         }
@@ -341,7 +171,7 @@ internal sealed partial class AssemblyScanner
         {
             foreach (var handled in handler.Handles)
             {
-                var target = ResolveCanonicalEventKey(handled, registeredEventFullNames) ?? handled;
+                var target = EventGraphLinker.ResolveCanonicalEventKey(handled, registeredEventFullNames) ?? handled;
                 relationships.Add(new Relationship
                 {
                     SourceType = handler.FullName,
@@ -361,7 +191,7 @@ internal sealed partial class AssemblyScanner
         var aggregateFullNames = new HashSet<string>(aggregateNodes.Select(a => a.FullName), StringComparer.Ordinal);
         foreach (var handlerType in commandHandlerTypes)
         {
-            foreach (var (targetFullName, methodName) in DetectInvocationsOnAggregates(handlerType, aggregateFullNames))
+            foreach (var (targetFullName, methodName) in HandlerIlScanner.DetectInvocationsOnAggregates(handlerType, aggregateFullNames))
             {
                 relationships.Add(new Relationship
                 {
@@ -390,7 +220,7 @@ internal sealed partial class AssemblyScanner
         foreach (var handlerType in eventHandlerTypes)
         {
             var source = handlerType.FullName!;
-            foreach (var cmdFullName in DetectInstantiatedTypes(handlerType, commandTargetFullNames))
+            foreach (var cmdFullName in HandlerIlScanner.DetectInstantiatedTypes(handlerType, commandTargetFullNames))
             {
                 relationships.Add(new Relationship
                 {
@@ -404,7 +234,7 @@ internal sealed partial class AssemblyScanner
                     targetNode.HandledBy.Add(source);
             }
 
-            foreach (var (targetFullName, methodName) in DetectInvocationsOnDeclaredTypes(handlerType, commandHandlerFullNames))
+            foreach (var (targetFullName, methodName) in HandlerIlScanner.DetectInvocationsOnDeclaredTypes(handlerType, commandHandlerFullNames))
             {
                 relationships.Add(new Relationship
                 {
@@ -452,6 +282,23 @@ internal sealed partial class AssemblyScanner
         }
     }
 
+    private static void AddPropertyReferences(IEnumerable<EntityNode> nodes, HashSet<string> knownDomainTypes, List<Relationship> relationships)
+    {
+        foreach (var node in nodes)
+        {
+            foreach (var prop in node.Properties.Where(p => p.ReferenceTypeName is not null))
+            {
+                relationships.Add(new Relationship
+                {
+                    SourceType = node.FullName,
+                    TargetType = prop.ReferenceTypeName!,
+                    Kind = prop.IsCollection ? RelationshipKind.HasMany : RelationshipKind.Has,
+                    Label = prop.Name
+                });
+            }
+        }
+    }
+
     private static Dictionary<string, string> BuildEntityAndAggregateNameMap(
         List<Type> entityTypes,
         List<Type> aggregateTypes)
@@ -462,5 +309,40 @@ internal sealed partial class AssemblyScanner
         foreach (var t in aggregateTypes)
             knownEntityAndAggregateNames[t.Name] = t.FullName!;
         return knownEntityAndAggregateNames;
+    }
+
+    private static void AddIdBasedReferences(
+        IEnumerable<EntityNode> nodes,
+        Dictionary<string, string> knownEntityAndAggregateNames,
+        List<Relationship> relationships)
+    {
+        var existingRefs = new HashSet<(string source, string target)>(
+            relationships.Select(r => (r.SourceType, r.TargetType)));
+
+        foreach (var node in nodes)
+        {
+            foreach (var prop in node.Properties)
+            {
+                if (prop.ReferenceTypeName is not null) continue;
+
+                if (prop.Name.Length <= 2 || !prop.Name.EndsWith("Id", StringComparison.Ordinal)) continue;
+
+                var candidateName = prop.Name[..^2];
+                if (!knownEntityAndAggregateNames.TryGetValue(candidateName, out var targetFullName)) continue;
+
+                if (targetFullName == node.FullName) continue;
+
+                if (existingRefs.Contains((node.FullName, targetFullName))) continue;
+
+                existingRefs.Add((node.FullName, targetFullName));
+                relationships.Add(new Relationship
+                {
+                    SourceType = node.FullName,
+                    TargetType = targetFullName,
+                    Kind = RelationshipKind.ReferencesById,
+                    Label = prop.Name
+                });
+            }
+        }
     }
 }

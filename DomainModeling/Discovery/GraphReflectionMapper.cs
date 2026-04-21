@@ -5,9 +5,12 @@ using MethodParameterInfo = DomainModeling.Graph.MethodParameterInfo;
 
 namespace DomainModeling.Discovery;
 
-internal sealed partial class AssemblyScanner
+/// <summary>
+/// Maps CLR types to graph property and method metadata.
+/// </summary>
+internal static class GraphReflectionMapper
 {
-    private static List<PropertyInfo> GetProperties(Type type, HashSet<string> knownDomainTypes)
+    public static List<PropertyInfo> GetProperties(Type type, HashSet<string> knownDomainTypes)
     {
         return type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
             .Where(p => p.DeclaringType == type || p.DeclaringType?.Assembly == type.Assembly)
@@ -55,7 +58,7 @@ internal sealed partial class AssemblyScanner
         return true;
     }
 
-    private static List<MethodInfo> GetMethods(Type type)
+    public static List<MethodInfo> GetMethods(Type type)
     {
         var objectMethods = new HashSet<string>(
             typeof(object).GetMethods(BindingFlags.Public | BindingFlags.Instance)

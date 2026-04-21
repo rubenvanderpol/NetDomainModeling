@@ -3,9 +3,12 @@ using DomainModeling.Graph;
 
 namespace DomainModeling.Discovery;
 
-internal sealed partial class AssemblyScanner
+/// <summary>
+/// IL-based detection of domain / integration event construction and handler publishing.
+/// </summary>
+internal static class EventEmissionScanner
 {
-    private static List<EventEmissionInfo> DetectEventEmissions(Type type, List<Type> eventTypes)
+    public static List<EventEmissionInfo> DetectEventEmissions(Type type, List<Type> eventTypes)
     {
         var eventFullNames = new HashSet<string>(eventTypes.Select(e => e.FullName!));
         var emittedByMethod = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
@@ -32,6 +35,14 @@ internal sealed partial class AssemblyScanner
             }))
             .OrderBy(e => e.EventType)
             .ThenBy(e => e.MethodName)
+            .ToList();
+    }
+
+    public static List<string> DetectPublishedEvents(Type type, List<Type> integrationEventTypes)
+    {
+        return DetectEventEmissions(type, integrationEventTypes)
+            .Select(e => e.EventType)
+            .Distinct()
             .ToList();
     }
 
@@ -95,7 +106,7 @@ internal sealed partial class AssemblyScanner
                 var resolved = module.ResolveMethod(token);
                 if (resolved?.DeclaringType?.FullName is { } fullName)
                 {
-                    var key = ResolveCanonicalEventKey(fullName, eventFullNames);
+                    var key = EventGraphLinker.ResolveCanonicalEventKey(fullName, eventFullNames);
                     if (key is not null)
                         AddEventEmission(emittedByMethod, key, sourceMethodName);
                 }
@@ -116,7 +127,7 @@ internal sealed partial class AssemblyScanner
     {
         if (type.FullName is not null)
         {
-            var key = ResolveCanonicalEventKey(type.FullName, eventFullNames);
+            var key = EventGraphLinker.ResolveCanonicalEventKey(type.FullName, eventFullNames);
             if (key is not null)
             {
                 AddEventEmission(emittedByMethod, key, sourceMethodName);
@@ -166,13 +177,5 @@ internal sealed partial class AssemblyScanner
 
         var methodName = generatedTypeName[(open + 1)..close];
         return string.IsNullOrWhiteSpace(methodName) ? null : methodName;
-    }
-
-    private static List<string> DetectPublishedEvents(Type type, List<Type> integrationEventTypes)
-    {
-        return DetectEventEmissions(type, integrationEventTypes)
-            .Select(e => e.EventType)
-            .Distinct()
-            .ToList();
     }
 }

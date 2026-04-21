@@ -3,9 +3,12 @@ using System.Runtime.CompilerServices;
 
 namespace DomainModeling.Discovery;
 
-internal sealed partial class AssemblyScanner
+/// <summary>
+/// IL scanning for handler → aggregate calls, handler → command handler calls, and command DTO construction.
+/// </summary>
+internal static class HandlerIlScanner
 {
-    private static List<(string TargetFullName, string MethodName)> DetectInvocationsOnAggregates(
+    public static List<(string TargetFullName, string MethodName)> DetectInvocationsOnAggregates(
         Type handlerType,
         HashSet<string> aggregateFullNames)
     {
@@ -31,7 +34,7 @@ internal sealed partial class AssemblyScanner
         return results;
     }
 
-    private static List<(string TargetFullName, string MethodName)> DetectInvocationsOnDeclaredTypes(
+    public static List<(string TargetFullName, string MethodName)> DetectInvocationsOnDeclaredTypes(
         Type handlerType,
         HashSet<string> declaringTypeFullNames)
     {
@@ -57,7 +60,7 @@ internal sealed partial class AssemblyScanner
         return results;
     }
 
-    private static List<string> DetectInstantiatedTypes(Type handlerType, HashSet<string> typeFullNames)
+    public static List<string> DetectInstantiatedTypes(Type handlerType, HashSet<string> typeFullNames)
     {
         var results = new List<string>();
         var seen = new HashSet<string>(StringComparer.Ordinal);

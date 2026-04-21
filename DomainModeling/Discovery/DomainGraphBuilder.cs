@@ -1,30 +1,32 @@
 using System.Reflection;
+using DomainModeling.Builder;
 using DomainModeling.Graph;
-using MethodInfo = DomainModeling.Graph.MethodInfo;
-using PropertyInfo = DomainModeling.Graph.PropertyInfo;
 
 namespace DomainModeling.Discovery;
 
-internal sealed partial class AssemblyScanner
+/// <summary>
+/// Builds graph nodes from categorized CLR types.
+/// </summary>
+internal sealed class DomainGraphBuilder(BoundedContextBuilder config)
 {
-    private EntityNode BuildEntityNode(Type type, List<Type> eventTypes, HashSet<string> knownDomainTypes, string? layer)
+    public EntityNode BuildEntityNode(Type type, List<Type> eventTypes, HashSet<string> knownDomainTypes, string? layer)
     {
-        var emissions = DetectEventEmissions(type, eventTypes);
+        var emissions = EventEmissionScanner.DetectEventEmissions(type, eventTypes);
         return new EntityNode
         {
             Name = TypeDisplayNames.ShortName(type),
             FullName = type.FullName!,
             Layer = layer,
-            Properties = GetProperties(type, knownDomainTypes),
+            Properties = GraphReflectionMapper.GetProperties(type, knownDomainTypes),
             EmittedEvents = emissions.Select(e => e.EventType).Distinct().ToList(),
             EventEmissions = emissions
         };
     }
 
-    private AggregateNode BuildAggregateNode(Type type, List<Type> entityTypes, List<Type> eventTypes, HashSet<string> knownDomainTypes, string? layer)
+    public AggregateNode BuildAggregateNode(Type type, List<Type> entityTypes, List<Type> eventTypes, HashSet<string> knownDomainTypes, string? layer)
     {
-        var properties = GetProperties(type, knownDomainTypes);
-        var emissions = DetectEventEmissions(type, eventTypes);
+        var properties = GraphReflectionMapper.GetProperties(type, knownDomainTypes);
+        var emissions = EventEmissionScanner.DetectEventEmissions(type, eventTypes);
 
         var entityFullNames = new HashSet<string>(entityTypes.Select(e => e.FullName!));
         var childEntities = properties
@@ -39,36 +41,36 @@ internal sealed partial class AssemblyScanner
             FullName = type.FullName!,
             Layer = layer,
             Properties = properties,
-            Methods = GetMethods(type),
+            Methods = GraphReflectionMapper.GetMethods(type),
             ChildEntities = childEntities,
             EmittedEvents = emissions.Select(e => e.EventType).Distinct().ToList(),
             EventEmissions = emissions
         };
     }
 
-    private ValueObjectNode BuildValueObjectNode(Type type, HashSet<string> knownDomainTypes, string? layer)
+    public ValueObjectNode BuildValueObjectNode(Type type, HashSet<string> knownDomainTypes, string? layer)
     {
         return new ValueObjectNode
         {
             Name = TypeDisplayNames.ShortName(type),
             FullName = type.FullName!,
             Layer = layer,
-            Properties = GetProperties(type, knownDomainTypes)
+            Properties = GraphReflectionMapper.GetProperties(type, knownDomainTypes)
         };
     }
 
-    private DomainEventNode BuildDomainEventNode(Type type, HashSet<string> knownDomainTypes, string? layer)
+    public DomainEventNode BuildDomainEventNode(Type type, HashSet<string> knownDomainTypes, string? layer)
     {
         return new DomainEventNode
         {
             Name = TypeDisplayNames.ShortName(type),
             FullName = type.FullName!,
             Layer = layer,
-            Properties = GetProperties(type, knownDomainTypes)
+            Properties = GraphReflectionMapper.GetProperties(type, knownDomainTypes)
         };
     }
 
-    private HandlerNode BuildHandlerNode(Type type, HashSet<string> knownDomainTypes, string? layer)
+    public HandlerNode BuildHandlerNode(Type type, HashSet<string> knownDomainTypes, string? layer)
     {
         var handledTypes = new HashSet<string>();
 
@@ -104,7 +106,7 @@ internal sealed partial class AssemblyScanner
         };
     }
 
-    private RepositoryNode BuildRepositoryNode(Type type, List<Type> aggregateTypes, string? layer)
+    public RepositoryNode BuildRepositoryNode(Type type, List<Type> aggregateTypes, string? layer)
     {
         var aggregateNames = new HashSet<string>(aggregateTypes.Select(a => a.FullName!));
 
@@ -122,7 +124,7 @@ internal sealed partial class AssemblyScanner
         };
     }
 
-    private DomainServiceNode BuildDomainServiceNode(Type type, string? layer)
+    public DomainServiceNode BuildDomainServiceNode(Type type, string? layer)
     {
         return new DomainServiceNode
         {
@@ -132,33 +134,7 @@ internal sealed partial class AssemblyScanner
         };
     }
 
-    private static HashSet<string> CollectPrimaryBuildingBlockFullNames(
-        List<EntityNode> entityNodes,
-        List<AggregateNode> aggregateNodes,
-        List<ValueObjectNode> valueObjectNodes,
-        List<DomainEventNode> domainEventNodes,
-        List<DomainEventNode> integrationEventNodes,
-        List<HandlerNode> eventHandlerNodes,
-        List<HandlerNode> commandHandlerNodes,
-        List<HandlerNode> queryHandlerNodes,
-        List<RepositoryNode> repositoryNodes,
-        List<DomainServiceNode> domainServiceNodes)
-    {
-        var excluded = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var n in entityNodes) excluded.Add(n.FullName);
-        foreach (var n in aggregateNodes) excluded.Add(n.FullName);
-        foreach (var n in valueObjectNodes) excluded.Add(n.FullName);
-        foreach (var n in domainEventNodes) excluded.Add(n.FullName);
-        foreach (var n in integrationEventNodes) excluded.Add(n.FullName);
-        foreach (var n in eventHandlerNodes) excluded.Add(n.FullName);
-        foreach (var n in commandHandlerNodes) excluded.Add(n.FullName);
-        foreach (var n in queryHandlerNodes) excluded.Add(n.FullName);
-        foreach (var n in repositoryNodes) excluded.Add(n.FullName);
-        foreach (var n in domainServiceNodes) excluded.Add(n.FullName);
-        return excluded;
-    }
-
-    private List<CommandHandlerTargetNode> DiscoverCommandHandlerTargets(
+    public List<CommandHandlerTargetNode> DiscoverCommandHandlerTargets(
         List<Type> allTypes,
         HashSet<string> knownDomainTypes,
         List<EntityNode> entityNodes,
@@ -196,13 +172,13 @@ internal sealed partial class AssemblyScanner
         }
 
         return targetTypes
-            .Where(t => !_config.ExternallyOwnedSharedAssemblies.Contains(t.Assembly))
+            .Where(t => !config.ExternallyOwnedSharedAssemblies.Contains(t.Assembly))
             .OrderBy(t => t.Name, StringComparer.Ordinal)
             .Select(t => BuildCommandHandlerTargetNode(t, knownDomainTypes))
             .ToList();
     }
 
-    private void MergeRegisteredCommands(
+    public void MergeRegisteredCommands(
         List<Type> allTypes,
         HashSet<string> knownDomainTypes,
         List<EntityNode> entityNodes,
@@ -217,7 +193,7 @@ internal sealed partial class AssemblyScanner
         List<DomainServiceNode> domainServiceNodes,
         List<CommandHandlerTargetNode> commandHandlerTargetNodes)
     {
-        if (!_config.CommandConvention.HasPredicates)
+        if (!config.CommandConvention.HasPredicates)
             return;
 
         var excluded = CollectPrimaryBuildingBlockFullNames(
@@ -230,9 +206,9 @@ internal sealed partial class AssemblyScanner
 
         foreach (var t in allTypes
                      .Where(type => type.FullName is not null
-                                    && _config.CommandConvention.Matches(type)
+                                    && config.CommandConvention.Matches(type)
                                     && !excluded.Contains(type.FullName)
-                                    && !_config.ExternallyOwnedSharedAssemblies.Contains(type.Assembly))
+                                    && !config.ExternallyOwnedSharedAssemblies.Contains(type.Assembly))
                      .OrderBy(type => type.Name, StringComparer.Ordinal))
         {
             var fn = t.FullName!;
@@ -244,15 +220,15 @@ internal sealed partial class AssemblyScanner
         commandHandlerTargetNodes.Sort(static (a, b) => string.CompareOrdinal(a.Name, b.Name));
     }
 
-    private CommandHandlerTargetNode BuildCommandHandlerTargetNode(Type type, HashSet<string> knownDomainTypes) => new()
+    public CommandHandlerTargetNode BuildCommandHandlerTargetNode(Type type, HashSet<string> knownDomainTypes) => new()
     {
         Name = TypeDisplayNames.ShortName(type),
         FullName = type.FullName!,
-        Layer = _config.GetLayer(type),
-        Properties = GetProperties(type, knownDomainTypes)
+        Layer = config.GetLayer(type),
+        Properties = GraphReflectionMapper.GetProperties(type, knownDomainTypes)
     };
 
-    private static void CrossReferenceCommandHandlerTargets(
+    public static void CrossReferenceCommandHandlerTargets(
         List<CommandHandlerTargetNode> targets,
         List<HandlerNode> commandHandlers)
     {
@@ -265,5 +241,31 @@ internal sealed partial class AssemblyScanner
                     node.HandledBy.Add(handler.FullName);
             }
         }
+    }
+
+    private static HashSet<string> CollectPrimaryBuildingBlockFullNames(
+        List<EntityNode> entityNodes,
+        List<AggregateNode> aggregateNodes,
+        List<ValueObjectNode> valueObjectNodes,
+        List<DomainEventNode> domainEventNodes,
+        List<DomainEventNode> integrationEventNodes,
+        List<HandlerNode> eventHandlerNodes,
+        List<HandlerNode> commandHandlerNodes,
+        List<HandlerNode> queryHandlerNodes,
+        List<RepositoryNode> repositoryNodes,
+        List<DomainServiceNode> domainServiceNodes)
+    {
+        var excluded = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var n in entityNodes) excluded.Add(n.FullName);
+        foreach (var n in aggregateNodes) excluded.Add(n.FullName);
+        foreach (var n in valueObjectNodes) excluded.Add(n.FullName);
+        foreach (var n in domainEventNodes) excluded.Add(n.FullName);
+        foreach (var n in integrationEventNodes) excluded.Add(n.FullName);
+        foreach (var n in eventHandlerNodes) excluded.Add(n.FullName);
+        foreach (var n in commandHandlerNodes) excluded.Add(n.FullName);
+        foreach (var n in queryHandlerNodes) excluded.Add(n.FullName);
+        foreach (var n in repositoryNodes) excluded.Add(n.FullName);
+        foreach (var n in domainServiceNodes) excluded.Add(n.FullName);
+        return excluded;
     }
 }

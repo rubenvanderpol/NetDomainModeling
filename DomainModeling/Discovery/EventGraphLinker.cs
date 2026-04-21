@@ -4,9 +4,12 @@ using DomainModeling.Graph;
 
 namespace DomainModeling.Discovery;
 
-internal sealed partial class AssemblyScanner
+/// <summary>
+/// Resolves generic event CLR names to graph nodes and wires emitted/handled/published cross-references.
+/// </summary>
+internal static class EventGraphLinker
 {
-    private static void CrossReferenceEvents(
+    public static void CrossReferenceEvents(
         List<DomainEventNode> eventNodes,
         List<EntityNode> entities,
         List<AggregateNode> aggregates,
@@ -42,7 +45,7 @@ internal sealed partial class AssemblyScanner
         }
     }
 
-    private static string? ResolveCanonicalEventKey(string typeFullName, HashSet<string> registeredEventFullNames)
+    public static string? ResolveCanonicalEventKey(string typeFullName, HashSet<string> registeredEventFullNames)
     {
         if (registeredEventFullNames.Contains(typeFullName))
             return typeFullName;
@@ -136,7 +139,7 @@ internal sealed partial class AssemblyScanner
         return false;
     }
 
-    private static void CrossReferencePublishedEvents(
+    public static void CrossReferencePublishedEvents(
         List<DomainEventNode> integrationEventNodes,
         Dictionary<string, List<string>> handlerPublishedEvents)
     {
