@@ -1,6 +1,7 @@
 using System.Reflection;
 using DomainModeling.AspNetCore;
 using DomainModeling.Builder;
+using DomainModeling.Graph;
 using DomainModeling.Example.Application;
 using DomainModeling.Example.Domain;
 using DomainModeling.Example.IntegrationEvents;
@@ -79,6 +80,8 @@ app.MapDomainModel(domainGraph, configure: opts =>
         }
         return string.Join(Environment.NewLine, lines);
     });
+
+    opts.AddExport("Ubiquitous Language", "md", UbiquitousLanguageMarkdownExport.Build);
 
     opts.AddFeatureExport("Summary", "md", graph =>
     {
