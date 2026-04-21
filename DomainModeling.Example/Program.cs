@@ -31,7 +31,7 @@ var domainGraph = DDDBuilder.Create(ctx => ctx
     .WithSharedAssembly(SharedExampleAssembly(typeof(Product).Assembly))
     .WithSharedAssembly(typeof(IntegrationEvent).Assembly, "IntegrationContracts")
     .WithBoundedContext("Catalog", ctx => ctx
-        .WithDomainAssembly(typeof(Product).Assembly, scanAssemblyForDocumentation: true)
+        .WithDomainAssembly(typeof(Product).Assembly)
     )
     .WithBoundedContext("Shipping", ctx => ctx
         .WithDomainAssembly(typeof(Shipment).Assembly)
