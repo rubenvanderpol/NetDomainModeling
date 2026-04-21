@@ -73,6 +73,11 @@ public sealed class EntityNode
     /// <summary>Optional description (e.g. from explorer metadata).</summary>
     public string? Description { get; set; }
 
+    /// <summary>
+    /// Bounded context this type belongs to in the discovered graph, or the value persisted from the feature editor.
+    /// </summary>
+    public string? BoundedContextName { get; set; }
+
     /// <summary>The architectural layer this type belongs to (Domain, Application, Infrastructure).</summary>
     public string? Layer { get; init; }
 
@@ -109,6 +114,11 @@ public sealed class AggregateNode
 
     /// <summary>Optional description (e.g. from explorer metadata).</summary>
     public string? Description { get; set; }
+
+    /// <summary>
+    /// Bounded context this type belongs to in the discovered graph, or the value persisted from the feature editor.
+    /// </summary>
+    public string? BoundedContextName { get; set; }
 
     /// <summary>The architectural layer this type belongs to (Domain, Application, Infrastructure).</summary>
     public string? Layer { get; init; }
@@ -150,6 +160,11 @@ public sealed class ValueObjectNode
     /// <summary>Optional description (e.g. from explorer metadata).</summary>
     public string? Description { get; set; }
 
+    /// <summary>
+    /// Bounded context this type belongs to in the discovered graph, or the value persisted from the feature editor.
+    /// </summary>
+    public string? BoundedContextName { get; set; }
+
     /// <summary>The architectural layer this type belongs to (Domain, Application, Infrastructure).</summary>
     public string? Layer { get; init; }
 
@@ -178,6 +193,11 @@ public sealed class DomainEventNode
 
     /// <summary>Optional description (e.g. from explorer metadata).</summary>
     public string? Description { get; set; }
+
+    /// <summary>
+    /// Bounded context this type belongs to in the discovered graph, or the value persisted from the feature editor.
+    /// </summary>
+    public string? BoundedContextName { get; set; }
 
     /// <summary>The architectural layer this type belongs to (Domain, Application, Infrastructure).</summary>
     public string? Layer { get; init; }
@@ -208,6 +228,11 @@ public sealed class CommandHandlerTargetNode
     /// <summary>Optional description (e.g. from explorer metadata).</summary>
     public string? Description { get; set; }
 
+    /// <summary>
+    /// Bounded context this type belongs to in the discovered graph, or the value persisted from the feature editor.
+    /// </summary>
+    public string? BoundedContextName { get; set; }
+
     /// <summary>The architectural layer this type belongs to (Domain, Application, Infrastructure).</summary>
     public string? Layer { get; init; }
 
@@ -237,6 +262,11 @@ public sealed class HandlerNode
     /// <summary>Optional description (e.g. from explorer metadata).</summary>
     public string? Description { get; set; }
 
+    /// <summary>
+    /// Bounded context this type belongs to in the discovered graph, or the value persisted from the feature editor.
+    /// </summary>
+    public string? BoundedContextName { get; set; }
+
     /// <summary>The architectural layer this type belongs to (Domain, Application, Infrastructure).</summary>
     public string? Layer { get; init; }
 
@@ -260,6 +290,11 @@ public sealed class RepositoryNode
 
     /// <summary>Optional description (e.g. from explorer metadata).</summary>
     public string? Description { get; set; }
+
+    /// <summary>
+    /// Bounded context this type belongs to in the discovered graph, or the value persisted from the feature editor.
+    /// </summary>
+    public string? BoundedContextName { get; set; }
 
     /// <summary>The architectural layer this type belongs to (Domain, Application, Infrastructure).</summary>
     public string? Layer { get; init; }
@@ -285,6 +320,11 @@ public sealed class DomainServiceNode
     /// <summary>Optional description (e.g. from explorer metadata).</summary>
     public string? Description { get; set; }
 
+    /// <summary>
+    /// Bounded context this type belongs to in the discovered graph, or the value persisted from the feature editor.
+    /// </summary>
+    public string? BoundedContextName { get; set; }
+
     /// <summary>The architectural layer this type belongs to (Domain, Application, Infrastructure).</summary>
     public string? Layer { get; init; }
 
@@ -306,6 +346,11 @@ public sealed class SubTypeNode
 
     /// <summary>Optional description (e.g. from explorer metadata).</summary>
     public string? Description { get; set; }
+
+    /// <summary>
+    /// Bounded context this type belongs to in the discovered graph, or the value persisted from the feature editor.
+    /// </summary>
+    public string? BoundedContextName { get; set; }
 
     /// <summary>The architectural layer this type belongs to (Domain, Application, Infrastructure).</summary>
     public string? Layer { get; init; }

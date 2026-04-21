@@ -116,10 +116,35 @@ public sealed class DomainModelOptions
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentException.ThrowIfNullOrWhiteSpace(fileExtension);
         ArgumentNullException.ThrowIfNull(builder);
+        FeatureExports.Add(new FeatureExportRegistration(name, fileExtension.TrimStart('.'), (g, _) => builder(g)));
+        return this;
+    }
+
+    /// <summary>
+    /// Registers a named feature export whose builder also receives the raw <c>feature.json</c> text
+    /// (useful for LLM prompts or round-tripping editor metadata).
+    /// </summary>
+    /// <param name="name">Display name shown in the UI.</param>
+    /// <param name="fileExtension">File extension for the download (without leading dot).</param>
+    /// <param name="builder">Receives the <see cref="FeatureGraph"/> and <see cref="FeatureExportContext"/>.</param>
+    /// <remarks>
+    /// Same query options as <see cref="AddFeatureExport(string, string, Func{FeatureGraph, string})"/>.
+    /// </remarks>
+    public DomainModelOptions AddFeatureExport(string name, string fileExtension, Func<FeatureGraph, FeatureExportContext, string> builder)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentException.ThrowIfNullOrWhiteSpace(fileExtension);
+        ArgumentNullException.ThrowIfNull(builder);
         FeatureExports.Add(new FeatureExportRegistration(name, fileExtension.TrimStart('.'), builder));
         return this;
     }
 }
+
+/// <summary>
+/// Optional inputs for a feature export beyond the resolved <see cref="FeatureGraph"/>.
+/// </summary>
+/// <param name="RawFeatureEditorJson">Verbatim JSON from the saved <c>feature.json</c> file, if available.</param>
+public sealed record FeatureExportContext(string? RawFeatureEditorJson);
 
 /// <summary>
 /// A named export that produces a downloadable string from the domain graph.
@@ -132,7 +157,7 @@ internal sealed record ExportRegistration(string Name, string FileExtension, Fun
 /// <summary>
 /// A named export for feature editor diagrams.
 /// </summary>
-internal sealed record FeatureExportRegistration(string Name, string FileExtension, Func<FeatureGraph, string> Builder);
+internal sealed record FeatureExportRegistration(string Name, string FileExtension, Func<FeatureGraph, FeatureExportContext, string> Builder);
 
 /// <summary>
 /// Extension methods to mount the Domain Model explorer UI and JSON API
@@ -621,10 +646,11 @@ public static class DomainModelEndpointExtensions
                         return Results.NotFound();
 
                     var featureJson = File.ReadAllText(path);
-                    var featureGraph = FeatureGraph.FromDomainGraph(
-                        FeatureJsonConverter.ToDomainGraph(featureJson, safeName));
+                    var slice = FeatureJsonConverter.ToDomainGraph(featureJson, safeName);
+                    FeatureGraphSliceEnrichment.Apply(slice, graph);
+                    var featureGraph = FeatureGraph.FromDomainGraph(slice);
 
-                    var content = export.Builder(featureGraph);
+                    var content = export.Builder(featureGraph, new FeatureExportContext(featureJson));
                     if (http.Request.Query.TryGetValue("registerCommands", out var rc) && rc.Count > 0)
                     {
                         var v = rc[0];
