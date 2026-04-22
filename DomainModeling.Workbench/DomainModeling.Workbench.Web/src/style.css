@@ -9,70 +9,28 @@ body {
   font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif;
   background: #0f1115;
   color: #e6e9ef;
-}
-
-#app {
   display: flex;
   flex-direction: column;
-  height: 100%;
 }
 
-.top {
+.workbench-banner {
+  flex: 0 0 auto;
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px 24px;
-  padding: 10px 16px;
+  align-items: baseline;
+  gap: 8px 16px;
+  padding: 8px 14px;
   border-bottom: 1px solid #252a35;
   background: #141821;
+  font-size: 13px;
 }
 
-.brand {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.sub {
-  font-size: 12px;
+.workbench-banner-note {
   color: #9aa3b5;
+  font-weight: normal;
 }
 
-.tabs {
-  display: flex;
-  gap: 6px;
-}
-
-.tab {
-  cursor: pointer;
-  border: 1px solid #2c3545;
-  background: #1a2130;
-  color: #c8d0e0;
-  border-radius: 8px;
-  padding: 8px 14px;
-  font-size: 14px;
-}
-
-.tab:hover {
-  border-color: #3d4a63;
-}
-
-.tab.active {
-  border-color: #4f7cff;
-  background: #1e2740;
-  color: #fff;
-}
-
-.frame-wrap {
+.workbench-explorer {
   flex: 1;
   min-height: 0;
-}
-
-.frame {
-  width: 100%;
-  height: 100%;
-  border: 0;
-  display: block;
-  background: #0b0d11;
 }

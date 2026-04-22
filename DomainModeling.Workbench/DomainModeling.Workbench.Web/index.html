@@ -6,7 +6,23 @@
     <title>Domain Modeling Workbench</title>
   </head>
   <body>
-    <div id="app"></div>
+    <header class="workbench-banner">
+      <strong>Workbench</strong>
+      <span class="workbench-banner-note">Aspire + Vite — same explorer as the library; use the sidebar for Graph and Features.</span>
+    </header>
+    <div class="layout workbench-explorer">
+      <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+          <h1>Domain Model Explorer</h1>
+          <p id="contextName">Loading…</p>
+        </div>
+        <nav class="sidebar-nav" id="sidebarNav"></nav>
+      </aside>
+      <button class="sidebar-toggle" id="sidebarToggle" title="Collapse sidebar" type="button">❮</button>
+      <main class="main" id="mainContent">
+        <div class="loading" id="loadingState">Loading domain model…</div>
+      </main>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

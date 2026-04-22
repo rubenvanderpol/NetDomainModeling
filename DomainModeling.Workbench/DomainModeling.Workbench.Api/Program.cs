@@ -1,5 +1,6 @@
 using DomainModeling.AspNetCore;
 using DomainModeling.Example;
+using Microsoft.Net.Http.Headers;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -75,6 +76,32 @@ app.MapDomainModel(domainGraph, configure: opts =>
     opts.AddFeatureExport("LLM implementation prompt", "md", (graph, ctx) =>
         FeatureLlmImplementationPrompt.BuildMarkdown(graph, ctx.RawFeatureEditorJson));
 });
+
+var appIndexPath = Path.Combine(app.Environment.ContentRootPath, "wwwroot", "app", "index.html");
+if (File.Exists(appIndexPath))
+{
+    app.UseStaticFiles(new StaticFileOptions
+    {
+        OnPrepareResponse = ctx =>
+        {
+            if (string.Equals(ctx.File.Name, "index.html", StringComparison.OrdinalIgnoreCase))
+            {
+                ctx.Context.Response.Headers.Append(HeaderNames.CacheControl, "no-cache, no-store, must-revalidate");
+            }
+        },
+    });
+
+    async Task ServeWorkbenchSpa(HttpContext ctx)
+    {
+        ctx.Response.ContentType = "text/html; charset=utf-8";
+        ctx.Response.Headers.Append(HeaderNames.CacheControl, "no-cache, no-store, must-revalidate");
+        await ctx.Response.SendFileAsync(appIndexPath).ConfigureAwait(false);
+    }
+
+    app.MapGet("/app", () => Results.Redirect("/app/"));
+    app.MapMethods("/app/", ["GET", "HEAD"], ServeWorkbenchSpa).ExcludeFromDescription();
+    app.MapMethods("/app/features", ["GET", "HEAD"], ServeWorkbenchSpa).ExcludeFromDescription();
+}
 
 app.MapGet("/", () => Results.Redirect("/app/"));
 

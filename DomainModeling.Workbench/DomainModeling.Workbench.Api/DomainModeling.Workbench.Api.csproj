@@ -13,4 +13,20 @@
     <ProjectReference Include="..\..\DomainModeling.Example\DomainModeling.Example.csproj" />
   </ItemGroup>
 
+  <PropertyGroup>
+    <WorkbenchWebDir>$(MSBuildThisFileDirectory)..\DomainModeling.Workbench.Web</WorkbenchWebDir>
+    <WorkbenchWebDist>$(WorkbenchWebDir)\dist</WorkbenchWebDist>
+  </PropertyGroup>
+  <Target Name="BuildWorkbenchWeb" BeforeTargets="BeforeBuild" Condition="!Exists('$(WorkbenchWebDist)\index.html')">
+    <Exec Command="npm ci &amp;&amp; npm run build" WorkingDirectory="$(WorkbenchWebDir)" />
+  </Target>
+  <ItemGroup>
+    <WorkbenchWebFiles Include="$(WorkbenchWebDist)\**\*.*" />
+  </ItemGroup>
+  <Target Name="CopyWorkbenchWebDist" AfterTargets="BuildWorkbenchWeb" BeforeTargets="BeforeBuild" Condition="Exists('$(WorkbenchWebDist)\index.html')">
+    <Copy SourceFiles="@(WorkbenchWebFiles)"
+          DestinationFiles="@(WorkbenchWebFiles->'$(MSBuildProjectDirectory)\wwwroot\app\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
+
 </Project>

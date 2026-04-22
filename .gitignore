@@ -90,6 +90,7 @@ ASALocalRun/
 # Node.js Tools for Visual Studio
 node_modules/
 DomainModeling.Workbench/DomainModeling.Workbench.Web/dist/
+DomainModeling.Workbench/DomainModeling.Workbench.Api/wwwroot/app/
 
 # Yarn
 .yarn/
