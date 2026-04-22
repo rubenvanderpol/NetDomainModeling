@@ -1,0 +1,513 @@
+/* ── Aggregate Testing View ──────────────────────────── */
+
+.testing-body {
+  display: flex;
+  gap: 1px;
+  height: calc(100vh - 40px);
+  background: var(--border);
+}
+
+.testing-create-panel {
+  flex: 1;
+  padding: 20px 24px;
+  overflow-y: auto;
+  background: var(--bg);
+  min-width: 0;
+}
+
+.testing-instances-panel {
+  width: 520px;
+  flex-shrink: 0;
+  padding: 20px 24px;
+  overflow-y: auto;
+  background: var(--bg);
+}
+
+/* ── Section title ───────────────────────────────────── */
+
+.testing-section-title {
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text);
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.testing-count {
+  font-size: 11px;
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1px 8px;
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+/* ── Description ─────────────────────────────────────── */
+
+.testing-desc {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 16px;
+  padding: 8px 12px;
+  background: var(--bg-hover);
+  border-radius: 6px;
+  border-left: 3px solid var(--clr-aggregate);
+  line-height: 1.5;
+}
+
+/* ── Form fields ─────────────────────────────────────── */
+
+.testing-field {
+  margin-bottom: 14px;
+}
+
+.testing-field label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 5px;
+}
+
+.testing-required {
+  color: #ef4444;
+  font-weight: 700;
+}
+
+.testing-type-hint {
+  font-weight: 400;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.testing-select {
+  width: 100%;
+  padding: 7px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  background: var(--bg-surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.testing-select:focus {
+  outline: none;
+  border-color: var(--clr-aggregate);
+}
+
+.testing-input {
+  width: 100%;
+  padding: 7px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  background: var(--bg-surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-sizing: border-box;
+}
+.testing-input:focus {
+  outline: none;
+  border-color: var(--clr-aggregate);
+}
+
+.testing-textarea {
+  min-height: 60px;
+  font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 12px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.testing-hint {
+  font-size: 12px;
+  color: var(--text-dim);
+  font-style: italic;
+  padding: 8px 0;
+}
+
+/* ── Nested object groups ────────────────────────────── */
+
+.testing-object-group {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0;
+  overflow: hidden;
+}
+
+.testing-object-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg-hover);
+  border-bottom: 1px solid var(--border);
+}
+
+.testing-object-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.testing-object-header .testing-type-hint {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-dim);
+}
+
+.testing-object-fields {
+  padding: 10px 14px 4px;
+  border-left: 3px solid var(--clr-value-object);
+  margin: 0;
+  background: var(--bg-surface);
+}
+
+.testing-object-fields .testing-field {
+  margin-bottom: 10px;
+}
+
+.testing-object-fields .testing-field label {
+  font-size: 11px;
+}
+
+/* ── Error ────────────────────────────────────────────── */
+
+.testing-error {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #ef4444;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  margin-bottom: 12px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+/* ── Create button ───────────────────────────────────── */
+
+.testing-create-btn {
+  width: 100%;
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  background: var(--clr-aggregate);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.testing-create-btn:hover:not(:disabled) {
+  opacity: 0.85;
+}
+.testing-create-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ── Empty state ─────────────────────────────────────── */
+
+.testing-empty {
+  font-size: 13px;
+  color: var(--text-dim);
+  padding: 20px 0;
+  line-height: 1.6;
+}
+
+/* ── Instance cards ──────────────────────────────────── */
+
+.testing-instance {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 10px;
+  overflow: hidden;
+  background: var(--bg-surface);
+}
+
+.testing-instance-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg-hover);
+  border-bottom: 1px solid var(--border);
+}
+
+.testing-instance-type {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--clr-aggregate);
+}
+
+.testing-instance-id {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.testing-expand-btn,
+.testing-edit-btn,
+.testing-delete-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 3px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.testing-expand-btn:hover,
+.testing-edit-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.testing-delete-btn:hover {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.testing-instance-props {
+  padding: 8px 12px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.testing-instance-props pre {
+  margin: 0;
+  font-size: 11px;
+  font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ── Instance edit area ──────────────────────────────── */
+
+/* ── Instance editor ─────────────────────────────────── */
+
+.testing-instance-editor {
+  padding: 12px;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.testing-editor-section {
+  margin-bottom: 14px;
+}
+
+.testing-editor-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.testing-editor-props .testing-field {
+  margin-bottom: 6px;
+}
+
+.testing-edit-area {
+  min-height: 120px;
+  font-size: 12px;
+}
+
+.testing-edit-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.testing-save-btn {
+  padding: 5px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  background: var(--clr-aggregate);
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.testing-save-btn:hover { opacity: 0.85; }
+
+.testing-cancel-btn {
+  padding: 5px 14px;
+  font-size: 12px;
+  font-family: inherit;
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  cursor: pointer;
+}
+.testing-cancel-btn:hover { background: var(--bg-hover); }
+
+/* ── Method cards ────────────────────────────────────── */
+
+.testing-methods-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.testing-method-card {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: var(--bg-card);
+}
+
+.testing-method-header {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.testing-method-name {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.testing-method-sig {
+  font-size: 12px;
+  color: var(--text-dim);
+  font-family: var(--font-mono, monospace);
+}
+
+.testing-method-return {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-left: auto;
+  font-family: var(--font-mono, monospace);
+}
+
+.testing-method-params {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.testing-method-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.testing-invoke-btn {
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  background: var(--clr-event, #e67e22);
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.testing-invoke-btn:hover { opacity: 0.85; }
+
+.testing-expand-method-btn {
+  margin-top: 6px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-family: inherit;
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.testing-expand-method-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.testing-edit-btn.active {
+  color: var(--clr-aggregate);
+}
+
+/* ── Invoke result ───────────────────────────────────── */
+
+.testing-invoke-result {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 5px;
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+}
+
+.testing-invoke-success {
+  font-size: 12px;
+  color: #27ae60;
+  font-weight: 600;
+}
+
+.testing-events-raised {
+  margin-bottom: 6px;
+}
+
+.testing-events-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--clr-event, #e67e22);
+  margin-bottom: 4px;
+}
+
+.testing-event-card {
+  padding: 6px 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  margin-bottom: 4px;
+}
+
+.testing-event-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--clr-event, #e67e22);
+}
+
+.testing-event-card pre {
+  font-size: 11px;
+  margin: 4px 0 0 0;
+  max-height: 120px;
+  overflow: auto;
+}
+
+/* ── Responsive ──────────────────────────────────────── */
+
+@media (max-width: 900px) {
+  .testing-body {
+    flex-direction: column;
+  }
+  .testing-instances-panel {
+    width: 100%;
+    border-top: 1px solid var(--border);
+  }
+}

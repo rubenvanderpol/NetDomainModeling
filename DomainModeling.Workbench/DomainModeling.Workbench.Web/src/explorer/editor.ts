@@ -13,8 +13,8 @@
 import {
   esc, escAttr, shortName, SECTION_META,
   formatDiagramPropertyLine, formatDiagramMethodLine, formatDiagramEmittedEventLine,
-} from './helpers.js';
-import { renderTabBar } from './tabs.js';
+} from './helpers';
+import { renderTabBar } from './tabs';
 
 // ── Constants ────────────────────────────────────────
 const EDITOR_STORAGE_KEY = 'domain-model-editor-positions';

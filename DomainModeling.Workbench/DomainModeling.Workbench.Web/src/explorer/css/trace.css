@@ -1,0 +1,155 @@
+/* Trace tab: diagram + live event panel (GitHub #34) */
+.trace-layout {
+  display: flex;
+  gap: 0;
+  width: 100%;
+  min-height: calc(100vh - 120px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.trace-diagram-pane {
+  flex: 1 1 55%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.trace-diagram-inner {
+  flex: 1;
+  min-height: 400px;
+  height: calc(100vh - 120px);
+  border: none;
+  border-radius: 0;
+}
+
+.trace-panel {
+  flex: 0 0 380px;
+  max-width: 42%;
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-card);
+  min-height: 400px;
+}
+
+.trace-panel-header {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.trace-panel-header h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.trace-status {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.trace-status.connected { color: #34d399; }
+.trace-status.disconnected { color: #f87171; }
+.trace-status.connecting { color: #fbbf24; }
+
+.trace-panel-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.trace-panel-actions button {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.trace-panel-actions button:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.trace-entries {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.trace-entry {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  background: var(--bg);
+  font-size: 12px;
+}
+
+.trace-entry-time {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.trace-entry-type {
+  font-weight: 600;
+  color: var(--clr-event, #fbbf24);
+  margin-bottom: 4px;
+  word-break: break-all;
+}
+
+.trace-entry-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.trace-entry-handlers {
+  font-size: 11px;
+  color: var(--clr-handler, #f472b6);
+  margin-bottom: 8px;
+  word-break: break-all;
+}
+
+.trace-entry-json {
+  margin: 0;
+  padding: 8px;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 6px;
+  font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 200px;
+  overflow-y: auto;
+  color: #c4c9d4;
+}
+
+.trace-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* Diagram highlight for traced types */
+.diagram-wrap svg .dg-node-trace > rect:nth-of-type(2) {
+  stroke: #22d3ee !important;
+  stroke-width: 3px !important;
+  filter: drop-shadow(0 0 6px rgba(34, 211, 238, 0.65));
+}

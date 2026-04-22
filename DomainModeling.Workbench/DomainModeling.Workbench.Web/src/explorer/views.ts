@@ -3,9 +3,9 @@
  */
 import {
   esc, escAttr, shortName, kindMeta, relKindColor, syntaxHighlight, SECTION_META, SECTION_TO_DIAGRAM_KIND,
-} from './helpers.js';
-import { isDiagramNodeHidden, getDiagramState } from './diagram.js';
-import { renderTabBar } from './tabs.js';
+} from './helpers';
+import { isDiagramNodeHidden, getDiagramState } from './diagram';
+import { renderTabBar } from './tabs';
 
 // ── Overview ─────────────────────────────────────────
 export function renderOverview(ctx, exports) {

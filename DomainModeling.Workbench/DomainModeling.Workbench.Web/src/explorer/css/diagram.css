@@ -1,0 +1,249 @@
+/* ── Diagram View ───────────────────────────────────── */
+.diagram-wrap {
+  position: relative; width: 100%;
+  height: calc(100vh - 120px);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+.diagram-wrap svg { width: 100%; height: 100%; cursor: grab; }
+.diagram-wrap svg.dragging { cursor: grabbing; }
+.diagram-wrap svg.dragging-node { cursor: grabbing; }
+
+/* Waypoint handles on edges */
+.dg-waypoint {
+  transition: r 0.1s, opacity 0.1s;
+}
+.dg-waypoint:hover {
+  r: 7;
+  opacity: 1 !important;
+}
+
+.diagram-controls {
+  position: absolute; top: 12px; right: 12px;
+  display: flex; gap: 4px; z-index: 10;
+}
+.diagram-controls button {
+  width: 32px; height: 32px; border: 1px solid var(--border);
+  background: var(--bg-card); color: var(--text-muted);
+  border-radius: var(--radius); cursor: pointer; font-size: 16px;
+  display: flex; align-items: center; justify-content: center;
+  transition: background .1s, color .1s;
+}
+.diagram-controls button:hover { background: var(--bg-hover); color: var(--text); }
+
+.diagram-legend {
+  position: absolute; bottom: 12px; left: 12px;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 10px 14px;
+  font-size: 11px; z-index: 10;
+  display: flex; flex-wrap: wrap; gap: 10px 16px;
+  color: var(--text-muted);
+}
+.diagram-legend-item { display: flex; align-items: center; gap: 5px; }
+.diagram-legend-swatch { width: 10px; height: 10px; border-radius: 3px; }
+
+.diagram-edge-legend {
+  position: absolute; bottom: 12px; right: 12px;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 10px 14px;
+  font-size: 11px; z-index: 10;
+  display: flex; flex-direction: column; gap: 6px;
+  color: var(--text-muted);
+}
+.diagram-edge-legend-item { display: flex; align-items: center; gap: 8px; }
+.diagram-edge-legend-line {
+  width: 24px; height: 0;
+  border-top: 2px solid currentColor;
+}
+.diagram-edge-legend-line.dashed { border-top-style: dashed; }
+
+.diagram-toolbar {
+  position: absolute; top: 12px; left: 12px;
+  display: flex; gap: 4px; z-index: 10;
+  align-items: center;
+  max-width: calc(100% - 140px);
+}
+.diagram-toolbar button {
+  height: 28px; border: 1px solid var(--border);
+  background: var(--bg-card); color: var(--text-muted);
+  border-radius: var(--radius); cursor: pointer; font-size: 11px;
+  padding: 0 10px;
+  display: flex; align-items: center; gap: 4px;
+  transition: background .1s, color .1s;
+  white-space: nowrap; flex-shrink: 0;
+}
+.diagram-toolbar button:hover { background: var(--bg-hover); color: var(--text); }
+.diagram-toolbar button.active { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
+
+.diagram-toolbar-sep {
+  width: 1px; height: 20px; background: var(--border);
+  margin: 0 2px; flex-shrink: 0;
+}
+
+/* ── Node-type dropdown ───────────────────────────── */
+.diagram-kind-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+}
+.diagram-kind-count {
+  font-size: 10px; color: var(--text-dim); margin-left: auto;
+}
+.rel-dropdown-actions {
+  display: flex;
+  gap: 6px;
+  padding: 4px 10px 8px;
+  margin-bottom: 3px;
+  border-bottom: 1px solid var(--border);
+}
+.rel-dropdown-actions button {
+  border: 1px solid var(--border);
+  background: var(--bg-hover);
+  color: var(--text-muted);
+  border-radius: 8px;
+  font-size: 10px;
+  padding: 3px 8px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.rel-dropdown-actions button:hover {
+  background: var(--border);
+  color: var(--text);
+}
+
+/* ── Relation-type dropdown ───────────────────────── */
+.rel-dropdown {
+  position: relative;
+  display: inline-block;
+}
+
+.rel-dropdown-trigger {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 10px; border-radius: 14px; font-size: 11px;
+  border: 1px solid var(--border); background: var(--bg-hover);
+  color: var(--text); cursor: pointer; font-family: inherit;
+  transition: all .15s; white-space: nowrap; height: 26px;
+  user-select: none;
+}
+.rel-dropdown-trigger:hover { background: var(--border); }
+.rel-dropdown-trigger.open {
+  background: var(--accent-dim); border-color: var(--accent);
+}
+.rel-dropdown-trigger .rel-chevron {
+  font-size: 8px; opacity: .6; transition: transform .2s;
+}
+.rel-dropdown-trigger.open .rel-chevron { transform: rotate(180deg); }
+
+.rel-dropdown-menu {
+  position: absolute; top: calc(100% + 4px); left: 0;
+  min-width: 200px;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: 10px; padding: 6px 0;
+  z-index: 200; box-shadow: 0 8px 24px rgba(0,0,0,.45);
+  opacity: 0; transform: translateY(-4px);
+  pointer-events: none;
+  transition: opacity .15s, transform .15s;
+}
+.rel-dropdown-menu.visible {
+  opacity: 1; transform: translateY(0);
+  pointer-events: auto;
+}
+
+/* Single-select variant (feature editor panel) */
+.rel-dropdown-menu.single-select { min-width: 180px; }
+
+.rel-dropdown-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 12px; cursor: pointer;
+  transition: background .1s; font-size: 12px;
+  color: var(--text);
+}
+.rel-dropdown-item:hover { background: var(--bg-hover); }
+
+.rel-dropdown-item .rel-line-sample {
+  width: 20px; height: 0; flex-shrink: 0;
+  border-top: 2px solid currentColor;
+}
+.rel-dropdown-item .rel-line-sample.dashed {
+  border-top-style: dashed;
+}
+
+.rel-dropdown-item .rel-kind-label {
+  flex: 1; min-width: 0;
+}
+
+/* Checkbox variant (multi-select filter) */
+.rel-dropdown-item .rel-check {
+  width: 14px; height: 14px; border-radius: 4px;
+  border: 1.5px solid var(--border); flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  transition: all .15s; font-size: 9px; color: transparent;
+}
+.rel-dropdown-item.checked .rel-check {
+  background: var(--accent); border-color: var(--accent);
+  color: #fff;
+}
+
+/* Selected state for single-select */
+.rel-dropdown-item.selected {
+  background: var(--accent-dim);
+}
+.rel-dropdown-item.selected .rel-kind-label { font-weight: 600; }
+
+/* Hidden count badge on trigger */
+.rel-hidden-count {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 16px; height: 16px; border-radius: 8px;
+  background: var(--accent); color: #fff; font-size: 9px;
+  font-weight: 700; padding: 0 4px;
+}
+
+/* ── Relation kind picker overlay (for connect action) */
+.rel-picker-overlay {
+  position: fixed; inset: 0; z-index: 300;
+  background: rgba(0,0,0,.5); backdrop-filter: blur(2px);
+  display: flex; align-items: center; justify-content: center;
+  animation: relPickerFadeIn .15s;
+}
+@keyframes relPickerFadeIn { from { opacity: 0; } }
+
+.rel-picker-card {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: 14px; padding: 20px 0 8px;
+  min-width: 240px; max-width: 300px;
+  box-shadow: 0 16px 48px rgba(0,0,0,.55);
+  animation: relPickerSlideIn .2s ease-out;
+}
+@keyframes relPickerSlideIn { from { transform: scale(.95) translateY(8px); opacity: 0; } }
+
+.rel-picker-title {
+  font-size: 13px; font-weight: 700; color: var(--text);
+  padding: 0 20px 12px; border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+
+.rel-picker-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 20px; cursor: pointer;
+  transition: background .1s; font-size: 13px;
+  color: var(--text);
+}
+.rel-picker-item:hover { background: var(--bg-hover); }
+.rel-picker-item:last-child { border-radius: 0 0 14px 14px; }
+
+.rel-picker-item .rel-line-sample {
+  width: 22px; height: 0; flex-shrink: 0;
+  border-top: 2px solid currentColor;
+}
+.rel-picker-item .rel-line-sample.dashed {
+  border-top-style: dashed;
+}
+
+.rel-picker-cancel {
+  display: block; width: calc(100% - 16px); margin: 8px 8px 4px;
+  padding: 7px 0; border: 1px solid var(--border);
+  border-radius: 8px; background: transparent;
+  color: var(--text-muted); font-size: 12px; font-family: inherit;
+  cursor: pointer; transition: all .15s; text-align: center;
+}
+.rel-picker-cancel:hover { background: var(--bg-hover); color: var(--text); }

@@ -1,8 +1,8 @@
 /**
  * Aggregate Testing — create instances, fill parameters, and store to repository.
  */
-import { esc, escAttr, shortName } from './helpers.js';
-import { renderTabBar } from './tabs.js';
+import { esc, escAttr, shortName } from './helpers';
+import { renderTabBar } from './tabs';
 
 // ── State ────────────────────────────────────────────
 let apiUrl = '';

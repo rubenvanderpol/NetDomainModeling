@@ -22,4 +22,11 @@
     <EmbeddedResource Include="wwwroot\**\*" />
   </ItemGroup>
 
+  <PropertyGroup>
+    <ExplorerWebProjectDir>$(MSBuildThisFileDirectory)..\DomainModeling.Workbench\DomainModeling.Workbench.Web</ExplorerWebProjectDir>
+  </PropertyGroup>
+  <Target Name="BuildExplorerBundle" BeforeTargets="BeforeBuild" Condition="!Exists('$(MSBuildThisFileDirectory)wwwroot\js\explorer-bundle.js')">
+    <Exec Command="npm ci &amp;&amp; npm run build:explorer" WorkingDirectory="$(ExplorerWebProjectDir)" />
+  </Target>
+
 </Project>

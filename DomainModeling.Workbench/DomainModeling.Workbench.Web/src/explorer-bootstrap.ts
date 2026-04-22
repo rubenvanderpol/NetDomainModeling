@@ -1,4 +1,8 @@
-import './explorer-styles.css';
+import './explorer/css/explorer.css';
+import './explorer/css/diagram.css';
+import './explorer/css/feature-editor.css';
+import './explorer/css/testing.css';
+import './explorer/css/trace.css';
 
 declare global {
   interface Window {
@@ -23,7 +27,6 @@ function syncRouteToHash(): void {
 }
 
 async function bootExplorer(): Promise<void> {
-  // Same origin: Vite dev proxies /domain-model; API hosts /domain-model in production.
   window.__config = {
     apiUrl: '/domain-model/json',
     developerMode: true,
@@ -35,7 +38,7 @@ async function bootExplorer(): Promise<void> {
 
   syncRouteToHash();
 
-  await import('@explorer/js/main.js');
+  await import('virtual:explorer-main');
 
   window.addEventListener('popstate', () => {
     syncRouteToHash();

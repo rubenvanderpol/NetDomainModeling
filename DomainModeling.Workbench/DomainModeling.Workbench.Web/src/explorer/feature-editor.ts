@@ -13,8 +13,8 @@
 import {
   esc, escAttr, shortName, ALL_SECTIONS,
   formatDiagramPropertyLine, formatDiagramMethodLine, formatDiagramRuleLine, formatDiagramEventBadgeLine,
-} from './helpers.js';
-import { renderTabBar } from './tabs.js';
+} from './helpers';
+import { renderTabBar } from './tabs';
 import {
   getDiagramShowAliases,
   getDiagramShowLayers,
@@ -26,7 +26,7 @@ import {
   diagramToggleAliases,
   diagramToggleLayers,
   syncDiagramToolbarToggles,
-} from './diagram.js';
+} from './diagram';
 
 // ── Constants ────────────────────────────────────────
 const NODE_W = 200;

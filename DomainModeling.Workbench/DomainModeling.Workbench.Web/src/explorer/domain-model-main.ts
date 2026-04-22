@@ -1,15 +1,15 @@
 /**
  * Main entry point — wires up data loading, navigation, sidebar, and views.
  */
-import { esc, escAttr, shortName, ALL_SECTIONS, SECTION_META, SECTION_TO_DIAGRAM_KIND } from './helpers.js';
-import { renderDetailView } from './views.js';
+import { esc, escAttr, shortName, ALL_SECTIONS, SECTION_META, SECTION_TO_DIAGRAM_KIND } from './helpers';
+import { renderDetailView } from './views';
 import {
   renderDiagramView, initDiagram, diagramZoom, diagramFit, diagramResetLayout, diagramToggleKind, diagramShowAll,
   diagramDownloadSvg, diagramToggleAliases, diagramToggleLayers, diagramToggleEdgeKind, diagramToggleEdgeFilter,
   diagramToggleKindFilter, diagramShowAllKinds, diagramHideAllKinds, setDiagramLayoutBaseUrl, setServerDiagramLayoutCache,
   isDiagramNodeHidden, getDiagramState, metadataImpliesDiagramHiddenByDefault, reapplyDiagramVisibilityAfterMetadataChange,
   removeLegacyHiddenNodeId,
-} from './diagram.js';
+} from './diagram';
 
 const API_URL = window.__config?.apiUrl || '/domain-model/json';
 const BASE_URL = API_URL.replace(/\/json$/, '');
@@ -125,20 +125,20 @@ async function init() {
 
     // Lazy-load testing module when testing mode is enabled
     if (TESTING_MODE) {
-      testingModule = await import('./testing.js');
+      testingModule = await import('./testing');
       await testingModule.initTesting(API_URL.replace('/json', ''));
       wireTestingGlobals();
     }
 
     // Lazy-load feature editor module when feature editor mode is enabled
     if (FEATURE_EDITOR_MODE) {
-      featureEditorModule = await import('./feature-editor.js');
+      featureEditorModule = await import('./feature-editor');
       await featureEditorModule.initFeatureEditor(BASE_URL, data);
       wireFeatureEditorGlobals();
     }
 
     if (TRACE_VIEW_MODE) {
-      traceModule = await import('./trace.js');
+      traceModule = await import('./trace');
       wireTraceGlobals();
     }
 

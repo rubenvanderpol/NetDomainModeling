@@ -5,8 +5,8 @@
 import {
   esc, escAttr, shortName,
   formatDiagramPropertyLine, formatDiagramMethodLine, formatDiagramEmittedEventLine,
-} from './helpers.js';
-import { renderTabBar } from './tabs.js';
+} from './helpers';
+import { renderTabBar } from './tabs';
 
 // Global layout (not scoped by bounded-context selection)
 const STORAGE_KEY = 'domain-model-diagram-positions-global';

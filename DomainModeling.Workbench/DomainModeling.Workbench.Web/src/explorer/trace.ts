@@ -1,8 +1,8 @@
 /**
  * Trace tab: live domain event notifications via SignalR, diagram highlights (GitHub #34).
  */
-import { esc } from './helpers.js';
-import { renderDiagramView, initDiagram, setDiagramTraceHighlights } from './diagram.js';
+import { esc } from './helpers';
+import { renderDiagramView, initDiagram, setDiagramTraceHighlights } from './diagram';
 
 const BASE_URL = (window.__config?.apiUrl || '/domain-model/json').replace(/\/json$/, '');
 const HUB_URL = window.__config?.traceHubUrl || '';
