@@ -6,4 +6,8 @@
   <Project Path="DomainModeling.Example.Shared/DomainModeling.Example.Shared.csproj" />
   <Project Path="DomainModeling.Example.IntegrationEvents/DomainModeling.Example.IntegrationEvents.csproj" />
   <Project Path="DomainModeling.Example.Shipping/DomainModeling.Example.Shipping.csproj" />
+  <Project Path="DomainModeling.Workbench/DomainModeling.Workbench.Api/DomainModeling.Workbench.Api.csproj" />
+  <Project Path="DomainModeling.Workbench/DomainModeling.Workbench.AppHost/DomainModeling.Workbench.AppHost.csproj" />
+  <Project Path="DomainModeling.Workbench/DomainModeling.Workbench.ServiceDefaults/DomainModeling.Workbench.ServiceDefaults.csproj" />
+  <Project Path="DomainModeling.Workbench/DomainModeling.Workbench.Web/DomainModeling.Workbench.Web.esproj" Type="Esproj" />
 </Solution>

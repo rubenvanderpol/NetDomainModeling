@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>DomainModeling.Workbench.Api</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DomainModeling.Workbench.ServiceDefaults\DomainModeling.Workbench.ServiceDefaults.csproj" />
+    <ProjectReference Include="..\..\DomainModeling.AspNetCore\DomainModeling.AspNetCore.csproj" />
+    <ProjectReference Include="..\..\DomainModeling.Example\DomainModeling.Example.csproj" />
+  </ItemGroup>
+
+</Project>

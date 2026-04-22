@@ -89,6 +89,7 @@ ASALocalRun/
 
 # Node.js Tools for Visual Studio
 node_modules/
+DomainModeling.Workbench/DomainModeling.Workbench.Web/dist/
 
 # Yarn
 .yarn/
@@ -102,3 +103,8 @@ node_modules/
 DomainModeling.Example/metadata/
 DomainModeling.Example/features/
 DomainModeling.Example/diagram-layout/
+
+# Aspire workbench API persisted files
+DomainModeling.Workbench/DomainModeling.Workbench.Api/features/
+DomainModeling.Workbench/DomainModeling.Workbench.Api/metadata/
+DomainModeling.Workbench/DomainModeling.Workbench.Api/diagram-layout/

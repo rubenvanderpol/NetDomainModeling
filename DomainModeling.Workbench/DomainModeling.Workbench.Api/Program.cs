@@ -1,55 +1,29 @@
 using DomainModeling.AspNetCore;
 using DomainModeling.Example;
-using DomainModeling.Example.Application;
-using DomainModeling.Example.Domain;
-using DomainModeling.Example.Shipping.Domain;
-using MediatR;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.AddServiceDefaults();
+
 var domainGraph = ExampleDomainModelGraph.Create();
-
 builder.Services.AddDomainModel(domainGraph);
-builder.Services.AddDomainModelTracing();
-
-builder.Services.AddMediatR(cfg =>
-    cfg.RegisterServicesFromAssemblyContaining<ShipOrderCommandHandler>());
-
-// Register in-memory repositories
-builder.Services.AddSingleton<IRepository<Order>, OrderRepository>();
-builder.Services.AddSingleton<IRepository<Customer>, CustomerRepository>();
-builder.Services.AddSingleton<IRepository<Product>, ProductRepository>();
-builder.Services.AddSingleton<IRepository<Shipment>, ShipmentRepository>();
-builder.Services.AddSingleton<IRepository<Carrier>, CarrierRepository>();
 
 var app = builder.Build();
 
-// Mount the domain model explorer UI at /domain-model (with developer editor and testing enabled)
+app.UseExceptionHandler();
+
+var contentRoot = app.Environment.ContentRootPath;
+var featureDir = Path.Combine(contentRoot, "features");
+var metadataDir = Path.Combine(contentRoot, "metadata");
+var diagramLayoutDir = Path.Combine(contentRoot, "diagram-layout");
+
 app.MapDomainModel(domainGraph, configure: opts =>
 {
     opts.EnableDeveloperView = true;
     opts.EnableFeatureEditor = true;
-    opts.EnableTraceView = true;
-    opts.Testing.RepositoryInterfaceType = typeof(IRepository<>);
-    opts.Testing.Repository(repo => repo
-        .Add()
-        .Update()
-        .Delete());
-
-    opts.AddExport("Summary", "txt", graph =>
-    {
-        var lines = new System.Collections.Generic.List<string>();
-        foreach (var ctx in graph.BoundedContexts)
-        {
-            lines.Add($"Bounded Context: {ctx.Name}");
-            lines.Add($"  Aggregates: {ctx.Aggregates.Count}");
-            lines.Add($"  Entities: {ctx.Entities.Count}");
-            lines.Add($"  Value Objects: {ctx.ValueObjects.Count}");
-            lines.Add($"  Domain Events: {ctx.DomainEvents.Count}");
-            lines.Add("");
-        }
-        return string.Join(Environment.NewLine, lines);
-    });
+    opts.FeatureStoragePath = featureDir;
+    opts.MetadataStoragePath = metadataDir;
+    opts.DiagramLayoutStoragePath = diagramLayoutDir;
 
     opts.AddFeatureExport("Summary", "md", graph =>
     {
@@ -102,22 +76,8 @@ app.MapDomainModel(domainGraph, configure: opts =>
         FeatureLlmImplementationPrompt.BuildMarkdown(graph, ctx.RawFeatureEditorJson));
 });
 
-// Demo: push a sample trace row to the Trace tab (POST with empty body)
-app.MapPost("/domain-model/trace/demo", async (IServiceProvider sp) =>
-{
-    await DomainModelTracing.NotifyAsync(sp, typeof(OrderPlacedEvent), new { demo = true, at = DateTime.UtcNow });
-    return Results.Ok(new { traced = typeof(OrderPlacedEvent).FullName });
-});
+app.MapGet("/", () => Results.Redirect("/app/"));
 
-app.MapGet("/", () => Results.Redirect("/domain-model"));
-app.MapGet("/favicon.ico", () => Results.NoContent());
-
-app.MapPost("/api/orders/{orderId:guid}/ship", async (Guid orderId, ISender mediator, CancellationToken ct) =>
-{
-    var result = await mediator.Send(new ShipOrderCommand(orderId), ct).ConfigureAwait(false);
-    return result.Success
-        ? Results.Ok(new { orderId, shipped = true })
-        : Results.NotFound(new { error = result.Error });
-});
+app.MapDefaultEndpoints();
 
 app.Run();

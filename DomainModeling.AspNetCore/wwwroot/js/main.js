@@ -142,6 +142,14 @@ async function init() {
       wireTraceGlobals();
     }
 
+    const hashTab = (typeof location !== 'undefined' && location.hash ? location.hash.slice(1) : '')
+      .toLowerCase();
+    if (hashTab === 'features' && FEATURE_EDITOR_MODE) {
+      currentView = 'features';
+    } else if (hashTab === 'diagram') {
+      currentView = 'diagram';
+    }
+
     render();
     initSidebarToggle();
     window.__onDiagramHiddenNodesChanged = syncExplorerDiagramHideCheckboxes;
