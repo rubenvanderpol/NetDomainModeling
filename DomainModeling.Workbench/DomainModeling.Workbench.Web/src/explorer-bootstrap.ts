@@ -1,8 +1,8 @@
-import './explorer/css/explorer.css';
-import './explorer/css/diagram.css';
-import './explorer/css/feature-editor.css';
-import './explorer/css/testing.css';
-import './explorer/css/trace.css';
+import './explorer/styles/explorer.css';
+import './explorer/styles/diagram.css';
+import './explorer/styles/feature-editor.css';
+import './explorer/styles/testing.css';
+import './explorer/styles/trace.css';
 
 declare global {
   interface Window {

@@ -1,8 +1,13 @@
 /**
  * Aggregate Testing — create instances, fill parameters, and store to repository.
  */
-import { esc, escAttr, shortName } from './helpers';
-import { renderTabBar } from './tabs';
+import { esc, escAttr, shortName } from '../lib/helpers';
+import { asHtmlInput, asHtmlSelect, asHtmlTextArea } from '../lib/dom';
+import { renderTabBar } from '../ui/tabs';
+
+function errMsg(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
 
 // ── State ────────────────────────────────────────────
 let apiUrl = '';
@@ -165,11 +170,12 @@ function renderParameterFields() {
 }
 
 /** Render a single parameter/property field, with nested fields for complex types. */
-function renderSingleField(p, prefix) {
-  const fullName = prefix ? `${prefix}.${p.name}` : p.name;
+function renderSingleField(p: Record<string, unknown>, prefix: string, fieldPath?: string) {
+  const fullName = fieldPath ?? (prefix ? `${prefix}.${String(p.name)}` : String(p.name));
   const req = p.isRequired ? ' <span class="testing-required">*</span>' : '';
-  const complex = p.isComplex || false;
-  const hasSubProps = complex && Array.isArray(p.subProperties) && p.subProperties.length > 0;
+  const complex = Boolean(p.isComplex);
+  const subProps = p.subProperties as unknown[] | undefined;
+  const hasSubProps = complex && Array.isArray(subProps) && subProps.length > 0;
 
   let html = '';
 
@@ -181,8 +187,8 @@ function renderSingleField(p, prefix) {
     html += `<span class="testing-type-hint">${esc(p.typeName)}</span>`;
     html += '</div>';
     html += '<div class="testing-object-fields">';
-    for (const sub of p.subProperties) {
-      html += renderSingleField(sub, fullName);
+    for (const sub of subProps!) {
+      html += renderSingleField(sub as Record<string, unknown>, '', fullName);
     }
     html += '</div>';
     html += '</div>';
@@ -207,25 +213,25 @@ function renderSingleField(p, prefix) {
     html += '</select>';
     html += '</div>';
   } else {
-    const ph = p.defaultValue || placeholder(p.typeName);
+    const ph = String(p.defaultValue ?? placeholder(String(p.typeName)));
     const inputType = inputTypeFor(p.typeName);
-    const step = ['decimal', 'double', 'float'].includes(p.typeName) ? ' step="any"' : '';
+    const step = ['decimal', 'double', 'float'].includes(String(p.typeName)) ? ' step="any"' : '';
     html += '<div class="testing-field">';
     html += `<label>${esc(p.name)}${req} <span class="testing-type-hint">${esc(p.typeName)}</span></label>`;
-    html += `<input class="testing-input" type="${inputType}" data-param="${escAttr(fullName)}" placeholder="${escAttr(ph)}"${step} />`;
+    html += `<input class="testing-input" type="${inputType}" data-param="${escAttr(fullName)}" placeholder="${escAttr(String(ph))}"${step} />`;
     html += '</div>';
   }
 
   return html;
 }
 
-function inputTypeFor(typeName) {
-  if (['int', 'long', 'decimal', 'double', 'float'].includes(typeName)) return 'number';
+function inputTypeFor(typeName: unknown) {
+  if (['int', 'long', 'decimal', 'double', 'float'].includes(String(typeName))) return 'number';
   return 'text';
 }
 
-function placeholder(typeName) {
-  const map = {
+function placeholder(typeName: string) {
+  const map: Record<string, string> = {
     'string': 'Enter text…',
     'int': '0', 'long': '0',
     'decimal': '0.00', 'double': '0.0', 'float': '0.0',
@@ -238,18 +244,24 @@ function placeholder(typeName) {
 
 function collectParameters() {
   const inputs = document.querySelectorAll('#testingParams .testing-input');
-  const params = {};
+  const params: Record<string, unknown> = {};
 
   for (const input of inputs) {
-    const path = input.dataset.param;
-    let value = (input.value || '').trim();
+    const el = input as HTMLElement;
+    const path = el.dataset.param;
+    if (!path) continue;
+    const textVal = asHtmlTextArea(el)?.value ?? asHtmlInput(el)?.value ?? asHtmlSelect(el)?.value ?? '';
+    let value = (textVal || '').trim();
     if (!value) continue;
 
     let parsed;
-    if (input.dataset.complex === 'true') {
+    if (el.dataset.complex === 'true') {
       try { parsed = JSON.parse(value); }
-      catch (e) { throw new Error(`Invalid JSON for "${path}": ${e.message}`); }
-    } else if (input.type === 'number') {
+      catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        throw new Error(`Invalid JSON for "${path}": ${msg}`);
+      }
+    } else if (asHtmlInput(el)?.type === 'number') {
       parsed = value.includes('.') ? parseFloat(value) : parseInt(value);
     } else if (value === 'true' || value === 'false') {
       parsed = value === 'true';
@@ -263,12 +275,16 @@ function collectParameters() {
 }
 
 /** Set a value at a dotted path (e.g. "Price.Amount") in an object. */
-function setNested(obj, path, value) {
+function setNested(obj: Record<string, unknown>, path: string, value: unknown) {
   const parts = path.split('.');
-  let cur = obj;
+  let cur: Record<string, unknown> = obj;
   for (let i = 0; i < parts.length - 1; i++) {
-    if (!(parts[i] in cur)) cur[parts[i]] = {};
-    cur = cur[parts[i]];
+    const key = parts[i];
+    const next = cur[key];
+    if (typeof next !== 'object' || next === null || Array.isArray(next)) {
+      cur[key] = {};
+    }
+    cur = cur[key] as Record<string, unknown>;
   }
   cur[parts[parts.length - 1]] = value;
 }
@@ -480,22 +496,26 @@ function getNestedValue(obj, name) {
 }
 
 /** Collect parameters from a scoped container. */
-function collectScopedParams(containerId) {
+function collectScopedParams(containerId: string) {
   const container = document.getElementById(containerId);
   if (!container) return {};
   const inputs = container.querySelectorAll('.testing-input');
-  const params = {};
+  const params: Record<string, unknown> = {};
   for (const input of inputs) {
-    const path = input.dataset.param;
+    const el = input as HTMLElement;
+    const path = el.dataset.param;
     if (!path) continue;
-    let value = (input.value || '').trim();
+    const textVal = asHtmlTextArea(el)?.value ?? asHtmlInput(el)?.value ?? asHtmlSelect(el)?.value ?? '';
+    let value = (textVal || '').trim();
     if (!value) continue;
 
     let parsed;
-    if (input.dataset.complex === 'true') {
+    if (el.dataset.complex === 'true') {
       try { parsed = JSON.parse(value); }
-      catch (e) { throw new Error(`Invalid JSON for "${path}": ${e.message}`); }
-    } else if (input.type === 'number') {
+      catch (e) {
+        throw new Error(`Invalid JSON for "${path}": ${errMsg(e)}`);
+      }
+    } else if (asHtmlInput(el)?.type === 'number') {
       parsed = value.includes('.') ? parseFloat(value) : parseInt(value);
     } else if (value === 'true' || value === 'false') {
       parsed = value === 'true';
@@ -577,14 +597,14 @@ export async function create() {
 
     if (!res.ok) {
       const errData = await res.json().catch(() => null);
-      throw new Error(errData?.error || `HTTP ${res.status}`);
+      throw new Error((errData as { error?: string } | null)?.error || `HTTP ${res.status}`);
     }
 
     const instance = await res.json();
     instances.unshift(instance);
     expandedInstances.add(instance.id); // auto-expand newly created
   } catch (e) {
-    error = e.message;
+    error = errMsg(e);
   } finally {
     creating = false;
     refresh();
@@ -596,10 +616,12 @@ export async function deleteInstance(id) {
     await fetch(`${apiUrl}/testing/instances/${id}`, { method: 'DELETE' });
     instances = instances.filter(i => i.id !== id);
     expandedInstances.delete(id);
-    editingInstances.delete(id);
+    if (editingInstance === id) {
+      editingInstance = null;
+    }
     refresh();
   } catch (e) {
-    error = e.message;
+    error = errMsg(e);
     refresh();
   }
 }
@@ -638,7 +660,7 @@ export async function saveInstance(id) {
     if (agg?.properties?.length > 0) {
       params = collectScopedParams(`editProps-${id}`);
     } else {
-      const textarea = document.getElementById(`editJson-${id}`);
+      const textarea = document.getElementById(`editJson-${id}`) as HTMLTextAreaElement | null;
       if (!textarea) return;
       params = JSON.parse(textarea.value);
     }
@@ -651,14 +673,14 @@ export async function saveInstance(id) {
 
     if (!res.ok) {
       const errData = await res.json().catch(() => null);
-      throw new Error(errData?.error || `HTTP ${res.status}`);
+      throw new Error((errData as { error?: string } | null)?.error || `HTTP ${res.status}`);
     }
 
     const updated = await res.json();
     instances = instances.map(i => i.id === id ? updated : i);
     error = null;
   } catch (e) {
-    error = e.message;
+    error = errMsg(e);
   }
   refresh();
 }
@@ -702,7 +724,7 @@ export async function invokeInstanceMethod(instanceId, methodName) {
 
     if (!res.ok) {
       const errData = await res.json().catch(() => null);
-      throw new Error(errData?.error || `HTTP ${res.status}`);
+      throw new Error((errData as { error?: string } | null)?.error || `HTTP ${res.status}`);
     }
 
     const result = await res.json();
@@ -722,7 +744,7 @@ export async function invokeInstanceMethod(instanceId, methodName) {
     invokeResult = {
       instanceId,
       methodName,
-      error: e.message,
+      error: errMsg(e),
     };
   }
   refresh();

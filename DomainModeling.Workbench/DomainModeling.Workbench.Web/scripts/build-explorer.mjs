@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const webRoot = path.resolve(__dirname, '..');
-const entry = path.join(webRoot, 'src', 'explorer-entry.ts');
+const entry = path.join(webRoot, 'src', 'explorer', 'app', 'explorer-embed-entry.ts');
 const outfile = path.resolve(webRoot, '../../DomainModeling.AspNetCore/wwwroot/js/explorer-bundle.js');
 
 await esbuild.build({

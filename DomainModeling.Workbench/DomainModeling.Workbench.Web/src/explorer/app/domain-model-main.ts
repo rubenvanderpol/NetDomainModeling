@@ -1,15 +1,15 @@
 /**
  * Main entry point — wires up data loading, navigation, sidebar, and views.
  */
-import { esc, escAttr, shortName, ALL_SECTIONS, SECTION_META, SECTION_TO_DIAGRAM_KIND } from './helpers';
-import { renderDetailView } from './views';
+import { esc, escAttr, ALL_SECTIONS, SECTION_META, SECTION_TO_DIAGRAM_KIND } from '../lib/helpers';
+import { renderDetailView } from '../ui/views';
 import {
   renderDiagramView, initDiagram, diagramZoom, diagramFit, diagramResetLayout, diagramToggleKind, diagramShowAll,
   diagramDownloadSvg, diagramToggleAliases, diagramToggleLayers, diagramToggleEdgeKind, diagramToggleEdgeFilter,
   diagramToggleKindFilter, diagramShowAllKinds, diagramHideAllKinds, setDiagramLayoutBaseUrl, setServerDiagramLayoutCache,
   isDiagramNodeHidden, getDiagramState, metadataImpliesDiagramHiddenByDefault, reapplyDiagramVisibilityAfterMetadataChange,
   removeLegacyHiddenNodeId,
-} from './diagram';
+} from '../features/diagram';
 
 const API_URL = window.__config?.apiUrl || '/domain-model/json';
 const BASE_URL = API_URL.replace(/\/json$/, '');
@@ -17,23 +17,33 @@ const TESTING_MODE = window.__config?.testingMode === true;
 const FEATURE_EDITOR_MODE = window.__config?.featureEditorMode === true;
 const TRACE_VIEW_MODE = window.__config?.traceViewMode === true;
 
-let testingModule = null; // lazy-loaded when testing mode is on
-let featureEditorModule = null; // lazy-loaded when feature editor mode is on
-let traceModule = null; // lazy-loaded when trace view is on
+let testingModule: typeof import('../features/testing') | null = null;
+let featureEditorModule: typeof import('../features/feature-editor') | null = null;
+let traceModule: typeof import('../features/trace') | null = null;
 
 // Custom metadata (alias / description) per fullName
-let metadata = {};
+let metadata: Record<string, Record<string, unknown>> = {};
 
 const STORAGE_KEY = 'domainModelSelectedContexts';
 // Legacy browser persistence key (migration-only).
 const METADATA_STORAGE_KEY = 'domainModelMetadata';
 
-let data = null;
-let selectedContextNames = new Set();
-let currentCtx = null; // merged view of selected contexts
+interface BoundedContextJson {
+  name: string;
+  relationships?: unknown[];
+  [key: string]: unknown;
+}
+
+interface DomainGraphJson {
+  boundedContexts?: BoundedContextJson[];
+}
+
+let data: DomainGraphJson | null = null;
+let selectedContextNames = new Set<string>();
+let currentCtx: (BoundedContextJson & { relationships: unknown[] }) | null = null;
 let currentView = 'diagram';
-let currentDetail = null;
-let availableExports = [];
+let currentDetail: { kind: string; item: { fullName: string; name?: string } } | null = null;
+let availableExports: unknown[] = [];
 
 function saveSelection() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify([...selectedContextNames]));
@@ -104,16 +114,16 @@ async function init() {
     try {
       const exportsRes = await fetch(`${BASE_URL}/exports`);
       if (exportsRes.ok) {
-        availableExports = await exportsRes.json();
+        availableExports = await exportsRes.json() as unknown[];
       }
     } catch { /* exports endpoint optional */ }
 
     if (data.boundedContexts && data.boundedContexts.length > 0) {
       const saved = loadSelection();
       const validNames = new Set(data.boundedContexts.map(c => c.name));
-      if (saved && [...saved].some(n => validNames.has(n))) {
-        for (const name of saved) {
-          if (validNames.has(name)) selectedContextNames.add(name);
+      if (saved && [...saved].some(n => validNames.has(String(n)))) {
+        for (const name of saved as Set<unknown>) {
+          if (validNames.has(String(name))) selectedContextNames.add(String(name));
         }
       } else {
         for (const ctx of data.boundedContexts) {
@@ -125,20 +135,20 @@ async function init() {
 
     // Lazy-load testing module when testing mode is enabled
     if (TESTING_MODE) {
-      testingModule = await import('./testing');
+      testingModule = await import('../features/testing');
       await testingModule.initTesting(API_URL.replace('/json', ''));
       wireTestingGlobals();
     }
 
     // Lazy-load feature editor module when feature editor mode is enabled
     if (FEATURE_EDITOR_MODE) {
-      featureEditorModule = await import('./feature-editor');
+      featureEditorModule = await import('../features/feature-editor');
       await featureEditorModule.initFeatureEditor(BASE_URL, data);
       wireFeatureEditorGlobals();
     }
 
     if (TRACE_VIEW_MODE) {
-      traceModule = await import('./trace');
+      traceModule = await import('../features/trace');
       wireTraceGlobals();
     }
 
@@ -161,13 +171,20 @@ async function init() {
 
 // ── Merge selected bounded contexts ──────────────────
 
-function mergeContexts() {
-  const selected = (data.boundedContexts || []).filter(c => selectedContextNames.has(c.name));
+function mergeContexts(): (BoundedContextJson & { relationships: unknown[] }) | null {
+  if (!data?.boundedContexts) return null;
+  const selected = data.boundedContexts.filter(c => selectedContextNames.has(c.name));
   if (selected.length === 0) return null;
-  if (selected.length === 1) return selected[0];
-  const merged = { name: selected.map(c => c.name).join(' + ') };
+  if (selected.length === 1) {
+    const one = selected[0];
+    return { ...one, relationships: [...(one.relationships || [])] };
+  }
+  const merged: BoundedContextJson & { relationships: unknown[] } = {
+    name: selected.map(c => c.name).join(' + '),
+    relationships: [],
+  };
   for (const key of ALL_SECTIONS) {
-    merged[key] = selected.flatMap(c => c[key] || []);
+    (merged as Record<string, unknown>)[key] = selected.flatMap(c => (c[key] as unknown[] | undefined) || []);
   }
   merged.relationships = selected.flatMap(c => c.relationships || []);
   return merged;
@@ -205,7 +222,7 @@ function initSidebarToggle() {
     const isCollapsed = sidebar.classList.toggle('collapsed');
     btn.textContent = isCollapsed ? '\u276F' : '\u276E';
     btn.title = isCollapsed ? 'Expand sidebar' : 'Collapse sidebar';
-    localStorage.setItem(SIDEBAR_COLLAPSED_KEY, isCollapsed);
+    localStorage.setItem(SIDEBAR_COLLAPSED_KEY, isCollapsed ? 'true' : 'false');
   });
 }
 
@@ -265,7 +282,7 @@ function renderSidebar() {
   }
 
   for (const sec of SECTION_META) {
-    const items = currentCtx[sec.key] || [];
+    const items = (currentCtx[sec.key] as { fullName: string; name: string }[] | undefined) || [];
     if (items.length === 0) continue;
     html += `<div class="nav-section" data-section="${sec.key}">
       <div class="nav-section-header" onclick="window.__nav.toggleSection(this)">
@@ -347,14 +364,14 @@ function isNavDiagramHidden(diagramKind, fullName) {
 function syncExplorerDiagramHideCheckboxes() {
   for (const row of document.querySelectorAll('.nav-item-with-diagram-toggle')) {
     const fullName = row.getAttribute('data-fullname');
-    const input = row.querySelector('input[type="checkbox"][data-nav-kind]');
+    const input = row.querySelector<HTMLInputElement>('input[type="checkbox"][data-nav-kind]');
     if (!fullName || !input) continue;
     const kindKey = input.getAttribute('data-nav-kind');
-    const dk = kindKey ? SECTION_TO_DIAGRAM_KIND[kindKey] : null;
+    const dk = kindKey ? SECTION_TO_DIAGRAM_KIND[kindKey as keyof typeof SECTION_TO_DIAGRAM_KIND] : null;
     if (!dk) continue;
     const hidden = isNavDiagramHidden(dk, fullName);
     input.checked = !hidden;
-    const lab = row.querySelector('.nav-diagram-visibility');
+    const lab = row.querySelector<HTMLElement>('.nav-diagram-visibility');
     if (lab) {
       lab.title = hidden
         ? 'Show on main diagram'
@@ -445,9 +462,9 @@ function renderMain() {
 
 // ── Metadata persistence ─────────────────────────────
 
-async function saveMetadata(fullName, alias, description) {
+async function saveMetadata(fullName: string, alias: unknown, description: unknown) {
   const prev = metadata[fullName] || {};
-  const next = {
+  const next: Record<string, unknown> = {
     ...prev,
     alias: alias && String(alias).trim() ? alias : null,
     description: description && String(description).trim() ? description : null,
@@ -470,8 +487,8 @@ function switchTab(tab) {
   document.getElementById('mainContent').scrollTop = 0;
 }
 
-function showDetail(kind, fullName) {
-  const items = currentCtx[kind] || [];
+function showDetail(kind: string, fullName: string) {
+  const items = (currentCtx![kind] as { fullName: string }[] | undefined) || [];
   const item = items.find(i => i.fullName === fullName);
   if (!item) return;
   currentView = 'detail';
@@ -480,9 +497,9 @@ function showDetail(kind, fullName) {
   document.getElementById('mainContent').scrollTop = 0;
 }
 
-function navigateTo(fullName) {
+function navigateTo(fullName: string) {
   for (const sec of ALL_SECTIONS) {
-    const items = currentCtx[sec] || [];
+    const items = (currentCtx![sec] as { fullName: string }[] | undefined) || [];
     const item = items.find(i => i.fullName === fullName);
     if (item) {
       showDetail(sec, fullName);
@@ -524,12 +541,12 @@ window.__diagram = {
   zoom: diagramZoom,
   fit: diagramFit,
   resetLayout: () => diagramResetLayout(currentCtx),
-  toggleKind: diagramToggleKind,
+  toggleKind: (kind: string) => { diagramToggleKind(undefined as unknown as Event, kind); },
   showAll: diagramShowAll,
   downloadSvg: diagramDownloadSvg,
   toggleAliases: diagramToggleAliases,
   toggleLayers: diagramToggleLayers,
-  toggleEdgeKind: diagramToggleEdgeKind,
+  toggleEdgeKind: (kind: string) => { diagramToggleEdgeKind(undefined as unknown as Event, kind); },
   toggleEdgeFilter: diagramToggleEdgeFilter,
   toggleKindFilter: diagramToggleKindFilter,
   showAllKinds: diagramShowAllKinds,

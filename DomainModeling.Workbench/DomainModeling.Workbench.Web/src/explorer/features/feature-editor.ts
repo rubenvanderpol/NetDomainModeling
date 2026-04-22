@@ -13,8 +13,9 @@
 import {
   esc, escAttr, shortName, ALL_SECTIONS,
   formatDiagramPropertyLine, formatDiagramMethodLine, formatDiagramRuleLine, formatDiagramEventBadgeLine,
-} from './helpers';
-import { renderTabBar } from './tabs';
+} from '../lib/helpers';
+import { closestFromEvent, tagNameFromEvent } from '../lib/dom';
+import { renderTabBar } from '../ui/tabs';
 import {
   getDiagramShowAliases,
   getDiagramShowLayers,
@@ -963,8 +964,8 @@ export function addProperty(nodeId) {
   if (!st) return;
   const n = st.nMap[nodeId];
   if (!n) return;
-  const nameInput = document.getElementById('feNewPropName');
-  const typeInput = document.getElementById('feNewPropType');
+  const nameInput = document.getElementById('feNewPropName') as HTMLInputElement | null;
+  const typeInput = document.getElementById('feNewPropType') as HTMLInputElement | null;
   if (!nameInput || !typeInput) return;
   const name = nameInput.value.trim();
   const type = typeInput.value.trim() || 'string';
@@ -997,7 +998,7 @@ export function addMethod(nodeId) {
   if (!st) return;
   const n = st.nMap[nodeId];
   if (!n || !FE_METHOD_RULE_KINDS.has(n.kind)) return;
-  const input = document.getElementById('feNewMethodSig');
+  const input = document.getElementById('feNewMethodSig') as HTMLInputElement | null;
   if (!input) return;
   const sig = input.value.trim();
   if (!sig) return;
@@ -1029,8 +1030,8 @@ export function addRule(nodeId) {
   if (!st) return;
   const n = st.nMap[nodeId];
   if (!n || !FE_METHOD_RULE_KINDS.has(n.kind)) return;
-  const nameInput = document.getElementById('feNewRuleName');
-  const textInput = document.getElementById('feNewRuleText');
+  const nameInput = document.getElementById('feNewRuleName') as HTMLInputElement | null;
+  const textInput = document.getElementById('feNewRuleText') as HTMLInputElement | null;
   if (!nameInput || !textInput) return;
   const ruleName = nameInput.value.trim() || 'Rule';
   const ruleText = textInput.value.trim();
@@ -1072,8 +1073,8 @@ function rebuildDisplayProps(n) {
 // ── Feature CRUD ─────────────────────────────────────
 
 export async function createFeature() {
-  const input = document.getElementById('feNewFeatureName');
-  const readOnlyInput = document.getElementById('feNewFeatureReadOnly');
+  const input = document.getElementById('feNewFeatureName') as HTMLInputElement | null;
+  const readOnlyInput = document.getElementById('feNewFeatureReadOnly') as HTMLInputElement | null;
   if (!input) return;
   const name = input.value.trim();
   if (!name) return;
@@ -1147,7 +1148,7 @@ export async function downloadExport(exportName) {
   if (!currentFeatureName) return;
   try {
     let url = `${baseUrl}/features/${encodeURIComponent(currentFeatureName)}/exports/${encodeURIComponent(exportName)}`;
-    const regCmd = document.getElementById('feRegisterCommands');
+    const regCmd = document.getElementById('feRegisterCommands') as HTMLInputElement | null;
     if (regCmd && regCmd.checked) {
       url += (url.includes('?') ? '&' : '?') + 'registerCommands=true';
     }
@@ -1275,7 +1276,7 @@ function loadFeatureState(feature) {
     }
   }
 
-  const fixedFromSaved = new Set();
+  const fixedFromSaved = new Set<string>();
   for (const n of st.nodes) {
     const pos = feature.positions?.[n.id];
     if (pos && typeof pos.x === 'number' && typeof pos.y === 'number') {
@@ -1284,7 +1285,7 @@ function loadFeatureState(feature) {
   }
   const needsLayout = st.nodes.filter(n => !fixedFromSaved.has(n.id));
   if (needsLayout.length === st.nodes.length) {
-    applyAutoLayout(st.nodes, st.edges, st.nMap);
+    applyAutoLayout(st.nodes, st.edges, st.nMap, null);
   } else if (needsLayout.length > 0) {
     applyAutoLayout(st.nodes, st.edges, st.nMap, fixedFromSaved);
   }
@@ -1391,7 +1392,7 @@ function placeNewNodeAtBulkIndex(n, index) {
  */
 export function addAllFromBoundedContext() {
   if (!st || !domainData) return;
-  const sel = document.getElementById('feBulkBcSelect');
+  const sel = document.getElementById('feBulkBcSelect') as HTMLSelectElement | null;
   const ctxName = (sel && sel.value) ? String(sel.value).trim() : '';
   if (!ctxName) return;
 
@@ -1429,8 +1430,8 @@ export function addAllFromBoundedContext() {
 export function addNewType() {
   if (isReadOnlyFeature()) return;
   if (!st) return;
-  const nameInput = document.getElementById('feNewTypeName');
-  const kindSelect = document.getElementById('feNewTypeKind');
+  const nameInput = document.getElementById('feNewTypeName') as HTMLInputElement | null;
+  const kindSelect = document.getElementById('feNewTypeKind') as HTMLSelectElement | null;
   if (!nameInput || !kindSelect) return;
 
   const name = nameInput.value.trim();
@@ -1595,7 +1596,7 @@ function showRelationKindPicker(callback) {
   overlay.addEventListener('click', (ev) => { if (ev.target === overlay) cleanup(); });
   overlay.querySelectorAll('.rel-picker-item').forEach(item => {
     item.addEventListener('click', () => {
-      const kind = item.dataset.kind;
+      const kind = (item as HTMLElement).dataset.kind;
       cleanup();
       callback(kind);
     });
@@ -1879,13 +1880,13 @@ function markDirty() {
 // ── Palette refresh ──────────────────────────────────
 
 export function filterPalette() {
-  const input = document.getElementById('fePaletteSearch');
+  const input = document.getElementById('fePaletteSearch') as HTMLInputElement | null;
   const container = document.getElementById('fePalette');
   if (input && container) container.innerHTML = renderPaletteItems(input.value);
 }
 
 function refreshPalette() {
-  const input = document.getElementById('fePaletteSearch');
+  const input = document.getElementById('fePaletteSearch') as HTMLInputElement | null;
   const container = document.getElementById('fePalette');
   if (container) container.innerHTML = renderPaletteItems(input?.value || '');
 }
@@ -1901,7 +1902,7 @@ function applyAutoLayout(nodes, edges, nMap, fixedNodeIds) {
     aggregate: 0, entity: 1, valueObject: 1, subType: 1, event: 2, integrationEvent: 2,
     eventHandler: 3, commandHandlerTarget: 2, commandHandler: 3, queryHandler: 3, repository: 4, service: 4,
   };
-  const rowBuckets = {};
+  const rowBuckets: Record<string, { id: string; kind: string; x: number; y: number; vx?: number; vy?: number }[]> = {};
   for (const n of nodes) {
     if (isFixed(n)) continue;
     const r = kindRow[n.kind] || 0;
@@ -1987,8 +1988,8 @@ function computeFeatureContextBounds(nodes) {
   return bounds;
 }
 
-function computeFeatureLayerBounds(nodes) {
-  const groups = {};
+function computeFeatureLayerBounds(nodes: { layer?: string; boundedContext?: string; x: number; y: number; w: number; h: number }[]) {
+  const groups: Record<string, { boundedContext?: string; layer: string; nodes: typeof nodes }> = {};
   for (const n of nodes) {
     if (!n.layer) continue;
     const key = (n.boundedContext || '__default') + '\0' + n.layer;
@@ -2287,10 +2288,10 @@ function setupInteraction() {
   let portDrag = false; // dragging from a connector port
 
   svg.addEventListener('mousedown', function (ev) {
-    const portEl = ev.target.closest('.fe-port');
-    const nodeEl = ev.target.closest('.fe-node');
-    const edgeEl = ev.target.closest('.fe-edge');
-    const ctxEl = ev.target.closest('.dg-ctx-boundary');
+    const portEl = closestFromEvent(ev, '.fe-port');
+    const nodeEl = closestFromEvent(ev, '.fe-node');
+    const edgeEl = closestFromEvent(ev, '.fe-edge');
+    const ctxEl = closestFromEvent(ev, '.dg-ctx-boundary');
 
     if (!isReadOnlyFeature() && portEl && nodeEl) {
       // Start connection from port
@@ -2453,7 +2454,8 @@ function setupInteraction() {
       document.removeEventListener('keydown', handler);
       return;
     }
-    if (ev.target.tagName === 'INPUT' || ev.target.tagName === 'TEXTAREA' || ev.target.tagName === 'SELECT') return;
+    const tag = tagNameFromEvent(ev);
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
 
     if (ev.key === 'Escape') {
       if (connecting) {

@@ -9,7 +9,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build && npm run build:explorer",
-    "build:explorer": "node ./scripts/build-explorer.mjs && cp -f src/explorer/css/*.css ../../DomainModeling.AspNetCore/wwwroot/css/",
+    "typecheck": "tsc -b",
+    "build:explorer": "node ./scripts/build-explorer.mjs && cp -f src/explorer/styles/*.css ../../DomainModeling.AspNetCore/wwwroot/css/",
     "preview": "vite preview"
   },
   "devDependencies": {

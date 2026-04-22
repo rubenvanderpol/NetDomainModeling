@@ -3,10 +3,11 @@
  * Layout (positions, viewport, filters) syncs to server disk when available, with localStorage fallback.
  */
 import {
-  esc, escAttr, shortName,
+  esc, escAttr,
   formatDiagramPropertyLine, formatDiagramMethodLine, formatDiagramEmittedEventLine,
-} from './helpers';
-import { renderTabBar } from './tabs';
+} from '../lib/helpers';
+import { closestFromEvent } from '../lib/dom';
+import { renderTabBar } from '../ui/tabs';
 
 // Global layout (not scoped by bounded-context selection)
 const STORAGE_KEY = 'domain-model-diagram-positions-global';
@@ -24,10 +25,9 @@ const LEGACY_VIEWPORT_KEY = 'domain-model-diagram-viewport';
 
 const FLUSH_MS = 450;
 const EDGE_WAYPOINTS_KEY = 'domain-model-diagram-edge-waypoints-global';
-let diagramLayoutBaseUrl = null;
-/** @type {object | null} */
-let serverLayoutDoc = null;
-let diagramLayoutFlushTimer = null;
+let diagramLayoutBaseUrl: string | null = null;
+let serverLayoutDoc: Record<string, unknown> | null = null;
+let diagramLayoutFlushTimer: ReturnType<typeof setTimeout> | null = null;
 let suppressDiagramLayoutFlush = false;
 let diagramLocalStorageMigrated = false;
 
@@ -60,12 +60,12 @@ const KIND_CFG = {
 
 // ── Persistence (localStorage + optional server file storage) ──
 
-export function setDiagramLayoutBaseUrl(baseUrl) {
+export function setDiagramLayoutBaseUrl(baseUrl: string | null | undefined) {
   diagramLayoutBaseUrl = baseUrl && baseUrl.length ? baseUrl.replace(/\/$/, '') : null;
 }
 
-export function setServerDiagramLayoutCache(doc) {
-  serverLayoutDoc = doc && typeof doc === 'object' && !Array.isArray(doc) ? doc : null;
+export function setServerDiagramLayoutCache(doc: unknown) {
+  serverLayoutDoc = doc && typeof doc === 'object' && !Array.isArray(doc) ? (doc as Record<string, unknown>) : null;
 }
 
 function migrateLegacyDiagramLocalStorage() {
@@ -117,8 +117,10 @@ function migrateLegacyDiagramLocalStorage() {
       const raw = localStorage.getItem(LEGACY_VIEWPORT_KEY);
       const all = raw ? JSON.parse(raw) : {};
       let picked = null;
-      for (const v of Object.values(all || {})) {
-        if (v && typeof v.zoom === 'number') picked = v;
+      for (const v of Object.values(all || {}) as unknown[]) {
+        if (v && typeof v === 'object' && v !== null && typeof (v as { zoom?: unknown }).zoom === 'number') {
+          picked = v as { zoom: number; panX?: number; panY?: number };
+        }
       }
       if (picked) {
         localStorage.setItem(VIEWPORT_KEY, JSON.stringify(picked));
@@ -130,13 +132,14 @@ function migrateLegacyDiagramLocalStorage() {
 
 function buildLayoutPayloadFromState() {
   if (!dgState) return null;
-  const positions = {};
-  for (const n of dgState.allNodes) {
+  const positions: Record<string, { x: number; y: number }> = {};
+  for (const n of dgState.allNodes as { id: string; x: number; y: number }[]) {
     positions[n.id] = { x: Math.round(n.x * 10) / 10, y: Math.round(n.y * 10) / 10 };
   }
-  const edgeWaypoints = {};
-  if (dgState.edgeWaypoints) {
-    for (const [key, pts] of Object.entries(dgState.edgeWaypoints)) {
+  const edgeWaypoints: Record<string, { x: number; y: number }[]> = {};
+  const ew = dgState.edgeWaypoints as Record<string, { x: number; y: number }[] | undefined> | undefined;
+  if (ew) {
+    for (const [key, pts] of Object.entries(ew)) {
       if (pts && pts.length > 0) {
         edgeWaypoints[key] = pts.map(p => ({ x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10 }));
       }
@@ -389,11 +392,11 @@ function loadEdgeWaypoints() {
   } catch { return {}; }
 }
 
-function saveEdgeWaypoints(edgeWaypoints) {
+function saveEdgeWaypoints(edgeWaypoints: Record<string, unknown>) {
   try {
-    const filtered = {};
+    const filtered: Record<string, unknown> = {};
     for (const [key, pts] of Object.entries(edgeWaypoints || {})) {
-      if (pts && pts.length > 0) filtered[key] = pts;
+      if (Array.isArray(pts) && pts.length > 0) filtered[key] = pts;
     }
     localStorage.setItem(EDGE_WAYPOINTS_KEY, JSON.stringify(filtered));
   } catch { /* quota exceeded or private mode */ }
@@ -405,7 +408,55 @@ function edgeKey(e) {
 }
 
 // ── Module state ─────────────────────────────────────
-let dgState = null;
+/** Diagram runtime state (incrementally typed; nodes carry many UI-only fields). */
+interface DgNodeStyle {
+  bg?: string;
+  border?: string;
+  color?: string;
+  stereotype?: string;
+  label?: string;
+}
+
+interface DgNode {
+  id: string;
+  kind: string;
+  x: number;
+  y: number;
+  w?: number;
+  h?: number;
+  vx?: number;
+  vy?: number;
+  contextName?: string | null;
+  layerName?: string | null;
+  cfg?: DgNodeStyle;
+  props?: string[];
+  methods?: string[];
+  events?: string[];
+  [key: string]: unknown;
+}
+interface DgEdge {
+  source: string;
+  target: string;
+  kind: string;
+  [key: string]: unknown;
+}
+interface DgState {
+  allNodes: DgNode[];
+  nodes: DgNode[];
+  allEdges: DgEdge[];
+  edges: DgEdge[];
+  nMap: Record<string, DgNode>;
+  edgeWaypoints: Record<string, { x: number; y: number }[]>;
+  hiddenKinds: Set<string>;
+  hiddenEdgeKinds: Set<string>;
+  hiddenNodeIds: Set<string>;
+  zoom: number;
+  panX: number;
+  panY: number;
+  contextName?: string | null;
+  _ctxBounds?: unknown;
+}
+let dgState: DgState | null = null;
 
 /** @type {Set<string>} */
 let traceHighlightIds = new Set();
@@ -533,7 +584,7 @@ export function setDiagramTraceHighlights(fullNames) {
 /**
  * @param {{ traceLayout?: boolean }} [opts]
  */
-export function renderDiagramView(opts = {}) {
+export function renderDiagramView(opts: { traceLayout?: boolean } = {}) {
   const traceLayout = opts.traceLayout === true;
   let html = renderTabBar(traceLayout ? 'trace' : 'diagram');
 
@@ -686,7 +737,7 @@ export function initDiagram(ctx, boundedContexts) {
     if (hasPartialSaved) {
       applyAutoLayout(nodes, edges, nMap, appliedFromSaved);
     } else if (!hasSaved) {
-      applyAutoLayout(nodes, edges, nMap);
+      applyAutoLayout(nodes, edges, nMap, null);
     }
 
     let hiddenKinds;
@@ -716,7 +767,7 @@ export function initDiagram(ctx, boundedContexts) {
     }
     if (serverLayout && typeof serverLayout.showLayers === 'boolean') {
       showLayers = serverLayout.showLayers;
-      try { localStorage.setItem(SHOW_LAYERS_KEY, showLayers); } catch { /* ignore */ }
+      try { localStorage.setItem(SHOW_LAYERS_KEY, showLayers ? 'true' : 'false'); } catch { /* ignore */ }
     }
 
     let edgeWaypoints = {};
@@ -736,16 +787,20 @@ export function initDiagram(ctx, boundedContexts) {
     const lsViewport = loadViewport();
     let savedViewport = null;
     if (hasSaved || hasPartialSaved) {
-      if (serverLayout?.viewport && typeof serverLayout.viewport.zoom === 'number') {
-        savedViewport = serverLayout.viewport;
+      const slVp = serverLayout && typeof serverLayout === 'object'
+        ? (serverLayout as Record<string, unknown>).viewport
+        : undefined;
+      if (slVp && typeof slVp === 'object' && typeof (slVp as { zoom?: unknown }).zoom === 'number') {
+        savedViewport = slVp;
       } else {
         savedViewport = lsViewport;
       }
     }
-    if ((hasSaved || hasPartialSaved) && savedViewport) {
-      dgState.zoom = savedViewport.zoom;
-      dgState.panX = savedViewport.panX;
-      dgState.panY = savedViewport.panY;
+    if ((hasSaved || hasPartialSaved) && savedViewport && typeof savedViewport === 'object') {
+      const vp = savedViewport as { zoom?: number; panX?: number; panY?: number };
+      if (typeof vp.zoom === 'number') dgState.zoom = vp.zoom;
+      if (typeof vp.panX === 'number') dgState.panX = vp.panX;
+      if (typeof vp.panY === 'number') dgState.panY = vp.panY;
     }
 
     renderSvg();
@@ -934,13 +989,18 @@ function applyDiagramVisibility() {
 }
 
 // ── Auto-layout (row-based + forces) ─────────────────
-/** @param {Set<string>|null|undefined} fixedNodeIds If set, those nodes keep their current x/y (partial layout restore). */
-function applyAutoLayout(nodes, edges, nMap, fixedNodeIds) {
+/** If set, those nodes keep their current x/y (partial layout restore). */
+function applyAutoLayout(
+  nodes: DgNode[],
+  edges: DgEdge[],
+  nMap: Record<string, DgNode>,
+  fixedNodeIds?: Set<string> | null,
+) {
   const fixed = fixedNodeIds instanceof Set && fixedNodeIds.size > 0 ? fixedNodeIds : null;
   const isFixed = (n) => fixed && fixed.has(n.id);
 
   // Group movable nodes by bounded context for initial placement
-  const ctxGroups = {};
+  const ctxGroups: Record<string, DgNode[]> = {};
   for (const n of nodes) {
     if (isFixed(n)) continue;
     const key = n.contextName || '__default';
@@ -956,25 +1016,25 @@ function applyAutoLayout(nodes, edges, nMap, fixedNodeIds) {
     let xOffset = 0;
     for (const ctxName of ctxNames) {
       const ctxNodes = ctxGroups[ctxName];
-      const rowBuckets = {};
-      for (const n of ctxNodes) { const r = kindRow[n.kind] || 0; (rowBuckets[r] = rowBuckets[r] || []).push(n); }
+      const rowBuckets: Record<string, DgNode[]> = {};
+      for (const n of ctxNodes) { const r = kindRow[n.kind as keyof typeof kindRow] || 0; (rowBuckets[r] = rowBuckets[r] || []).push(n); }
       let maxRowWidth = 0;
       for (const [row, rNodes] of Object.entries(rowBuckets)) {
-        const y = parseInt(row) * 240;
+        const y = parseInt(row, 10) * 240;
         rNodes.forEach((n, i) => { n.x = xOffset + i * 270; n.y = y; });
         maxRowWidth = Math.max(maxRowWidth, rNodes.length * 270);
       }
       xOffset += maxRowWidth + 200; // gap between contexts
     }
   } else {
-    const rowBuckets = {};
+    const rowBuckets: Record<string, DgNode[]> = {};
     for (const n of nodes) {
       if (isFixed(n)) continue;
-      const r = kindRow[n.kind] || 0;
+      const r = kindRow[n.kind as keyof typeof kindRow] || 0;
       (rowBuckets[r] = rowBuckets[r] || []).push(n);
     }
     for (const [row, rNodes] of Object.entries(rowBuckets)) {
-      const y = parseInt(row) * 240;
+      const y = parseInt(row, 10) * 240;
       rNodes.forEach((n, i) => { n.x = (i - (rNodes.length - 1) / 2) * 270; n.y = y; });
     }
   }
@@ -1051,9 +1111,9 @@ function computeContextBounds(nodes) {
 // ── Layer boundary colors ────────────────────────────
 const LAYER_COLORS = { Domain: '#a78bfa', Application: '#60a5fa', Infrastructure: '#fb923c' };
 
-function computeLayerBounds(nodes) {
+function computeLayerBounds(nodes: DgNode[]) {
   // Group by (contextName or '__default', layerName) so each bounded context gets its own layer boundaries
-  const groups = {};
+  const groups: Record<string, { contextName: string | null | undefined; layerName: string; nodes: DgNode[] }> = {};
   for (const n of nodes) {
     if (!n.layerName) continue;
     const key = (n.contextName || '__default') + '\0' + n.layerName;
@@ -1182,7 +1242,7 @@ function renderSvg() {
 
   // Nodes
   nodes.forEach((n, ni) => {
-    const c = n.cfg;
+    const c = n.cfg ?? { bg: '#333', border: '#555', color: '#ccc', stereotype: '' };
     const traceCls = traceHighlightIds.has(n.id) ? ' dg-node-trace' : '';
     s += `<g class="dg-node${traceCls}" data-id="${escAttr(n.id)}" transform="translate(${n.x},${n.y})" style="cursor:pointer">`;
     s += `<rect x="3" y="3" width="${n.w}" height="${n.h}" rx="8" fill="rgba(0,0,0,.3)" />`;
@@ -1198,23 +1258,23 @@ function renderSvg() {
       s += `<tspan x="${n.w/2}" y="${ty}">${esc(ln)}</tspan>`;
     }
     s += '</text>';
-    if (n.props.length > 0) {
+    if ((n.props ?? []).length > 0) {
       ty += 8;
       s += `<line x1="12" y1="${ty}" x2="${n.w-12}" y2="${ty}" stroke="${c.border}" stroke-width="0.5" />`;
       ty += 4;
-      for (const p of n.props) { ty += 17; s += `<text x="16" y="${ty}" fill="#a0a4b8" font-size="11" font-family="'SF Mono','Cascadia Code','Fira Code',monospace">${esc(p)}</text>`; }
+      for (const p of n.props ?? []) { ty += 17; s += `<text x="16" y="${ty}" fill="#a0a4b8" font-size="11" font-family="'SF Mono','Cascadia Code','Fira Code',monospace">${esc(p)}</text>`; }
     }
-    if (n.methods.length > 0) {
+    if ((n.methods ?? []).length > 0) {
       ty += 8;
       s += `<line x1="12" y1="${ty}" x2="${n.w-12}" y2="${ty}" stroke="${c.border}" stroke-width="0.5" />`;
       ty += 4;
-      for (const m of n.methods) { ty += 17; s += `<text x="16" y="${ty}" fill="#a78bfa" font-size="11" font-family="'SF Mono','Cascadia Code','Fira Code',monospace">${esc(m)}</text>`; }
+      for (const m of n.methods ?? []) { ty += 17; s += `<text x="16" y="${ty}" fill="#a78bfa" font-size="11" font-family="'SF Mono','Cascadia Code','Fira Code',monospace">${esc(m)}</text>`; }
     }
-    if (n.events.length > 0) {
+    if ((n.events ?? []).length > 0) {
       ty += 8;
       s += `<line x1="12" y1="${ty}" x2="${n.w-12}" y2="${ty}" stroke="${c.border}" stroke-width="0.5" />`;
       ty += 4;
-      for (const ev of n.events) { ty += 17; s += `<text x="16" y="${ty}" fill="#fbbf24" font-size="11" font-family="'SF Mono','Cascadia Code','Fira Code',monospace">${esc(ev)}</text>`; }
+      for (const ev of n.events ?? []) { ty += 17; s += `<text x="16" y="${ty}" fill="#fbbf24" font-size="11" font-family="'SF Mono','Cascadia Code','Fira Code',monospace">${esc(ev)}</text>`; }
     }
     s += '</g></g>';
   });
@@ -1265,9 +1325,9 @@ function setupInteraction() {
   let panning = false, panStartX = 0, panStartY = 0, panOrigX = 0, panOrigY = 0;
 
   svg.addEventListener('mousedown', function(ev) {
-    const wpEl = ev.target.closest('.dg-waypoint');
-    const nodeEl = ev.target.closest('.dg-node');
-    const ctxEl = ev.target.closest('.dg-ctx-boundary');
+    const wpEl = closestFromEvent(ev, '.dg-waypoint');
+    const nodeEl = closestFromEvent(ev, '.dg-node');
+    const ctxEl = closestFromEvent(ev, '.dg-ctx-boundary');
 
     if (wpEl) {
       ev.preventDefault();
@@ -1363,7 +1423,7 @@ function setupInteraction() {
 
   svg.addEventListener('dblclick', function(ev) {
     // Double-click on waypoint → remove it
-    const wpEl = ev.target.closest('.dg-waypoint');
+    const wpEl = closestFromEvent(ev, '.dg-waypoint');
     if (wpEl) {
       ev.preventDefault();
       ev.stopPropagation();
@@ -1380,7 +1440,7 @@ function setupInteraction() {
     }
 
     // Double-click on edge hit area → add a waypoint
-    const edgeHit = ev.target.closest('.dg-edge-hit');
+    const edgeHit = closestFromEvent(ev, '.dg-edge-hit');
     if (edgeHit) {
       ev.preventDefault();
       ev.stopPropagation();
@@ -1420,13 +1480,13 @@ function setupInteraction() {
       return;
     }
 
-    const nodeEl = ev.target.closest('.dg-node');
+    const nodeEl = closestFromEvent(ev, '.dg-node');
     if (nodeEl) window.__nav.navigateTo(nodeEl.dataset.id);
   });
 
   // Right-click on waypoint → remove it
   svg.addEventListener('contextmenu', function(ev) {
-    const wpEl = ev.target.closest('.dg-waypoint');
+    const wpEl = closestFromEvent(ev, '.dg-waypoint');
     if (wpEl) {
       ev.preventDefault();
       ev.stopPropagation();
@@ -1487,7 +1547,7 @@ export function diagramResetLayout(ctx) {
   saveHiddenNodeIds(dgState.hiddenNodeIds);
   dgState.edgeWaypoints = {};
   saveEdgeWaypoints(dgState.edgeWaypoints);
-  applyAutoLayout(dgState.allNodes, dgState.allEdges, dgState.nMap);
+  applyAutoLayout(dgState.allNodes, dgState.allEdges, dgState.nMap, null);
   applyDiagramVisibility();
   renderSvg();
   fitToView();
@@ -1618,7 +1678,7 @@ export function diagramToggleEdgeFilter() {
 export function diagramDownloadSvg() {
   const svg = document.getElementById('diagramSvg');
   if (!svg) return;
-  const clone = svg.cloneNode(true);
+  const clone = svg.cloneNode(true) as SVGSVGElement;
   clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
   const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
   bg.setAttribute('width', '100%'); bg.setAttribute('height', '100%');
@@ -1647,7 +1707,7 @@ export function diagramToggleAliases() {
 
 export function diagramToggleLayers() {
   showLayers = !showLayers;
-  try { localStorage.setItem(SHOW_LAYERS_KEY, showLayers); } catch { /* ignore */ }
+  try { localStorage.setItem(SHOW_LAYERS_KEY, showLayers ? 'true' : 'false'); } catch { /* ignore */ }
   syncDiagramToolbarToggles();
   if (typeof window.__featureEditor?.onDiagramViewFlagsChanged === 'function') {
     window.__featureEditor.onDiagramViewFlagsChanged();

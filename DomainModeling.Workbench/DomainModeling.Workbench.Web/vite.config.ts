@@ -1,7 +1,7 @@
 import { defineConfig, type Plugin } from 'vite';
 import path from 'node:path';
 
-const explorerMainPath = path.resolve(__dirname, 'src/explorer/domain-model-main.ts');
+const explorerMainPath = path.resolve(__dirname, 'src/explorer/app/domain-model-main.ts');
 
 /** Side-effect import of explorer without pulling it into strict `tsc` project graph. */
 function virtualExplorerMain(): Plugin {

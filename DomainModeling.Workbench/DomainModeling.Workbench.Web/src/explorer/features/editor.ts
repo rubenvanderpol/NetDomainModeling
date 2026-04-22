@@ -13,8 +13,9 @@
 import {
   esc, escAttr, shortName, SECTION_META,
   formatDiagramPropertyLine, formatDiagramMethodLine, formatDiagramEmittedEventLine,
-} from './helpers';
-import { renderTabBar } from './tabs';
+} from '../lib/helpers';
+import { closestFromEvent, tagNameFromEvent } from '../lib/dom';
+import { renderTabBar } from '../ui/tabs';
 
 // ── Constants ────────────────────────────────────────
 const EDITOR_STORAGE_KEY = 'domain-model-editor-positions';
@@ -228,7 +229,7 @@ function renderKindFilters() {
 function refreshKindFilters() {
   const el = document.getElementById('editorKindFilters');
   if (el) el.innerHTML = renderKindFilters();
-  const showAll = document.getElementById('editorShowAllBtn');
+  const showAll = document.getElementById('editorShowAllBtn') as HTMLButtonElement | null;
   if (showAll) showAll.disabled = st.hiddenNodes.size === 0 && st.hiddenKinds.size === 0;
 }
 
@@ -309,7 +310,7 @@ function applyVisibility() {
 // ── Auto-layout ──────────────────────────────────────
 function applyAutoLayout(nodes, edges, nMap) {
   const kindRow = { aggregate: 0, entity: 1, valueObject: 1, event: 2, integrationEvent: 2, commandHandlerTarget: 2, eventHandler: 3, commandHandler: 3, queryHandler: 3, repository: 4, service: 4 };
-  const rowBuckets = {};
+  const rowBuckets: Record<string, { x: number; y: number; vx: number; vy: number; kind: string; id: string }[]> = {};
   for (const n of nodes) { const r = kindRow[n.kind] || 0; (rowBuckets[r] = rowBuckets[r] || []).push(n); }
   for (const [row, rNodes] of Object.entries(rowBuckets)) {
     const y = parseInt(row) * 240;
@@ -472,8 +473,8 @@ function setupInteraction() {
   let panning = false, panStartX = 0, panStartY = 0, panOrigX = 0, panOrigY = 0;
 
   svg.addEventListener('mousedown', function (ev) {
-    const nodeEl = ev.target.closest('.dg-node');
-    const edgeEl = ev.target.closest('.dg-edge');
+    const nodeEl = closestFromEvent(ev, '.dg-node');
+    const edgeEl = closestFromEvent(ev, '.dg-edge');
 
     if (nodeEl) {
       ev.preventDefault();
@@ -540,7 +541,8 @@ function setupInteraction() {
       document.removeEventListener('keydown', handler);
       return;
     }
-    if (ev.target.tagName === 'INPUT' || ev.target.tagName === 'TEXTAREA' || ev.target.tagName === 'SELECT') return;
+    const tag = tagNameFromEvent(ev);
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
     if (ev.key === 'Escape') {
       st.selectedNode = null; st.selectedEdge = null;
       renderSvg(); refreshPanel();
@@ -739,7 +741,7 @@ export function downloadJson() {
 export function downloadSvg() {
   const svg = document.getElementById('editorSvg');
   if (!svg) return;
-  const clone = svg.cloneNode(true);
+  const clone = svg.cloneNode(true) as SVGSVGElement;
   clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
   const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
   bg.setAttribute('width', '100%'); bg.setAttribute('height', '100%');

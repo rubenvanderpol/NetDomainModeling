@@ -3,8 +3,8 @@
  */
 import {
   esc, escAttr, shortName, kindMeta, relKindColor, syntaxHighlight, SECTION_META, SECTION_TO_DIAGRAM_KIND,
-} from './helpers';
-import { isDiagramNodeHidden, getDiagramState } from './diagram';
+} from '../lib/helpers';
+import { isDiagramNodeHidden, getDiagramState } from '../features/diagram';
 import { renderTabBar } from './tabs';
 
 // ── Overview ─────────────────────────────────────────

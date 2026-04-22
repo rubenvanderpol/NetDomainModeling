@@ -8,7 +8,7 @@ var __export = (target, all) => {
     __defProp(target, name, { get: all[name], enumerable: true });
 };
 
-// src/explorer/helpers.ts
+// src/explorer/lib/helpers.ts
 function shortName(fullName) {
   if (!fullName) return "";
   const s = String(fullName);
@@ -173,7 +173,7 @@ function relKindColor(kind) {
 }
 var ELLIPSIS, DIAGRAM_NODE_TEXT_MAX_CHARS, ALL_SECTIONS, SECTION_TO_DIAGRAM_KIND, SECTION_META;
 var init_helpers = __esm({
-  "src/explorer/helpers.ts"() {
+  "src/explorer/lib/helpers.ts"() {
     ELLIPSIS = "\u2026";
     DIAGRAM_NODE_TEXT_MAX_CHARS = 28;
     ALL_SECTIONS = [
@@ -221,7 +221,33 @@ var init_helpers = __esm({
   }
 });
 
-// src/explorer/tabs.ts
+// src/explorer/lib/dom.ts
+function eventTargetElement(ev) {
+  const t = ev.target;
+  return t instanceof Element ? t : null;
+}
+function closestFromEvent(ev, selector) {
+  const el = eventTargetElement(ev)?.closest(selector);
+  return el instanceof HTMLElement ? el : null;
+}
+function tagNameFromEvent(ev) {
+  return eventTargetElement(ev)?.tagName;
+}
+function asHtmlInput(el) {
+  return el instanceof HTMLInputElement ? el : null;
+}
+function asHtmlTextArea(el) {
+  return el instanceof HTMLTextAreaElement ? el : null;
+}
+function asHtmlSelect(el) {
+  return el instanceof HTMLSelectElement ? el : null;
+}
+var init_dom = __esm({
+  "src/explorer/lib/dom.ts"() {
+  }
+});
+
+// src/explorer/ui/tabs.ts
 function renderTabBar(activeTab) {
   const tabs = [
     { id: "diagram", label: "Diagram" }
@@ -244,11 +270,11 @@ function renderTabBar(activeTab) {
   return html;
 }
 var init_tabs = __esm({
-  "src/explorer/tabs.ts"() {
+  "src/explorer/ui/tabs.ts"() {
   }
 });
 
-// src/explorer/diagram.ts
+// src/explorer/features/diagram.ts
 function setDiagramLayoutBaseUrl(baseUrl2) {
   diagramLayoutBaseUrl = baseUrl2 && baseUrl2.length ? baseUrl2.replace(/\/$/, "") : null;
 }
@@ -305,7 +331,9 @@ function migrateLegacyDiagramLocalStorage() {
       const all = raw ? JSON.parse(raw) : {};
       let picked = null;
       for (const v of Object.values(all || {})) {
-        if (v && typeof v.zoom === "number") picked = v;
+        if (v && typeof v === "object" && v !== null && typeof v.zoom === "number") {
+          picked = v;
+        }
       }
       if (picked) {
         localStorage.setItem(VIEWPORT_KEY, JSON.stringify(picked));
@@ -322,8 +350,9 @@ function buildLayoutPayloadFromState() {
     positions[n.id] = { x: Math.round(n.x * 10) / 10, y: Math.round(n.y * 10) / 10 };
   }
   const edgeWaypoints = {};
-  if (dgState.edgeWaypoints) {
-    for (const [key, pts] of Object.entries(dgState.edgeWaypoints)) {
+  const ew = dgState.edgeWaypoints;
+  if (ew) {
+    for (const [key, pts] of Object.entries(ew)) {
       if (pts && pts.length > 0) {
         edgeWaypoints[key] = pts.map((p) => ({ x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10 }));
       }
@@ -561,7 +590,7 @@ function saveEdgeWaypoints(edgeWaypoints) {
   try {
     const filtered = {};
     for (const [key, pts] of Object.entries(edgeWaypoints || {})) {
-      if (pts && pts.length > 0) filtered[key] = pts;
+      if (Array.isArray(pts) && pts.length > 0) filtered[key] = pts;
     }
     localStorage.setItem(EDGE_WAYPOINTS_KEY, JSON.stringify(filtered));
   } catch {
@@ -786,7 +815,7 @@ function initDiagram(ctx, boundedContexts2) {
     if (hasPartialSaved) {
       applyAutoLayout(nodes, edges, nMap, appliedFromSaved);
     } else if (!hasSaved) {
-      applyAutoLayout(nodes, edges, nMap);
+      applyAutoLayout(nodes, edges, nMap, null);
     }
     let hiddenKinds;
     if (serverLayout && Array.isArray(serverLayout.hiddenKinds)) {
@@ -816,7 +845,7 @@ function initDiagram(ctx, boundedContexts2) {
     if (serverLayout && typeof serverLayout.showLayers === "boolean") {
       showLayers = serverLayout.showLayers;
       try {
-        localStorage.setItem(SHOW_LAYERS_KEY, showLayers);
+        localStorage.setItem(SHOW_LAYERS_KEY, showLayers ? "true" : "false");
       } catch {
       }
     }
@@ -845,16 +874,18 @@ function initDiagram(ctx, boundedContexts2) {
     const lsViewport = loadViewport();
     let savedViewport = null;
     if (hasSaved || hasPartialSaved) {
-      if (serverLayout?.viewport && typeof serverLayout.viewport.zoom === "number") {
-        savedViewport = serverLayout.viewport;
+      const slVp = serverLayout && typeof serverLayout === "object" ? serverLayout.viewport : void 0;
+      if (slVp && typeof slVp === "object" && typeof slVp.zoom === "number") {
+        savedViewport = slVp;
       } else {
         savedViewport = lsViewport;
       }
     }
-    if ((hasSaved || hasPartialSaved) && savedViewport) {
-      dgState.zoom = savedViewport.zoom;
-      dgState.panX = savedViewport.panX;
-      dgState.panY = savedViewport.panY;
+    if ((hasSaved || hasPartialSaved) && savedViewport && typeof savedViewport === "object") {
+      const vp = savedViewport;
+      if (typeof vp.zoom === "number") dgState.zoom = vp.zoom;
+      if (typeof vp.panX === "number") dgState.panX = vp.panX;
+      if (typeof vp.panY === "number") dgState.panY = vp.panY;
     }
     renderSvg();
     refreshDiagramKindFilters();
@@ -1050,7 +1081,7 @@ function applyAutoLayout(nodes, edges, nMap, fixedNodeIds) {
       }
       let maxRowWidth = 0;
       for (const [row, rNodes] of Object.entries(rowBuckets)) {
-        const y = parseInt(row) * 240;
+        const y = parseInt(row, 10) * 240;
         rNodes.forEach((n, i) => {
           n.x = xOffset + i * 270;
           n.y = y;
@@ -1067,7 +1098,7 @@ function applyAutoLayout(nodes, edges, nMap, fixedNodeIds) {
       (rowBuckets[r] = rowBuckets[r] || []).push(n);
     }
     for (const [row, rNodes] of Object.entries(rowBuckets)) {
-      const y = parseInt(row) * 240;
+      const y = parseInt(row, 10) * 240;
       rNodes.forEach((n, i) => {
         n.x = (i - (rNodes.length - 1) / 2) * 270;
         n.y = y;
@@ -1262,7 +1293,7 @@ function renderSvg() {
     }
   }
   nodes.forEach((n, ni) => {
-    const c = n.cfg;
+    const c = n.cfg ?? { bg: "#333", border: "#555", color: "#ccc", stereotype: "" };
     const traceCls = traceHighlightIds.has(n.id) ? " dg-node-trace" : "";
     s += `<g class="dg-node${traceCls}" data-id="${escAttr(n.id)}" transform="translate(${n.x},${n.y})" style="cursor:pointer">`;
     s += `<rect x="3" y="3" width="${n.w}" height="${n.h}" rx="8" fill="rgba(0,0,0,.3)" />`;
@@ -1278,29 +1309,29 @@ function renderSvg() {
       s += `<tspan x="${n.w / 2}" y="${ty}">${esc(ln)}</tspan>`;
     }
     s += "</text>";
-    if (n.props.length > 0) {
+    if ((n.props ?? []).length > 0) {
       ty += 8;
       s += `<line x1="12" y1="${ty}" x2="${n.w - 12}" y2="${ty}" stroke="${c.border}" stroke-width="0.5" />`;
       ty += 4;
-      for (const p of n.props) {
+      for (const p of n.props ?? []) {
         ty += 17;
         s += `<text x="16" y="${ty}" fill="#a0a4b8" font-size="11" font-family="'SF Mono','Cascadia Code','Fira Code',monospace">${esc(p)}</text>`;
       }
     }
-    if (n.methods.length > 0) {
+    if ((n.methods ?? []).length > 0) {
       ty += 8;
       s += `<line x1="12" y1="${ty}" x2="${n.w - 12}" y2="${ty}" stroke="${c.border}" stroke-width="0.5" />`;
       ty += 4;
-      for (const m of n.methods) {
+      for (const m of n.methods ?? []) {
         ty += 17;
         s += `<text x="16" y="${ty}" fill="#a78bfa" font-size="11" font-family="'SF Mono','Cascadia Code','Fira Code',monospace">${esc(m)}</text>`;
       }
     }
-    if (n.events.length > 0) {
+    if ((n.events ?? []).length > 0) {
       ty += 8;
       s += `<line x1="12" y1="${ty}" x2="${n.w - 12}" y2="${ty}" stroke="${c.border}" stroke-width="0.5" />`;
       ty += 4;
-      for (const ev of n.events) {
+      for (const ev of n.events ?? []) {
         ty += 17;
         s += `<text x="16" y="${ty}" fill="#fbbf24" font-size="11" font-family="'SF Mono','Cascadia Code','Fira Code',monospace">${esc(ev)}</text>`;
       }
@@ -1347,9 +1378,9 @@ function setupInteraction() {
   let dragWp = null;
   let panning = false, panStartX = 0, panStartY = 0, panOrigX = 0, panOrigY = 0;
   svg.addEventListener("mousedown", function(ev) {
-    const wpEl = ev.target.closest(".dg-waypoint");
-    const nodeEl = ev.target.closest(".dg-node");
-    const ctxEl = ev.target.closest(".dg-ctx-boundary");
+    const wpEl = closestFromEvent(ev, ".dg-waypoint");
+    const nodeEl = closestFromEvent(ev, ".dg-node");
+    const ctxEl = closestFromEvent(ev, ".dg-ctx-boundary");
     if (wpEl) {
       ev.preventDefault();
       ev.stopPropagation();
@@ -1448,7 +1479,7 @@ function setupInteraction() {
     saveViewport(dgState.zoom, dgState.panX, dgState.panY);
   }, { passive: false });
   svg.addEventListener("dblclick", function(ev) {
-    const wpEl = ev.target.closest(".dg-waypoint");
+    const wpEl = closestFromEvent(ev, ".dg-waypoint");
     if (wpEl) {
       ev.preventDefault();
       ev.stopPropagation();
@@ -1463,7 +1494,7 @@ function setupInteraction() {
       }
       return;
     }
-    const edgeHit = ev.target.closest(".dg-edge-hit");
+    const edgeHit = closestFromEvent(ev, ".dg-edge-hit");
     if (edgeHit) {
       ev.preventDefault();
       ev.stopPropagation();
@@ -1501,11 +1532,11 @@ function setupInteraction() {
       renderSvg();
       return;
     }
-    const nodeEl = ev.target.closest(".dg-node");
+    const nodeEl = closestFromEvent(ev, ".dg-node");
     if (nodeEl) window.__nav.navigateTo(nodeEl.dataset.id);
   });
   svg.addEventListener("contextmenu", function(ev) {
-    const wpEl = ev.target.closest(".dg-waypoint");
+    const wpEl = closestFromEvent(ev, ".dg-waypoint");
     if (wpEl) {
       ev.preventDefault();
       ev.stopPropagation();
@@ -1560,7 +1591,7 @@ function diagramResetLayout(ctx) {
   saveHiddenNodeIds(dgState.hiddenNodeIds);
   dgState.edgeWaypoints = {};
   saveEdgeWaypoints(dgState.edgeWaypoints);
-  applyAutoLayout(dgState.allNodes, dgState.allEdges, dgState.nMap);
+  applyAutoLayout(dgState.allNodes, dgState.allEdges, dgState.nMap, null);
   applyDiagramVisibility();
   renderSvg();
   fitToView();
@@ -1717,7 +1748,7 @@ function diagramToggleAliases() {
 function diagramToggleLayers() {
   showLayers = !showLayers;
   try {
-    localStorage.setItem(SHOW_LAYERS_KEY, showLayers);
+    localStorage.setItem(SHOW_LAYERS_KEY, showLayers ? "true" : "false");
   } catch {
   }
   syncDiagramToolbarToggles();
@@ -1737,8 +1768,9 @@ function diagramDisplayName(n) {
 }
 var STORAGE_KEY, HIDDEN_KINDS_KEY, HIDDEN_NODE_IDS_KEY, HIDDEN_EDGE_KINDS_KEY, VIEWPORT_KEY, SHOW_ALIASES_KEY, SHOW_LAYERS_KEY, LEGACY_POSITIONS_KEY, LEGACY_HIDDEN_KINDS_KEY, LEGACY_HIDDEN_EDGE_KINDS_KEY, LEGACY_VIEWPORT_KEY, FLUSH_MS, EDGE_WAYPOINTS_KEY, diagramLayoutBaseUrl, serverLayoutDoc, diagramLayoutFlushTimer, suppressDiagramLayoutFlush, diagramLocalStorageMigrated, EDGE_CFG, KIND_CFG, dgState, traceHighlightIds, showAliases, showLayers, NODE_W, PROP_H, HEADER_H, NAME_LINE_H, NAME_PAD, DIVIDER_H, PAD, MAX_NAME_CHARS, BC_COLORS, LAYER_COLORS;
 var init_diagram = __esm({
-  "src/explorer/diagram.ts"() {
+  "src/explorer/features/diagram.ts"() {
     init_helpers();
+    init_dom();
     init_tabs();
     STORAGE_KEY = "domain-model-diagram-positions-global";
     HIDDEN_KINDS_KEY = "domain-model-diagram-hidden-kinds-global";
@@ -1808,7 +1840,7 @@ var init_diagram = __esm({
   }
 });
 
-// src/explorer/testing.ts
+// src/explorer/features/testing.ts
 var testing_exports = {};
 __export(testing_exports, {
   cancelEdit: () => cancelEdit,
@@ -1826,6 +1858,9 @@ __export(testing_exports, {
   startInvoke: () => startInvoke,
   toggleInstance: () => toggleInstance
 });
+function errMsg(e) {
+  return e instanceof Error ? e.message : String(e);
+}
 async function initTesting(url) {
   apiUrl = url;
   try {
@@ -1927,11 +1962,12 @@ function renderParameterFields() {
   }
   return html;
 }
-function renderSingleField(p, prefix) {
-  const fullName = prefix ? `${prefix}.${p.name}` : p.name;
+function renderSingleField(p, prefix, fieldPath) {
+  const fullName = fieldPath ?? (prefix ? `${prefix}.${String(p.name)}` : String(p.name));
   const req = p.isRequired ? ' <span class="testing-required">*</span>' : "";
-  const complex = p.isComplex || false;
-  const hasSubProps = complex && Array.isArray(p.subProperties) && p.subProperties.length > 0;
+  const complex = Boolean(p.isComplex);
+  const subProps = p.subProperties;
+  const hasSubProps = complex && Array.isArray(subProps) && subProps.length > 0;
   let html = "";
   if (hasSubProps) {
     html += '<div class="testing-field testing-object-group">';
@@ -1940,8 +1976,8 @@ function renderSingleField(p, prefix) {
     html += `<span class="testing-type-hint">${esc(p.typeName)}</span>`;
     html += "</div>";
     html += '<div class="testing-object-fields">';
-    for (const sub of p.subProperties) {
-      html += renderSingleField(sub, fullName);
+    for (const sub of subProps) {
+      html += renderSingleField(sub, "", fullName);
     }
     html += "</div>";
     html += "</div>";
@@ -1965,18 +2001,18 @@ function renderSingleField(p, prefix) {
     html += "</select>";
     html += "</div>";
   } else {
-    const ph = p.defaultValue || placeholder(p.typeName);
+    const ph = String(p.defaultValue ?? placeholder(String(p.typeName)));
     const inputType = inputTypeFor(p.typeName);
-    const step = ["decimal", "double", "float"].includes(p.typeName) ? ' step="any"' : "";
+    const step = ["decimal", "double", "float"].includes(String(p.typeName)) ? ' step="any"' : "";
     html += '<div class="testing-field">';
     html += `<label>${esc(p.name)}${req} <span class="testing-type-hint">${esc(p.typeName)}</span></label>`;
-    html += `<input class="testing-input" type="${inputType}" data-param="${escAttr(fullName)}" placeholder="${escAttr(ph)}"${step} />`;
+    html += `<input class="testing-input" type="${inputType}" data-param="${escAttr(fullName)}" placeholder="${escAttr(String(ph))}"${step} />`;
     html += "</div>";
   }
   return html;
 }
 function inputTypeFor(typeName) {
-  if (["int", "long", "decimal", "double", "float"].includes(typeName)) return "number";
+  if (["int", "long", "decimal", "double", "float"].includes(String(typeName))) return "number";
   return "text";
 }
 function placeholder(typeName) {
@@ -1997,17 +2033,21 @@ function collectParameters() {
   const inputs = document.querySelectorAll("#testingParams .testing-input");
   const params = {};
   for (const input of inputs) {
-    const path = input.dataset.param;
-    let value = (input.value || "").trim();
+    const el = input;
+    const path = el.dataset.param;
+    if (!path) continue;
+    const textVal = asHtmlTextArea(el)?.value ?? asHtmlInput(el)?.value ?? asHtmlSelect(el)?.value ?? "";
+    let value = (textVal || "").trim();
     if (!value) continue;
     let parsed;
-    if (input.dataset.complex === "true") {
+    if (el.dataset.complex === "true") {
       try {
         parsed = JSON.parse(value);
       } catch (e) {
-        throw new Error(`Invalid JSON for "${path}": ${e.message}`);
+        const msg = e instanceof Error ? e.message : String(e);
+        throw new Error(`Invalid JSON for "${path}": ${msg}`);
       }
-    } else if (input.type === "number") {
+    } else if (asHtmlInput(el)?.type === "number") {
       parsed = value.includes(".") ? parseFloat(value) : parseInt(value);
     } else if (value === "true" || value === "false") {
       parsed = value === "true";
@@ -2022,8 +2062,12 @@ function setNested(obj, path, value) {
   const parts = path.split(".");
   let cur = obj;
   for (let i = 0; i < parts.length - 1; i++) {
-    if (!(parts[i] in cur)) cur[parts[i]] = {};
-    cur = cur[parts[i]];
+    const key = parts[i];
+    const next = cur[key];
+    if (typeof next !== "object" || next === null || Array.isArray(next)) {
+      cur[key] = {};
+    }
+    cur = cur[key];
   }
   cur[parts[parts.length - 1]] = value;
 }
@@ -2204,18 +2248,20 @@ function collectScopedParams(containerId) {
   const inputs = container.querySelectorAll(".testing-input");
   const params = {};
   for (const input of inputs) {
-    const path = input.dataset.param;
+    const el = input;
+    const path = el.dataset.param;
     if (!path) continue;
-    let value = (input.value || "").trim();
+    const textVal = asHtmlTextArea(el)?.value ?? asHtmlInput(el)?.value ?? asHtmlSelect(el)?.value ?? "";
+    let value = (textVal || "").trim();
     if (!value) continue;
     let parsed;
-    if (input.dataset.complex === "true") {
+    if (el.dataset.complex === "true") {
       try {
         parsed = JSON.parse(value);
       } catch (e) {
-        throw new Error(`Invalid JSON for "${path}": ${e.message}`);
+        throw new Error(`Invalid JSON for "${path}": ${errMsg(e)}`);
       }
-    } else if (input.type === "number") {
+    } else if (asHtmlInput(el)?.type === "number") {
       parsed = value.includes(".") ? parseFloat(value) : parseInt(value);
     } else if (value === "true" || value === "false") {
       parsed = value === "true";
@@ -2280,7 +2326,7 @@ async function create() {
     instances.unshift(instance);
     expandedInstances.add(instance.id);
   } catch (e) {
-    error = e.message;
+    error = errMsg(e);
   } finally {
     creating = false;
     refresh();
@@ -2291,10 +2337,12 @@ async function deleteInstance(id) {
     await fetch(`${apiUrl}/testing/instances/${id}`, { method: "DELETE" });
     instances = instances.filter((i) => i.id !== id);
     expandedInstances.delete(id);
-    editingInstances.delete(id);
+    if (editingInstance === id) {
+      editingInstance = null;
+    }
     refresh();
   } catch (e) {
-    error = e.message;
+    error = errMsg(e);
     refresh();
   }
 }
@@ -2345,7 +2393,7 @@ async function saveInstance(id) {
     instances = instances.map((i) => i.id === id ? updated : i);
     error = null;
   } catch (e) {
-    error = e.message;
+    error = errMsg(e);
   }
   refresh();
 }
@@ -2398,15 +2446,16 @@ async function invokeInstanceMethod(instanceId, methodName) {
     invokeResult = {
       instanceId,
       methodName,
-      error: e.message
+      error: errMsg(e)
     };
   }
   refresh();
 }
 var apiUrl, aggregates, selectedAggregate, creationMethod, instances, creating, error, expandedInstances, editingInstance, invokeMethod, invokeResult;
 var init_testing = __esm({
-  "src/explorer/testing.ts"() {
+  "src/explorer/features/testing.ts"() {
     init_helpers();
+    init_dom();
     init_tabs();
     apiUrl = "";
     aggregates = [];
@@ -2422,7 +2471,7 @@ var init_testing = __esm({
   }
 });
 
-// src/explorer/feature-editor.ts
+// src/explorer/features/feature-editor.ts
 var feature_editor_exports = {};
 __export(feature_editor_exports, {
   addAllFromBoundedContext: () => addAllFromBoundedContext,
@@ -3524,7 +3573,7 @@ function loadFeatureState(feature) {
   }
   const needsLayout = st.nodes.filter((n) => !fixedFromSaved.has(n.id));
   if (needsLayout.length === st.nodes.length) {
-    applyAutoLayout2(st.nodes, st.edges, st.nMap);
+    applyAutoLayout2(st.nodes, st.edges, st.nMap, null);
   } else if (needsLayout.length > 0) {
     applyAutoLayout2(st.nodes, st.edges, st.nMap, fixedFromSaved);
   }
@@ -4439,10 +4488,10 @@ function setupInteraction2() {
   let panning = false, panStartX = 0, panStartY = 0, panOrigX = 0, panOrigY = 0;
   let portDrag = false;
   svg.addEventListener("mousedown", function(ev) {
-    const portEl = ev.target.closest(".fe-port");
-    const nodeEl = ev.target.closest(".fe-node");
-    const edgeEl = ev.target.closest(".fe-edge");
-    const ctxEl = ev.target.closest(".dg-ctx-boundary");
+    const portEl = closestFromEvent(ev, ".fe-port");
+    const nodeEl = closestFromEvent(ev, ".fe-node");
+    const edgeEl = closestFromEvent(ev, ".fe-edge");
+    const ctxEl = closestFromEvent(ev, ".dg-ctx-boundary");
     if (!isReadOnlyFeature() && portEl && nodeEl) {
       ev.preventDefault();
       const id = nodeEl.dataset.id;
@@ -4594,7 +4643,8 @@ function setupInteraction2() {
       document.removeEventListener("keydown", handler);
       return;
     }
-    if (ev.target.tagName === "INPUT" || ev.target.tagName === "TEXTAREA" || ev.target.tagName === "SELECT") return;
+    const tag = tagNameFromEvent(ev);
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
     if (ev.key === "Escape") {
       if (connecting) {
         connecting = null;
@@ -4626,8 +4676,9 @@ function svgPoint2(svg, ev) {
 }
 var NODE_W2, PROP_H2, HEADER_H2, NAME_LINE_H2, NAME_PAD2, DIVIDER_H2, PAD2, MAX_NAME_CHARS2, KIND_CFG2, EDGE_COLORS, RELATION_KINDS, KIND_TO_SECTION, SECTION_TO_KIND, KIND_LABELS, LAYERS, LAYER_COLORS2, FE_EDGE_CFG, FE_KIND_DROPDOWN_LABEL, FEATURE_EDITOR_VIEW_MODE_KEY, FE_LAST_BC_KEY, FE_LAST_LAYER_KEY, FE_METHOD_RULE_KINDS, baseUrl, domainData, featureList, currentFeatureName, currentFeatureReadOnly, st, dirty, connecting, featureExports, viewModeOnly, feInteractionAbort, BC_COLORS2;
 var init_feature_editor = __esm({
-  "src/explorer/feature-editor.ts"() {
+  "src/explorer/features/feature-editor.ts"() {
     init_helpers();
+    init_dom();
     init_tabs();
     init_diagram();
     NODE_W2 = 200;
@@ -4745,7 +4796,7 @@ var init_feature_editor = __esm({
   }
 });
 
-// src/explorer/trace.ts
+// src/explorer/features/trace.ts
 var trace_exports = {};
 __export(trace_exports, {
   clearTracePanel: () => clearTracePanel,
@@ -4939,7 +4990,7 @@ function remountTraceDiagram() {
 }
 var BASE_URL, HUB_URL, HIGHLIGHT_DURATION_MS, connection, reconnectTimer, highlightClearTimer, manualDisconnect, diagramCtx, boundedContexts;
 var init_trace = __esm({
-  "src/explorer/trace.ts"() {
+  "src/explorer/features/trace.ts"() {
     init_helpers();
     init_diagram();
     BASE_URL = (window.__config?.apiUrl || "/domain-model/json").replace(/\/json$/, "");
@@ -4954,10 +5005,10 @@ var init_trace = __esm({
   }
 });
 
-// src/explorer/domain-model-main.ts
+// src/explorer/app/domain-model-main.ts
 init_helpers();
 
-// src/explorer/views.ts
+// src/explorer/ui/views.ts
 init_helpers();
 init_diagram();
 init_tabs();
@@ -5098,7 +5149,7 @@ function renderDetailView(kind, item, ctx, metadata2, saveMetadataFn) {
   return html;
 }
 
-// src/explorer/domain-model-main.ts
+// src/explorer/app/domain-model-main.ts
 init_diagram();
 var API_URL = window.__config?.apiUrl || "/domain-model/json";
 var BASE_URL2 = API_URL.replace(/\/json$/, "");
@@ -5182,9 +5233,9 @@ async function init() {
     if (data.boundedContexts && data.boundedContexts.length > 0) {
       const saved = loadSelection();
       const validNames = new Set(data.boundedContexts.map((c) => c.name));
-      if (saved && [...saved].some((n) => validNames.has(n))) {
+      if (saved && [...saved].some((n) => validNames.has(String(n)))) {
         for (const name of saved) {
-          if (validNames.has(name)) selectedContextNames.add(name);
+          if (validNames.has(String(name))) selectedContextNames.add(String(name));
         }
       } else {
         for (const ctx of data.boundedContexts) {
@@ -5222,10 +5273,17 @@ async function init() {
   }
 }
 function mergeContexts() {
-  const selected = (data.boundedContexts || []).filter((c) => selectedContextNames.has(c.name));
+  if (!data?.boundedContexts) return null;
+  const selected = data.boundedContexts.filter((c) => selectedContextNames.has(c.name));
   if (selected.length === 0) return null;
-  if (selected.length === 1) return selected[0];
-  const merged = { name: selected.map((c) => c.name).join(" + ") };
+  if (selected.length === 1) {
+    const one = selected[0];
+    return { ...one, relationships: [...one.relationships || []] };
+  }
+  const merged = {
+    name: selected.map((c) => c.name).join(" + "),
+    relationships: []
+  };
   for (const key of ALL_SECTIONS) {
     merged[key] = selected.flatMap((c) => c[key] || []);
   }
@@ -5258,7 +5316,7 @@ function initSidebarToggle() {
     const isCollapsed = sidebar.classList.toggle("collapsed");
     btn.textContent = isCollapsed ? "\u276F" : "\u276E";
     btn.title = isCollapsed ? "Expand sidebar" : "Collapse sidebar";
-    localStorage.setItem(SIDEBAR_COLLAPSED_KEY, isCollapsed);
+    localStorage.setItem(SIDEBAR_COLLAPSED_KEY, isCollapsed ? "true" : "false");
   });
 }
 function render() {
@@ -5536,12 +5594,16 @@ window.__diagram = {
   zoom: diagramZoom,
   fit: diagramFit,
   resetLayout: () => diagramResetLayout(currentCtx),
-  toggleKind: diagramToggleKind,
+  toggleKind: (kind) => {
+    diagramToggleKind(void 0, kind);
+  },
   showAll: diagramShowAll,
   downloadSvg: diagramDownloadSvg,
   toggleAliases: diagramToggleAliases,
   toggleLayers: diagramToggleLayers,
-  toggleEdgeKind: diagramToggleEdgeKind,
+  toggleEdgeKind: (kind) => {
+    diagramToggleEdgeKind(void 0, kind);
+  },
   toggleEdgeFilter: diagramToggleEdgeFilter,
   toggleKindFilter: diagramToggleKindFilter,
   showAllKinds: diagramShowAllKinds,
