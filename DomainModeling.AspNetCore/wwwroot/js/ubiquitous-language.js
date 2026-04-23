@@ -144,10 +144,14 @@ export function renderUbiquitousLanguageView(opts = {}) {
   const traceLayout = opts.traceLayout === true;
   const activeTab = opts.activeTab || (traceLayout ? 'trace' : 'ubiquitous-language');
   let html = renderTabBar(activeTab);
-  html += '<div class="ul-lang-toolbar" id="ulLangToolbar" style="display:none">';
+  html += '<div class="ul-lang-toolbar" id="ulLangToolbar">';
+  html += '<div class="ul-lang-toolbar-spacer"></div>';
+  html += '<div class="ul-lang-toolbar-inner" id="ulLangToolbarInner" style="display:none">';
   html += '<label class="ul-lang-label" for="ulLangSelect">Language</label>';
   html += '<select id="ulLangSelect" class="ul-lang-select" onchange="window.__ulOnLangChange(this.value)">';
   html += '</select>';
+  html += '</div>';
+  html += '<button type="button" class="ul-download-btn" id="ulDownloadBtn" disabled title="Download Markdown (same pipeline as server export)" onclick="window.__ulDownloadMarkdown()">⬇ Markdown</button>';
   html += '</div>';
   html += '<div class="ubiquitous-lang-page ubiquitous-lang-page--loading" id="ulPageRoot">';
   html += '<p class="ul-loading" id="ulStatus">Loading ubiquitous language…</p>';
@@ -178,8 +182,13 @@ export async function mountUbiquitousLanguage(baseUrl, selectedContextNames, req
   const root = document.getElementById('ulPageRoot');
   const status = document.getElementById('ulStatus');
   const toolbar = document.getElementById('ulLangToolbar');
+  const toolbarInner = document.getElementById('ulLangToolbarInner');
   const select = document.getElementById('ulLangSelect');
+  const downloadBtn = document.getElementById('ulDownloadBtn');
   if (!root) return;
+
+  window.__ulDownloadMarkdown = () => {};
+  if (downloadBtn) downloadBtn.disabled = true;
 
   const langParam = requestedLang !== undefined && requestedLang !== null && requestedLang !== ''
     ? requestedLang
@@ -192,15 +201,39 @@ export async function mountUbiquitousLanguage(baseUrl, selectedContextNames, req
     const doc = await res.json();
 
     const langs = doc.availableLanguages || [];
-    if (toolbar && select && langs.length > 1) {
-      toolbar.style.display = '';
+    if (toolbarInner && select && langs.length > 1) {
+      toolbarInner.style.display = '';
       const current = doc.language || '';
       select.innerHTML = langs.map((l) =>
         `<option value="${escAttr(l)}"${l === current ? ' selected' : ''}>${esc(l)}</option>`,
       ).join('');
-    } else if (toolbar) {
-      toolbar.style.display = 'none';
+    } else if (toolbarInner) {
+      toolbarInner.style.display = 'none';
     }
+
+    const activeLang = doc.language || '';
+    window.__ulDownloadMarkdown = async () => {
+      const qs = activeLang ? `?lang=${encodeURIComponent(activeLang)}` : '';
+      const mdUrl = `${baseUrl.replace(/\/$/, '')}/ubiquitous-language.md${qs}`;
+      try {
+        const res = await fetch(mdUrl);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const blob = await res.blob();
+        const cd = res.headers.get('Content-Disposition') || '';
+        const m = cd.match(/filename="?([^";]+)"?/i);
+        const filename = m ? m[1] : (activeLang ? `ubiquitous-language-${activeLang}.md` : 'ubiquitous-language.md');
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(a.href);
+      } catch (err) {
+        console.error('Ubiquitous language Markdown download failed', err);
+      }
+    };
+    if (downloadBtn) downloadBtn.disabled = false;
 
     window.__ulOnLangChange = (lang) => {
       setStoredUlLang(lang);

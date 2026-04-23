@@ -4,10 +4,22 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 10px 14px;
   padding: 8px 16px 0;
   max-width: 920px;
   margin: 0 auto;
+}
+
+.ul-lang-toolbar-spacer {
+  flex: 1;
+  min-width: 8px;
+}
+
+.ul-lang-toolbar-inner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .ul-lang-label {
@@ -26,6 +38,27 @@
   color: var(--text, #e4e6ec);
   font-size: 0.86rem;
   cursor: pointer;
+}
+
+.ul-download-btn {
+  padding: 7px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(196, 165, 116, 0.45);
+  background: var(--ul-accent-soft, rgba(196, 165, 116, 0.12));
+  color: #e8dcc8;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, opacity 0.15s;
+}
+
+.ul-download-btn:hover:not(:disabled) {
+  background: rgba(196, 165, 116, 0.22);
+}
+
+.ul-download-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .ul-lang-badge {

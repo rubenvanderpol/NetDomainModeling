@@ -188,7 +188,8 @@ public static class DomainModelEndpointExtensions
     /// <para>
     /// <c>GET {routePrefix}</c> — serves the interactive HTML explorer.<br/>
     /// <c>GET {routePrefix}/json</c> — returns the raw domain graph JSON.<br/>
-    /// <c>GET {routePrefix}/ubiquitous-language</c> — returns structured ubiquitous language JSON for the explorer Language tab.<br/>
+    /// <c>GET {routePrefix}/ubiquitous-language</c> — structured ubiquitous language JSON (Language tab).<br/>
+    /// <c>GET {routePrefix}/ubiquitous-language.md</c> — same content as Markdown (<c>UbiquitousLanguageMarkdownExport</c>), optional <c>?lang=</c>.<br/>
     /// <c>GET {routePrefix}/assets/**</c> — serves CSS and JS modules.
     /// </para>
     /// When <see cref="DomainModelOptions.EnableDeveloperView"/> is <c>true</c>,
@@ -266,7 +267,7 @@ public static class DomainModelEndpointExtensions
             }
         }
 
-        // GET /domain-model/ubiquitous-language?lang=nl — structured ubiquitous language (matches Markdown export rules)
+        // GET /domain-model/ubiquitous-language?lang=nl — structured ubiquitous language (same graph + definition as Markdown)
         endpoints.MapGet($"{routePrefix}/ubiquitous-language", (HttpRequest http) =>
         {
             var lang = http.Query["lang"].FirstOrDefault();
@@ -284,6 +285,26 @@ public static class DomainModelEndpointExtensions
         })
         .ExcludeFromDescription()
         .WithName("DomainModelUbiquitousLanguage");
+
+        // GET /domain-model/ubiquitous-language.md?lang=nl — Markdown download (same pipeline as UbiquitousLanguageMarkdownExport + JSON page)
+        endpoints.MapGet($"{routePrefix}/ubiquitous-language.md", (HttpRequest http) =>
+        {
+            var lang = http.Query["lang"].FirstOrDefault();
+            var md = UbiquitousLanguageMarkdownExport.Build(
+                ResolveGraphForDerivedViews(),
+                options.UbiquitousLanguage,
+                lang);
+            var safeLang = string.IsNullOrWhiteSpace(lang) ? null : SanitizeFileName(lang.Trim());
+            var fileName = safeLang is { Length: > 0 }
+                ? $"ubiquitous-language-{safeLang}.md"
+                : "ubiquitous-language.md";
+            return Results.File(
+                Encoding.UTF8.GetBytes(md),
+                "text/markdown; charset=utf-8",
+                fileName);
+        })
+        .ExcludeFromDescription()
+        .WithName("DomainModelUbiquitousLanguageMarkdown");
 
         // GET /domain-model/metadata — return all custom type metadata
         endpoints.MapGet($"{routePrefix}/metadata", () =>
@@ -311,7 +332,7 @@ public static class DomainModelEndpointExtensions
                 if (export is null)
                     return Results.NotFound();
 
-                var content = export.Builder(graph);
+                var content = export.Builder(ResolveGraphForDerivedViews());
                 var fileName = $"{export.Name.ToLowerInvariant().Replace(' ', '-')}.{export.FileExtension}";
                 return Results.File(
                     System.Text.Encoding.UTF8.GetBytes(content),

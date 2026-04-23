@@ -54,8 +54,6 @@ builder.Services.AddSingleton<IRepository<Carrier>, CarrierRepository>();
 
 var app = builder.Build();
 
-UbiquitousLanguageDefinition ubiquitousLanguageDefinition = UbiquitousLanguageDefinition.CreateDefault();
-
 // Mount the domain model explorer UI at /domain-model (with developer editor and testing enabled)
 app.MapDomainModel(domainGraph, configure: opts =>
 {
@@ -92,8 +90,6 @@ app.MapDomainModel(domainGraph, configure: opts =>
             .WithRelationshipReferences("verwijst naar")
             .WithRelationshipReferencesById("verwijst naar via id")));
 
-    ubiquitousLanguageDefinition = opts.UbiquitousLanguage;
-
     opts.AddExport("Summary", "txt", graph =>
     {
         var lines = new System.Collections.Generic.List<string>();
@@ -108,9 +104,6 @@ app.MapDomainModel(domainGraph, configure: opts =>
         }
         return string.Join(Environment.NewLine, lines);
     });
-
-    opts.AddExport("Ubiquitous Language", "md", graph =>
-        UbiquitousLanguageMarkdownExport.Build(graph, ubiquitousLanguageDefinition, language: null));
 
     opts.AddFeatureExport("Summary", "md", graph =>
     {
