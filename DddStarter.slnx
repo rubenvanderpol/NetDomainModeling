@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="DddStarter.Application/DddStarter.Application.csproj" />
+  <Project Path="DddStarter.Domain/DddStarter.Domain.csproj" />
+  <Project Path="DddStarter.Infrastructure/DddStarter.Infrastructure.csproj" />
+</Solution>
