@@ -16,6 +16,28 @@ The `DomainModeling.Example` project and `DomainModeling.Example.*` assemblies e
 | `DomainModeling.AspNetCore` | ASP.NET Core integration: endpoints + embedded explorer UI (static assets as embedded resources) |
 | `DomainModeling.Example*` | Runnable sample app and fake bounded contexts for tests |
 | `DomainModeling.Tests` | Unit tests |
+| `DomainModeling.Workbench.*` | Optional: **.NET Aspire** app host, **Vite + TypeScript** SPA, and a small API that mounts `MapDomainModel` — see [Workbench (Aspire + Vite)](#workbench-aspire--vite) |
+
+### Explorer UI source (TypeScript)
+
+The interactive explorer (diagram, detail views, feature editor, etc.) is implemented in **TypeScript** under:
+
+`DomainModeling.Workbench/DomainModeling.Workbench.Web/src/explorer/`
+
+Layout:
+
+| Folder | Purpose |
+|--------|---------|
+| `explorer/app/` | Main bootstrap and embed entry for the bundled script |
+| `explorer/features/` | Diagram, feature editor, developer editor, testing, trace |
+| `explorer/lib/` | Shared helpers and DOM utilities |
+| `explorer/ui/` | Tabs and detail rendering |
+| `explorer/styles/` | Explorer CSS (synced into `DomainModeling.AspNetCore/wwwroot/css` when the bundle is built) |
+| `explorer/types/` | Ambient types for `window` globals used by inline handlers |
+
+The library ships a single **`wwwroot/js/explorer-bundle.js`** (produced by **esbuild** from that tree). It is **checked in** so `dotnet build` works without Node.js. If you change explorer sources, run **`npm run build`** (or **`npm run build:explorer`**) from `DomainModeling.Workbench/DomainModeling.Workbench.Web` to regenerate the bundle and copied CSS. The `DomainModeling.AspNetCore` project can also run `npm ci && npm run build:explorer` automatically when the bundle file is missing.
+
+TypeScript is checked with **`tsc -b`** (see `DomainModeling.Workbench/DomainModeling.Workbench.Web/tsconfig.json` and `tsconfig.explorer.json`).
 
 ## Add to your application
 
@@ -111,11 +133,36 @@ Default routes (prefix `/domain-model` unless you change it):
 |--------|------|--------|
 | GET | `{prefix}` | Interactive explorer |
 | GET | `{prefix}/json` | Full domain graph JSON |
-| GET | `{prefix}/assets/**` | UI assets |
+| GET | `{prefix}/assets/**` | UI assets (including `js/explorer-bundle.js`) |
 
 With **developer view** enabled, a **PUT** `{prefix}/json` endpoint allows saving an edited graph from the browser. Optional **exports** appear under `{prefix}/exports` and `{prefix}/exports/{name}`.
 
-There is **no database, Docker, or Node.js** dependency for the UI; assets ship inside `DomainModeling.AspNetCore`.
+At **runtime**, the embedded UI needs only the DLL and its embedded resources—**no database or Docker**. **Node.js** is **not** required to *run* the explorer from a built package; it **is** used in this repo to **author or rebuild** the TypeScript bundle (see [Explorer UI source](#explorer-ui-source-typescript)).
+
+## Workbench (Aspire + Vite)
+
+The **`DomainModeling.Workbench`** folder hosts an optional stack for local development toward a separate SPA + API:
+
+| Piece | Role |
+|--------|------|
+| `DomainModeling.Workbench.AppHost` | .NET Aspire orchestration (`AddViteApp` for the frontend, reference to the API) |
+| `DomainModeling.Workbench.Api` | ASP.NET Core API calling `MapDomainModel` (graph + feature editor endpoints); serves the built SPA under `/app` in development-style setups |
+| `DomainModeling.Workbench.Web` | **Vite** + **TypeScript** SPA (`npm run dev` / `npm run build`) — proxies `/domain-model` to the API in dev |
+| `DomainModeling.Workbench.ServiceDefaults` | Shared Aspire service defaults |
+
+Run the full stack from the repository root:
+
+```bash
+dotnet run --project DomainModeling.Workbench/DomainModeling.Workbench.AppHost
+```
+
+Use the Aspire dashboard URLs from the console output. For frontend-only dev (after `npm install` in `DomainModeling.Workbench/DomainModeling.Workbench.Web`):
+
+```bash
+npm run dev --prefix DomainModeling.Workbench/DomainModeling.Workbench.Web
+```
+
+The workbench API currently builds its sample graph the same way as `DomainModeling.Example` (`ExampleDomainModelGraph`); it is a host for the SPA and endpoints, not a separate product backend yet.
 
 ## Build and test (this repository)
 
@@ -124,6 +171,15 @@ dotnet restore
 dotnet build
 dotnet test
 ```
+
+If you change **explorer TypeScript** or **workbench web** sources, install Node.js **20+** and from `DomainModeling.Workbench/DomainModeling.Workbench.Web` run:
+
+```bash
+npm ci
+npm run build
+```
+
+That runs `tsc`, builds the Vite SPA, and regenerates `DomainModeling.AspNetCore/wwwroot/js/explorer-bundle.js` plus synced CSS.
 
 Run the sample host:
 
