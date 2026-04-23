@@ -16,11 +16,21 @@ public static class UbiquitousLanguageMarkdownExport
     /// <summary>
     /// Creates Markdown with a custom definition and optional language key (<c>null</c> = definition default).
     /// </summary>
-    public static string Build(DomainGraph graph, UbiquitousLanguageDefinition definition, string? language = null)
+    public static string Build(DomainGraph graph, UbiquitousLanguageDefinition definition, string? language = null) =>
+        Build(graph, definition, language, boundedContextNames: null);
+
+    /// <summary>
+    /// Creates Markdown with optional bounded-context filter (same as <see cref="UbiquitousLanguageDocumentBuilder.Build"/>).
+    /// </summary>
+    public static string Build(
+        DomainGraph graph,
+        UbiquitousLanguageDefinition definition,
+        string? language,
+        IReadOnlyList<string>? boundedContextNames)
     {
         ArgumentNullException.ThrowIfNull(graph);
         ArgumentNullException.ThrowIfNull(definition);
-        return Build(UbiquitousLanguageDocumentBuilder.Build(graph, definition, language));
+        return Build(UbiquitousLanguageDocumentBuilder.Build(graph, definition, language, boundedContextNames));
     }
 
     /// <summary>

@@ -5,6 +5,7 @@ import { esc, escAttr } from './helpers.js';
 import { renderTabBar } from './tabs.js';
 
 const UL_LANG_KEY = 'domainModelUbiquitousLanguageLang';
+const UL_BC_KEY = 'domainModelUbiquitousLanguageBc';
 
 const REL_COLORS = {
   Has: '#60a5fa',
@@ -20,6 +21,21 @@ function kindPillClass(kindLabel) {
   if (k.includes('sub') && (k.includes('type') || k.includes('typ'))) return 'ul-kind-pill st';
   if (k.includes('aggreg')) return 'ul-kind-pill agg';
   return 'ul-kind-pill';
+}
+
+function getStoredUlBcFilter() {
+  try {
+    return localStorage.getItem(UL_BC_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+function setStoredUlBcFilter(name) {
+  try {
+    if (name) localStorage.setItem(UL_BC_KEY, name);
+    else localStorage.removeItem(UL_BC_KEY);
+  } catch { /* ignore */ }
 }
 
 function renderRelations(relations, labels) {
@@ -144,13 +160,18 @@ export function renderUbiquitousLanguageView(opts = {}) {
   const traceLayout = opts.traceLayout === true;
   const activeTab = opts.activeTab || (traceLayout ? 'trace' : 'ubiquitous-language');
   let html = renderTabBar(activeTab);
-  html += '<div class="ul-lang-toolbar" id="ulLangToolbar">';
-  html += '<div class="ul-lang-toolbar-spacer"></div>';
+  html += '<div class="ul-top-toolbar" id="ulTopToolbar">';
+  html += '<div class="ul-bc-filter-wrap" id="ulBcFilterWrap" style="display:none">';
+  html += '<label class="ul-bc-filter-label" for="ulBcSelect">Bounded context</label>';
+  html += '<select id="ulBcSelect" class="ul-bc-select" onchange="window.__ulOnBcChange(this.value)">';
+  html += '</select>';
+  html += '</div>';
   html += '<div class="ul-lang-toolbar-inner" id="ulLangToolbarInner" style="display:none">';
   html += '<label class="ul-lang-label" for="ulLangSelect">Language</label>';
   html += '<select id="ulLangSelect" class="ul-lang-select" onchange="window.__ulOnLangChange(this.value)">';
   html += '</select>';
   html += '</div>';
+  html += '<div class="ul-toolbar-spacer"></div>';
   html += '<button type="button" class="ul-download-btn" id="ulDownloadBtn" disabled title="Download Markdown (same pipeline as server export)" onclick="window.__ulDownloadMarkdown()">⬇ Markdown</button>';
   html += '</div>';
   html += '<div class="ubiquitous-lang-page ubiquitous-lang-page--loading" id="ulPageRoot">';
@@ -174,14 +195,25 @@ function setStoredUlLang(lang) {
   } catch { /* ignore */ }
 }
 
+function buildUlQuery(lang, contextName) {
+  const params = new URLSearchParams();
+  if (lang) params.set('lang', lang);
+  if (contextName) params.set('context', contextName);
+  const s = params.toString();
+  return s ? `?${s}` : '';
+}
+
 /**
- * @param {string} baseUrl — e.g. <code>/domain-model</code> (no trailing slash)
- * @param {Set<string> | null | undefined} selectedContextNames — when set, only these bounded contexts are shown
+ * @param {string} baseUrl
+ * @param {Set<string> | null | undefined} sidebarSelectedContexts — from sidebar checkboxes (used as default when no Language-tab filter)
+ * @param {string | undefined} requestedLang
+ * @param {string[] | null | undefined} allContextNames — all bounded context names in the graph (for top dropdown)
  */
-export async function mountUbiquitousLanguage(baseUrl, selectedContextNames, requestedLang) {
+export async function mountUbiquitousLanguage(baseUrl, sidebarSelectedContexts, requestedLang, allContextNames) {
   const root = document.getElementById('ulPageRoot');
   const status = document.getElementById('ulStatus');
-  const toolbar = document.getElementById('ulLangToolbar');
+  const bcWrap = document.getElementById('ulBcFilterWrap');
+  const bcSelect = document.getElementById('ulBcSelect');
   const toolbarInner = document.getElementById('ulLangToolbarInner');
   const select = document.getElementById('ulLangSelect');
   const downloadBtn = document.getElementById('ulDownloadBtn');
@@ -190,15 +222,43 @@ export async function mountUbiquitousLanguage(baseUrl, selectedContextNames, req
   window.__ulDownloadMarkdown = () => {};
   if (downloadBtn) downloadBtn.disabled = true;
 
+  const names = (allContextNames || []).filter(Boolean);
+  const storedBc = getStoredUlBcFilter();
+  let effectiveBc = '';
+  if (names.length > 1) {
+    if (storedBc && names.includes(storedBc)) {
+      effectiveBc = storedBc;
+    } else if (sidebarSelectedContexts && sidebarSelectedContexts.size === 1) {
+      const only = [...sidebarSelectedContexts][0];
+      effectiveBc = names.includes(only) ? only : '';
+    }
+  }
+
   const langParam = requestedLang !== undefined && requestedLang !== null && requestedLang !== ''
     ? requestedLang
     : getStoredUlLang();
-  const qs = langParam ? `?lang=${encodeURIComponent(langParam)}` : '';
+  const qs = buildUlQuery(langParam, effectiveBc);
   const url = `${baseUrl.replace(/\/$/, '')}/ubiquitous-language${qs}`;
   try {
     const res = await fetch(url);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const doc = await res.json();
+
+    if (bcWrap && bcSelect && names.length > 1) {
+      bcWrap.style.display = '';
+      let optsHtml = '<option value="">All bounded contexts</option>';
+      for (const n of names) {
+        optsHtml += `<option value="${escAttr(n)}"${n === effectiveBc ? ' selected' : ''}>${esc(n)}</option>`;
+      }
+      bcSelect.innerHTML = optsHtml;
+    } else if (bcWrap) {
+      bcWrap.style.display = 'none';
+    }
+
+    window.__ulOnBcChange = (name) => {
+      setStoredUlBcFilter(name);
+      void mountUbiquitousLanguage(baseUrl, sidebarSelectedContexts, langParam, names);
+    };
 
     const langs = doc.availableLanguages || [];
     if (toolbarInner && select && langs.length > 1) {
@@ -213,15 +273,15 @@ export async function mountUbiquitousLanguage(baseUrl, selectedContextNames, req
 
     const activeLang = doc.language || '';
     window.__ulDownloadMarkdown = async () => {
-      const qs = activeLang ? `?lang=${encodeURIComponent(activeLang)}` : '';
-      const mdUrl = `${baseUrl.replace(/\/$/, '')}/ubiquitous-language.md${qs}`;
+      const q = buildUlQuery(activeLang, effectiveBc);
+      const mdUrl = `${baseUrl.replace(/\/$/, '')}/ubiquitous-language.md${q}`;
       try {
         const res = await fetch(mdUrl);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const blob = await res.blob();
         const cd = res.headers.get('Content-Disposition') || '';
         const m = cd.match(/filename="?([^";]+)"?/i);
-        const filename = m ? m[1] : (activeLang ? `ubiquitous-language-${activeLang}.md` : 'ubiquitous-language.md');
+        const filename = m ? m[1] : 'ubiquitous-language.md';
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
         a.download = filename;
@@ -237,12 +297,12 @@ export async function mountUbiquitousLanguage(baseUrl, selectedContextNames, req
 
     window.__ulOnLangChange = (lang) => {
       setStoredUlLang(lang);
-      void mountUbiquitousLanguage(baseUrl, selectedContextNames, lang);
+      void mountUbiquitousLanguage(baseUrl, sidebarSelectedContexts, lang, names);
     };
 
     let contexts = doc.boundedContexts || [];
-    if (selectedContextNames && selectedContextNames.size > 0) {
-      contexts = contexts.filter((bc) => selectedContextNames.has(bc.name));
+    if (sidebarSelectedContexts && sidebarSelectedContexts.size > 0 && !effectiveBc) {
+      contexts = contexts.filter((bc) => sidebarSelectedContexts.has(bc.name));
     }
 
     const labels = {

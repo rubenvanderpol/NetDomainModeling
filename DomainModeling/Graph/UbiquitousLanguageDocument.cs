@@ -11,6 +11,12 @@ public sealed class UbiquitousLanguageDocument
     /// <summary>Languages the host registered (for UI pickers).</summary>
     public IReadOnlyList<string> AvailableLanguages { get; init; } = [];
 
+    /// <summary>
+    /// When the client requested a bounded-context filter, lists the names that were applied (subset of the full graph).
+    /// <c>null</c> when the full model is included.
+    /// </summary>
+    public List<string>? FilteredToBoundedContexts { get; init; }
+
     public required string Title { get; init; }
     public string? Introduction { get; init; }
 
@@ -113,7 +119,18 @@ public static class UbiquitousLanguageDocumentBuilder
     public static UbiquitousLanguageDocument Build(
         DomainGraph graph,
         UbiquitousLanguageDefinition definition,
-        string? language)
+        string? language) =>
+        Build(graph, definition, language, boundedContextNames: null);
+
+    /// <summary>
+    /// Produces a structured document, optionally restricted to the given bounded context names (case-insensitive).
+    /// When <paramref name="boundedContextNames"/> is null or empty, the full graph is used.
+    /// </summary>
+    public static UbiquitousLanguageDocument Build(
+        DomainGraph graph,
+        UbiquitousLanguageDefinition definition,
+        string? language,
+        IReadOnlyList<string>? boundedContextNames)
     {
         ArgumentNullException.ThrowIfNull(graph);
         ArgumentNullException.ThrowIfNull(definition);
@@ -121,7 +138,7 @@ public static class UbiquitousLanguageDocumentBuilder
         var resolvedLang = string.IsNullOrWhiteSpace(language) ? definition.DefaultLanguage : language.Trim();
         var phrases = definition.ResolvePhrases(resolvedLang);
         var impl = new Impl(definition, phrases, resolvedLang);
-        return impl.Build(graph);
+        return impl.Build(graph, boundedContextNames);
     }
 
     private sealed class Impl(UbiquitousLanguageDefinition definition, UbiquitousLanguagePhrases phrases, string resolvedLang)
@@ -137,16 +154,31 @@ public static class UbiquitousLanguageDocumentBuilder
             RelationshipKind.ReferencesById,
         ];
 
-        public UbiquitousLanguageDocument Build(DomainGraph graph)
+        public UbiquitousLanguageDocument Build(DomainGraph graph, IReadOnlyList<string>? boundedContextNames)
         {
+            List<string>? filterApplied = null;
+            IEnumerable<BoundedContextNode> sourceContexts = graph.BoundedContexts;
+            if (boundedContextNames is { Count: > 0 })
+            {
+                var wanted = new HashSet<string>(
+                    boundedContextNames.Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s.Trim()),
+                    StringComparer.OrdinalIgnoreCase);
+                if (wanted.Count > 0)
+                {
+                    sourceContexts = graph.BoundedContexts.Where(c => wanted.Contains(c.Name)).ToList();
+                    filterApplied = sourceContexts.Select(c => c.Name).ToList();
+                }
+            }
+
             var contexts = new List<UbiquitousLanguageBoundedContext>();
-            foreach (var ctx in graph.BoundedContexts)
+            foreach (var ctx in sourceContexts)
                 contexts.Add(BuildBoundedContext(ctx));
 
             return new UbiquitousLanguageDocument
             {
                 Language = resolvedLang,
                 AvailableLanguages = definition.LanguageKeys,
+                FilteredToBoundedContexts = filterApplied,
                 Title = phrases.Title,
                 Introduction = phrases.Introduction,
                 AggregatesSectionLabel = phrases.MarkdownSectionAggregates,

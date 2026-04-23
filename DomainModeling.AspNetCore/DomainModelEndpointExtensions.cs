@@ -188,8 +188,8 @@ public static class DomainModelEndpointExtensions
     /// <para>
     /// <c>GET {routePrefix}</c> — serves the interactive HTML explorer.<br/>
     /// <c>GET {routePrefix}/json</c> — returns the raw domain graph JSON.<br/>
-    /// <c>GET {routePrefix}/ubiquitous-language</c> — structured ubiquitous language JSON (Language tab).<br/>
-    /// <c>GET {routePrefix}/ubiquitous-language.md</c> — same content as Markdown (<c>UbiquitousLanguageMarkdownExport</c>), optional <c>?lang=</c>.<br/>
+    /// <c>GET {routePrefix}/ubiquitous-language</c> — structured ubiquitous language JSON (Language tab); optional <c>?lang=</c>, <c>?context=Name</c> (repeatable or comma-separated) to limit bounded contexts.<br/>
+    /// <c>GET {routePrefix}/ubiquitous-language.md</c> — same Markdown pipeline; same query options.<br/>
     /// <c>GET {routePrefix}/assets/**</c> — serves CSS and JS modules.
     /// </para>
     /// When <see cref="DomainModelOptions.EnableDeveloperView"/> is <c>true</c>,
@@ -267,14 +267,31 @@ public static class DomainModelEndpointExtensions
             }
         }
 
-        // GET /domain-model/ubiquitous-language?lang=nl — structured ubiquitous language (same graph + definition as Markdown)
+        static List<string>? ParseUbiquitousLanguageContextQuery(IQueryCollection query)
+        {
+            if (!query.TryGetValue("context", out var values) || values.Count == 0)
+                return null;
+            var list = new List<string>();
+            foreach (var v in values)
+            {
+                if (string.IsNullOrWhiteSpace(v))
+                    continue;
+                foreach (var part in v.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+                    list.Add(part);
+            }
+            return list.Count > 0 ? list : null;
+        }
+
+        // GET /domain-model/ubiquitous-language?lang=nl&context=Catalog&context=Shipping — structured ubiquitous language (same graph + definition as Markdown)
         endpoints.MapGet($"{routePrefix}/ubiquitous-language", (HttpRequest http) =>
         {
             var lang = http.Query["lang"].FirstOrDefault();
+            var contexts = ParseUbiquitousLanguageContextQuery(http.Query);
             var doc = UbiquitousLanguageDocumentBuilder.Build(
                 ResolveGraphForDerivedViews(),
                 options.UbiquitousLanguage,
-                lang);
+                lang,
+                contexts);
             return Results.Json(doc, new JsonSerializerOptions
             {
                 PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -286,18 +303,27 @@ public static class DomainModelEndpointExtensions
         .ExcludeFromDescription()
         .WithName("DomainModelUbiquitousLanguage");
 
-        // GET /domain-model/ubiquitous-language.md?lang=nl — Markdown download (same pipeline as UbiquitousLanguageMarkdownExport + JSON page)
+        // GET /domain-model/ubiquitous-language.md?lang=nl&context=Catalog — Markdown download (same pipeline as JSON page)
         endpoints.MapGet($"{routePrefix}/ubiquitous-language.md", (HttpRequest http) =>
         {
             var lang = http.Query["lang"].FirstOrDefault();
+            var contexts = ParseUbiquitousLanguageContextQuery(http.Query);
             var md = UbiquitousLanguageMarkdownExport.Build(
                 ResolveGraphForDerivedViews(),
                 options.UbiquitousLanguage,
-                lang);
+                lang,
+                contexts);
             var safeLang = string.IsNullOrWhiteSpace(lang) ? null : SanitizeFileName(lang.Trim());
-            var fileName = safeLang is { Length: > 0 }
-                ? $"ubiquitous-language-{safeLang}.md"
-                : "ubiquitous-language.md";
+            var safeCtx = contexts is { Count: 1 } && SanitizeFileName(contexts[0]) is { } sc && sc.Length > 0
+                ? sc.ToLowerInvariant().Replace(' ', '-')
+                : null;
+            var fileName = (safeLang, safeCtx) switch
+            {
+                ({ } l, { } c) => $"ubiquitous-language-{l}-{c}.md",
+                ({ } l, null) => $"ubiquitous-language-{l}.md",
+                (null, { } c) => $"ubiquitous-language-{c}.md",
+                _ => "ubiquitous-language.md",
+            };
             return Results.File(
                 Encoding.UTF8.GetBytes(md),
                 "text/markdown; charset=utf-8",

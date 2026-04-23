@@ -431,7 +431,8 @@ function renderMain() {
 
   if (currentView === 'ubiquitous-language') {
     main.innerHTML = renderUbiquitousLanguageView();
-    void mountUbiquitousLanguage(BASE_URL, selectedContextNames);
+    const allBcNames = (data.boundedContexts || []).map((c) => c.name);
+    void mountUbiquitousLanguage(BASE_URL, selectedContextNames, undefined, allBcNames);
     return;
   }
 
