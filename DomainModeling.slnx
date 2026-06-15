@@ -6,4 +6,6 @@
   <Project Path="DomainModeling.Example.Shared/DomainModeling.Example.Shared.csproj" />
   <Project Path="DomainModeling.Example.IntegrationEvents/DomainModeling.Example.IntegrationEvents.csproj" />
   <Project Path="DomainModeling.Example.Shipping/DomainModeling.Example.Shipping.csproj" />
+  <Project Path="TypeScanning/TypeScanning.csproj" />
+  <Project Path="TypeScanning.Tests/TypeScanning.Tests.csproj" />
 </Solution>

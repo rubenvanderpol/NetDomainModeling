@@ -1,10 +1,10 @@
 using System.Text.RegularExpressions;
 
-namespace DomainModeling.Builder;
+namespace TypeScanning.Convention;
 
 /// <summary>
-/// Fluent builder to define how a particular DDD building block is identified
-/// in a target project — by base type, implemented interface, naming convention, or attribute.
+/// Fluent builder to define how types are identified in a target project —
+/// by base type, implemented interface, naming convention, or attribute.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -23,7 +23,7 @@ namespace DomainModeling.Builder;
 public sealed class TypeConventionBuilder
 {
     private readonly List<List<Func<Type, bool>>> _orBranches = [];
-    private readonly List<StructuralDomainEventRule> _structuralRules = [];
+    private readonly List<StructuralTypeRule> _structuralRules = [];
     private bool _mergeNextIntoCurrentBranch;
 
     /// <summary>
@@ -32,13 +32,13 @@ public sealed class TypeConventionBuilder
     internal bool HasPredicates => _orBranches.Count > 0;
 
     /// <summary>
-    /// Structural rules derive domain event types from handler types (method parameters).
+    /// Structural rules derive types from handler types (method parameters).
     /// </summary>
     internal bool HasStructuralRules => _structuralRules.Count > 0;
 
-    internal IReadOnlyList<StructuralDomainEventRule> StructuralRules => _structuralRules;
+    internal IReadOnlyList<StructuralTypeRule> StructuralRules => _structuralRules;
 
-    internal void AddStructuralRule(StructuralDomainEventRule rule) => _structuralRules.Add(rule);
+    internal void AddStructuralRule(StructuralTypeRule rule) => _structuralRules.Add(rule);
 
     /// <summary>
     /// AND the next rule with the current branch (the one formed by the immediately preceding rule).
@@ -157,7 +157,7 @@ public sealed class TypeConventionBuilder
     }
 
     /// <summary>
-    /// Begins a structural rule for domain events: choose handler types, then a method and parameter whose type is treated as a domain event.
+    /// Begins a structural rule: choose root types, then a method and parameter whose type is treated as a discovered type.
     /// Example: <c>Type(t => t.NameEndsWith("EventHandler")).HasMethod("Handle").Parameters().First().Type()</c>.
     /// </summary>
     public TypeStructuralSelector Type(Action<TypeConventionBuilder> configure)
@@ -203,7 +203,6 @@ public sealed class TypeConventionBuilder
         if (!target.IsGenericTypeDefinition)
             return false;
 
-        // Check open-generic base classes
         var current = candidate.BaseType;
         while (current is not null)
         {
@@ -212,7 +211,6 @@ public sealed class TypeConventionBuilder
             current = current.BaseType;
         }
 
-        // Check open-generic interfaces
         return candidate.GetInterfaces()
             .Any(i => i.IsGenericType && i.GetGenericTypeDefinition() == target);
     }
