@@ -2,9 +2,10 @@ using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text;
-using DomainModeling;
 using DomainModeling.Builder;
 using DomainModeling.Graph;
+using TypeScanning;
+using TypeScanning.Discovery;
 using MethodInfo = DomainModeling.Graph.MethodInfo;
 using PropertyInfo = DomainModeling.Graph.PropertyInfo;
 
@@ -26,49 +27,22 @@ internal sealed class AssemblyScanner
 
     public BoundedContextNode Scan()
     {
-        var assemblies = _config.GetAllAssemblies();
-        var assemblyOrder = new Dictionary<Assembly, int>();
-        for (var i = 0; i < assemblies.Count; i++)
-        {
-            if (!assemblyOrder.ContainsKey(assemblies[i]))
-                assemblyOrder[assemblies[i]] = i;
-        }
+        var scanResult = new TypeScanner(_config.ToScanContext()).Scan();
 
-        // Multiple assemblies can expose types with the same FullName (e.g. duplicated sample types
-        // in DomainModeling.Example vs DomainModeling.Example.Shared). Type reference Distinct() does not
-        // collapse those; pick one Type per FullName following configured assembly order.
-        var allTypes = DeduplicateTypesByFullName(
-            assemblies.SelectMany(SafeGetTypes).Where(t => t is { IsAbstract: false, IsInterface: false }),
-            assemblyOrder);
+        var allTypes = scanResult.ConcreteTypes.ToList();
+        var entityTypes = GetCategoryTypes(scanResult, DddCategoryNames.Entity);
+        var aggregateTypes = GetCategoryTypes(scanResult, DddCategoryNames.Aggregate);
+        var valueObjectTypes = GetCategoryTypes(scanResult, DddCategoryNames.ValueObject);
+        var domainEventTypes = GetCategoryTypes(scanResult, DddCategoryNames.DomainEvent);
+        var integrationEventTypesAll = GetAllMatchedTypes(scanResult, DddCategoryNames.IntegrationEvent);
+        var integrationEventTypes = GetCategoryTypes(scanResult, DddCategoryNames.IntegrationEvent);
+        var eventHandlerTypes = GetCategoryTypes(scanResult, DddCategoryNames.EventHandler);
+        var commandHandlerTypes = GetCategoryTypes(scanResult, DddCategoryNames.CommandHandler);
+        var queryHandlerTypes = GetCategoryTypes(scanResult, DddCategoryNames.QueryHandler);
+        var repositoryTypes = GetCategoryTypes(scanResult, DddCategoryNames.Repository);
+        var domainServiceTypes = GetCategoryTypes(scanResult, DddCategoryNames.DomainService);
 
-        // Also collect abstract / interface types for generic-argument resolution
-        var allExportedTypes = DeduplicateTypesByFullName(
-            assemblies.SelectMany(SafeGetTypes),
-            assemblyOrder);
-
-        bool OwnedElsewhere(Type t) => _config.ExternallyOwnedSharedAssemblies.Contains(t.Assembly);
-
-        // Categorize types based on configured conventions (types "owned" by another BC are scanned but not listed here)
-        var entityTypes = allTypes.Where(t => !OwnedElsewhere(t) && _config.EntityConvention.Matches(t)).ToList();
-        var aggregateTypes = allTypes.Where(t => !OwnedElsewhere(t) && _config.AggregateConvention.Matches(t)).ToList();
-        var valueObjectTypes = allTypes.Where(t => !OwnedElsewhere(t) && _config.ValueObjectConvention.Matches(t)).ToList();
-        var domainEventTypes = allTypes.Where(t => !OwnedElsewhere(t) && _config.DomainEventConvention.Matches(t)).ToList();
-        var integrationEventTypesAll = allTypes.Where(t => _config.IntegrationEventConvention.Matches(t)).ToList();
-        var integrationEventTypes = integrationEventTypesAll.Where(t => !OwnedElsewhere(t)).ToList();
-        var eventHandlerTypes = allTypes.Where(t => !OwnedElsewhere(t) && _config.EventHandlerConvention.Matches(t)).ToList();
-        var commandHandlerTypes = allTypes.Where(t => !OwnedElsewhere(t) && _config.CommandHandlerConvention.Matches(t)).ToList();
-        var queryHandlerTypes = allTypes.Where(t => !OwnedElsewhere(t) && _config.QueryHandlerConvention.Matches(t)).ToList();
-        var repositoryTypes = allTypes.Where(t => !OwnedElsewhere(t) && _config.RepositoryConvention.Matches(t)).ToList();
-        var domainServiceTypes = allTypes.Where(t => !OwnedElsewhere(t) && _config.DomainServiceConvention.Matches(t)).ToList();
-
-        MergeStructuralDomainEvents(allTypes, OwnedElsewhere, domainEventTypes);
-
-        // Build a set of all "known domain type" full names for reference detection
-        var knownDomainTypes = new HashSet<string>(
-            entityTypes.Concat(aggregateTypes).Concat(valueObjectTypes)
-                .Concat(domainEventTypes).Concat(integrationEventTypesAll)
-                .Select(t => t.FullName!)
-                .Where(n => n is not null));
+        var knownDomainTypes = new HashSet<string>(scanResult.KnownTypeFullNames, StringComparer.Ordinal);
 
         // Build nodes
         var entityNodes = entityTypes.Select(t => BuildEntityNode(t, domainEventTypes, knownDomainTypes, _config.GetLayer(t))).ToList();
@@ -332,33 +306,15 @@ internal sealed class AssemblyScanner
         };
     }
 
-    /// <summary>
-    /// Adds domain event types derived from <see cref="BoundedContextBuilder.DomainEventConvention"/> structural rules
-    /// (e.g. first parameter of <c>Handle</c> on types matching a nested convention).
-    /// </summary>
-    private void MergeStructuralDomainEvents(
-        List<Type> allTypes,
-        Func<Type, bool> ownedElsewhere,
-        List<Type> domainEventTypes)
-    {
-        var rules = _config.DomainEventConvention.StructuralRules;
-        if (rules.Count == 0)
-            return;
+    private static List<Type> GetCategoryTypes(TypeScanning.Model.ScanResult scanResult, string category) =>
+        scanResult.Categories.TryGetValue(category, out var types)
+            ? types.Select(t => t.ClrType).ToList()
+            : [];
 
-        var existing = new HashSet<string>(domainEventTypes.Select(t => t.FullName!).Where(n => n is not null), StringComparer.Ordinal);
-        foreach (var rule in rules)
-        {
-            foreach (var eventType in rule.EnumerateEventTypes(allTypes))
-            {
-                if (ownedElsewhere(eventType))
-                    continue;
-                var fullName = eventType.FullName;
-                if (fullName is null || !existing.Add(fullName))
-                    continue;
-                domainEventTypes.Add(eventType);
-            }
-        }
-    }
+    private static List<Type> GetAllMatchedTypes(TypeScanning.Model.ScanResult scanResult, string category) =>
+        scanResult.AllMatchedTypes.TryGetValue(category, out var types)
+            ? types.ToList()
+            : [];
 
     // ─── Node builders ───────────────────────────────────────────────
 
@@ -1469,32 +1425,9 @@ internal sealed class AssemblyScanner
     /// When the same CLR full name appears in more than one scanned assembly, keep a single
     /// <see cref="Type"/> — prefer the assembly that appears earlier in <paramref name="assemblyOrder"/>.
     /// </summary>
-    private static List<Type> DeduplicateTypesByFullName(IEnumerable<Type> types, Dictionary<Assembly, int> assemblyOrder)
-    {
-        var list = types as IList<Type> ?? types.ToList();
-        var withFullName = list.Where(t => t.FullName is not null).ToList();
-        var withoutFullName = list.Where(t => t.FullName is null).Distinct().ToList();
+    private static List<Type> DeduplicateTypesByFullName(IEnumerable<Type> types, Dictionary<Assembly, int> assemblyOrder) =>
+        AssemblyTypeLoader.DeduplicateTypesByFullName(types, assemblyOrder);
 
-        static int Order(Dictionary<Assembly, int> order, Assembly a) =>
-            order.TryGetValue(a, out var i) ? i : int.MaxValue;
-
-        var deduped = withFullName
-            .GroupBy(t => t.FullName!, StringComparer.Ordinal)
-            .Select(g => g.OrderBy(t => Order(assemblyOrder, t.Assembly)).First())
-            .ToList();
-
-        return deduped.Concat(withoutFullName).ToList();
-    }
-
-    private static IEnumerable<Type> SafeGetTypes(Assembly assembly)
-    {
-        try
-        {
-            return assembly.GetTypes();
-        }
-        catch (ReflectionTypeLoadException ex)
-        {
-            return ex.Types.Where(t => t is not null)!;
-        }
-    }
+    private static IEnumerable<Type> SafeGetTypes(Assembly assembly) =>
+        AssemblyTypeLoader.SafeGetTypes(assembly);
 }

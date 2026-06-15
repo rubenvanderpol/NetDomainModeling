@@ -1,11 +1,12 @@
 using System.Reflection;
 
-namespace DomainModeling.Builder;
+namespace TypeScanning.Convention;
 
 /// <summary>
-/// Describes how to derive domain event types from handler types (e.g. first parameter of <c>Handle</c>).
+/// Describes how to derive types from other types via method parameters
+/// (e.g. first parameter of <c>Handle</c> on types matching a nested convention).
 /// </summary>
-internal sealed class StructuralDomainEventRule(TypeConventionBuilder rootMatcher, string methodName, int parameterIndex)
+internal sealed class StructuralTypeRule(TypeConventionBuilder rootMatcher, string methodName, int parameterIndex)
 {
     public TypeConventionBuilder RootMatcher { get; } = rootMatcher;
     public string MethodName { get; } = methodName;
@@ -14,7 +15,7 @@ internal sealed class StructuralDomainEventRule(TypeConventionBuilder rootMatche
     /// <summary>
     /// Yields non-null parameter types from matching roots that have a suitable method.
     /// </summary>
-    public IEnumerable<Type> EnumerateEventTypes(IEnumerable<Type> candidateRoots)
+    public IEnumerable<Type> EnumerateTypes(IEnumerable<Type> candidateRoots)
     {
         var flags = BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly;
 

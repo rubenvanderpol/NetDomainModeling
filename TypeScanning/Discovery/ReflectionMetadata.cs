@@ -1,0 +1,121 @@
+using System.Reflection;
+using TypeScanning.Model;
+
+namespace TypeScanning.Discovery;
+
+/// <summary>
+/// Reflection helpers for extracting type metadata.
+/// </summary>
+internal static class ReflectionMetadata
+{
+    public static List<ScannedProperty> GetProperties(Type type, HashSet<string> knownTypeFullNames)
+    {
+        return type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .Where(p => p.DeclaringType == type || p.DeclaringType?.Assembly == type.Assembly)
+            .Select(p =>
+            {
+                var (propertyTypeName, isCollection, elementType) = AnalyzePropertyType(p.PropertyType);
+                var referenceType = elementType ?? p.PropertyType;
+                var refFullName = referenceType.FullName;
+                var isKnown = refFullName is not null && knownTypeFullNames.Contains(refFullName);
+                var isCustomType = !isKnown && refFullName is not null && IsCustomType(referenceType);
+
+                return new ScannedProperty
+                {
+                    Name = p.Name,
+                    TypeName = propertyTypeName,
+                    IsCollection = isCollection,
+                    ReferenceTypeName = isKnown || isCustomType ? refFullName : null
+                };
+            })
+            .ToList();
+    }
+
+    public static List<ScannedMethod> GetMethods(Type type)
+    {
+        var objectMethods = new HashSet<string>(
+            typeof(object).GetMethods(BindingFlags.Public | BindingFlags.Instance)
+                .Select(m => m.Name));
+
+        return type.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
+            .Where(m => !m.IsSpecialName && !objectMethods.Contains(m.Name))
+            .Select(m => new ScannedMethod
+            {
+                Name = m.Name,
+                ReturnTypeName = TypeDisplayNames.FormatTypeReference(m.ReturnType),
+                Parameters = m.GetParameters()
+                    .Select(p => new ScannedMethodParameter
+                    {
+                        Name = p.Name ?? "arg",
+                        TypeName = TypeDisplayNames.FormatTypeReference(p.ParameterType),
+                    })
+                    .ToList()
+            })
+            .ToList();
+    }
+
+    public static bool IsCustomType(Type type)
+    {
+        var underlying = Nullable.GetUnderlyingType(type) ?? type;
+
+        if (underlying.IsPrimitive) return false;
+        if (underlying.IsEnum) return false;
+        if (underlying == typeof(string)) return false;
+        if (underlying == typeof(decimal)) return false;
+        if (underlying == typeof(Guid)) return false;
+        if (underlying == typeof(DateTime)) return false;
+        if (underlying == typeof(DateTimeOffset)) return false;
+        if (underlying == typeof(DateOnly)) return false;
+        if (underlying == typeof(TimeOnly)) return false;
+        if (underlying == typeof(TimeSpan)) return false;
+        if (underlying == typeof(Uri)) return false;
+        if (underlying == typeof(byte[])) return false;
+        if (underlying == typeof(object)) return false;
+
+        if (underlying.FullName is null) return false;
+        if (underlying.Namespace?.StartsWith("System") == true) return false;
+        if (underlying.Namespace?.StartsWith("Microsoft") == true) return false;
+
+        return true;
+    }
+
+    private static (string TypeName, bool IsCollection, Type? ElementType) AnalyzePropertyType(Type type)
+    {
+        if (type.IsArray)
+        {
+            var elem = type.GetElementType()!;
+            return ($"{TypeDisplayNames.FormatTypeReference(elem)}[]", true, elem);
+        }
+
+        if (type.IsGenericType)
+        {
+            var genericDef = type.GetGenericTypeDefinition();
+            var args = type.GetGenericArguments();
+
+            if (args.Length == 1 && IsCollectionType(genericDef))
+                return ($"ICollection<{TypeDisplayNames.FormatTypeReference(args[0])}>", true, args[0]);
+
+            var argNames = string.Join(", ", args.Select(TypeDisplayNames.FormatTypeReference));
+            var defName = StripGenericArity(type.Name);
+            return ($"{defName}<{argNames}>", false, null);
+        }
+
+        return (TypeDisplayNames.FormatTypeReference(type), false, null);
+    }
+
+    private static bool IsCollectionType(Type genericDef) =>
+        genericDef == typeof(IEnumerable<>)
+        || genericDef == typeof(ICollection<>)
+        || genericDef == typeof(IList<>)
+        || genericDef == typeof(List<>)
+        || genericDef == typeof(IReadOnlyCollection<>)
+        || genericDef == typeof(IReadOnlyList<>)
+        || genericDef == typeof(HashSet<>)
+        || genericDef == typeof(ISet<>);
+
+    private static string StripGenericArity(string name)
+    {
+        var idx = name.IndexOf('`');
+        return idx >= 0 ? name[..idx] : name;
+    }
+}

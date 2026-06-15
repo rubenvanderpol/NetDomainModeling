@@ -1,4 +1,5 @@
 using System.Reflection;
+using TypeScanning.Configuration;
 
 namespace DomainModeling.Builder;
 
@@ -211,5 +212,45 @@ public sealed class BoundedContextBuilder
     {
         var scanner = new Discovery.AssemblyScanner(this);
         return scanner.Scan();
+    }
+
+    /// <summary>
+    /// Maps this bounded context configuration to a generic <see cref="ScanContext"/>.
+    /// </summary>
+    internal ScanContext ToScanContext()
+    {
+        var builder = new ScanContextBuilder()
+            .WithName(Name);
+
+        if (DomainAssembly is not null) builder.WithDomainAssembly(DomainAssembly);
+        if (ApplicationAssembly is not null) builder.WithApplicationAssembly(ApplicationAssembly);
+        if (InfrastructureAssembly is not null) builder.WithInfrastructureAssembly(InfrastructureAssembly);
+
+        foreach (var assembly in AdditionalAssemblies)
+            builder.WithAssemblies(assembly);
+        foreach (var assembly in SharedAssemblies)
+            builder.WithSharedAssembly(assembly);
+        foreach (var assembly in ExternallyOwnedSharedAssemblies)
+            builder.WithExternallyOwnedAssembly(assembly);
+
+        builder
+            .WithCategory(DddCategoryNames.Entity, EntityConvention)
+            .WithCategory(DddCategoryNames.Aggregate, AggregateConvention)
+            .WithCategory(DddCategoryNames.ValueObject, ValueObjectConvention)
+            .WithCategory(DddCategoryNames.DomainEvent, DomainEventConvention)
+            .WithCategory(DddCategoryNames.IntegrationEvent, IntegrationEventConvention, new TypeCategoryOptions
+            {
+                IncludeExternallyOwnedInKnownTypes = true
+            })
+            .WithCategory(DddCategoryNames.EventHandler, EventHandlerConvention)
+            .WithCategory(DddCategoryNames.CommandHandler, CommandHandlerConvention)
+            .WithCategory(DddCategoryNames.Command, CommandConvention)
+            .WithCategory(DddCategoryNames.QueryHandler, QueryHandlerConvention)
+            .WithCategory(DddCategoryNames.Repository, RepositoryConvention)
+            .WithCategory(DddCategoryNames.DomainService, DomainServiceConvention);
+
+        DddRelationshipRules.Apply(builder);
+
+        return builder.Build();
     }
 }

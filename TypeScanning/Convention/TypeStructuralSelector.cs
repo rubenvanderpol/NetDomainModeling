@@ -1,7 +1,7 @@
-namespace DomainModeling.Builder;
+namespace TypeScanning.Convention;
 
 /// <summary>
-/// Begins a structural rule: match types (e.g. event handlers), then walk to a parameter type.
+/// Begins a structural rule: match types (e.g. handlers), then walk to a parameter type.
 /// </summary>
 public sealed class TypeStructuralSelector
 {
@@ -25,7 +25,7 @@ public sealed class TypeStructuralSelector
 }
 
 /// <summary>
-/// Selects which method parameter supplies the domain event type.
+/// Selects which method parameter supplies the discovered type.
 /// </summary>
 public sealed class MethodParameterSelector
 {
@@ -75,7 +75,7 @@ public sealed class ParameterPositionSelector
 }
 
 /// <summary>
-/// Completes a structural extraction by registering the parameter's type as a candidate domain event type.
+/// Completes a structural extraction by registering the parameter's type as a candidate discovered type.
 /// </summary>
 public sealed class TypeExtractor
 {
@@ -97,11 +97,11 @@ public sealed class TypeExtractor
     }
 
     /// <summary>
-    /// Registers this structural rule: discovered event types are taken from the selected parameter's type.
+    /// Registers this structural rule: discovered types are taken from the selected parameter's type.
     /// </summary>
     public TypeConventionBuilder Type()
     {
-        _owner.AddStructuralRule(new StructuralDomainEventRule(_rootMatcher, _methodName, _parameterIndex));
+        _owner.AddStructuralRule(new StructuralTypeRule(_rootMatcher, _methodName, _parameterIndex));
         return _owner;
     }
 }

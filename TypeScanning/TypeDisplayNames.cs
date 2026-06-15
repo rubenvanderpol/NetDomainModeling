@@ -1,10 +1,9 @@
-namespace DomainModeling;
+namespace TypeScanning;
 
 /// <summary>
 /// C#-style display names for <see cref="System.Type"/> (nested types, generics, arity markers).
-/// Used for graph node <c>Name</c> and type references in property/method metadata.
 /// </summary>
-internal static class TypeDisplayNames
+public static class TypeDisplayNames
 {
     /// <summary>
     /// Short type name for UI: nested types as <c>Outer.Inner</c>, closed generics as <c>Event&lt;T&gt;</c> (no <c>`1</c>).
@@ -19,7 +18,6 @@ internal static class TypeDisplayNames
 
         if (type.IsGenericType)
         {
-            // Open generic definition: show "EntityDeletedEvent", not "EntityDeletedEvent`1" / not "EntityDeletedEvent<TEntity>"
             if (type.IsGenericTypeDefinition)
                 return StripArity(type.Name);
 
