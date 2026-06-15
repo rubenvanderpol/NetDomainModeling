@@ -40,4 +40,11 @@ public sealed class PlaceOrderHandler : ICommandHandler<PlaceOrderCommand>
     public void Handle(PlaceOrderCommand command) { }
 }
 
+public sealed class OrderWithCustomerId
+{
+    public string CustomerId { get; init; } = "";
+}
+
+public sealed class Customer;
+
 public interface ICommandHandler<in T> where T : ICommand;

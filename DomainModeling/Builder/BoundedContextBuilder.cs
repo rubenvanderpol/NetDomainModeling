@@ -249,6 +249,8 @@ public sealed class BoundedContextBuilder
             .WithCategory(DddCategoryNames.Repository, RepositoryConvention)
             .WithCategory(DddCategoryNames.DomainService, DomainServiceConvention);
 
+        DddRelationshipRules.Apply(builder);
+
         return builder.Build();
     }
 }

@@ -1,6 +1,7 @@
 using System.Reflection;
 using TypeScanning.Configuration;
 using TypeScanning.Model;
+using TypeScanning.Relationships;
 
 namespace TypeScanning.Discovery;
 
@@ -69,7 +70,20 @@ public sealed class TypeScanner
                 .ToList();
         }
 
-        var propertyRelationships = BuildPropertyRelationships(scannedByCategory);
+        var allMatchedTypesReadOnly = allMatchedTypes.ToDictionary(
+            kvp => kvp.Key,
+            kvp => (IReadOnlyList<Type>)kvp.Value);
+
+        var detectionContext = new RelationshipDetectionContext
+        {
+            ContextName = _context.Name,
+            Categories = scannedByCategory,
+            AllMatchedTypes = allMatchedTypesReadOnly,
+            ConcreteTypes = allTypes,
+            KnownTypeFullNames = knownTypeFullNames
+        };
+
+        var relationships = RelationshipEngine.DetectAll(detectionContext, _context.RelationshipRules);
 
         return new ScanResult
         {
@@ -78,10 +92,8 @@ public sealed class TypeScanner
             ConcreteTypes = allTypes,
             AllExportedTypes = allExportedTypes,
             KnownTypeFullNames = knownTypeFullNames,
-            AllMatchedTypes = allMatchedTypes.ToDictionary(
-                kvp => kvp.Key,
-                kvp => (IReadOnlyList<Type>)kvp.Value),
-            PropertyRelationships = propertyRelationships
+            AllMatchedTypes = allMatchedTypesReadOnly,
+            Relationships = relationships
         };
     }
 
@@ -126,29 +138,4 @@ public sealed class TypeScanner
         Properties = ReflectionMetadata.GetProperties(type, knownTypeFullNames),
         Methods = ReflectionMetadata.GetMethods(type)
     };
-
-    private static List<ScannedRelationship> BuildPropertyRelationships(
-        IReadOnlyDictionary<string, IReadOnlyList<ScannedType>> scannedByCategory)
-    {
-        var relationships = new List<ScannedRelationship>();
-
-        foreach (var types in scannedByCategory.Values)
-        {
-            foreach (var scannedType in types)
-            {
-                foreach (var prop in scannedType.Properties.Where(p => p.ReferenceTypeName is not null))
-                {
-                    relationships.Add(new ScannedRelationship
-                    {
-                        SourceType = scannedType.FullName,
-                        TargetType = prop.ReferenceTypeName!,
-                        Kind = prop.IsCollection ? RelationshipKind.HasMany : RelationshipKind.Has,
-                        Label = prop.Name
-                    });
-                }
-            }
-        }
-
-        return relationships;
-    }
 }

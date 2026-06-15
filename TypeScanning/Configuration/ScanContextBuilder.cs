@@ -1,5 +1,6 @@
 using System.Reflection;
 using TypeScanning.Convention;
+using TypeScanning.Relationships;
 
 namespace TypeScanning.Configuration;
 
@@ -16,6 +17,7 @@ public sealed class ScanContextBuilder
     private readonly List<Assembly> _sharedAssemblies = [];
     private readonly HashSet<Assembly> _externallyOwnedAssemblies = [];
     private readonly Dictionary<string, TypeCategory> _categories = new(StringComparer.Ordinal);
+    private readonly List<RelationshipRule> _relationshipRules = [];
 
     /// <summary>
     /// Sets the context name (e.g. bounded context or module name).
@@ -125,6 +127,20 @@ public sealed class ScanContextBuilder
         return this;
     }
 
+    /// <summary>
+    /// Registers a consumer-named relationship with a configurable detection strategy.
+    /// </summary>
+    public ScanContextBuilder WithRelationship(string name, Action<RelationshipRuleBuilder> configure)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentNullException.ThrowIfNull(configure);
+
+        var builder = new RelationshipRuleBuilder(name);
+        configure(builder);
+        _relationshipRules.Add(builder.Build());
+        return this;
+    }
+
     internal ScanContext Build()
     {
         if (string.IsNullOrWhiteSpace(_name))
@@ -143,7 +159,8 @@ public sealed class ScanContextBuilder
             assemblies.Distinct().ToList(),
             _categories.Values.ToList(),
             _externallyOwnedAssemblies,
-            GetLayer);
+            GetLayer,
+            _relationshipRules);
     }
 
     private string? GetLayer(Type type)

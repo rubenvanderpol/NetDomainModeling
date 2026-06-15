@@ -1,5 +1,6 @@
 using System.Reflection;
 using TypeScanning.Convention;
+using TypeScanning.Relationships;
 
 namespace TypeScanning.Configuration;
 
@@ -49,13 +50,15 @@ public sealed class ScanContext
     public IReadOnlyList<TypeCategory> Categories { get; }
     public HashSet<Assembly> ExternallyOwnedAssemblies { get; }
     public Func<Type, string?>? LayerResolver { get; }
+    public IReadOnlyList<RelationshipRule> RelationshipRules { get; }
 
     public ScanContext(
         string name,
         IReadOnlyList<Assembly> assemblies,
         IReadOnlyList<TypeCategory> categories,
         HashSet<Assembly>? externallyOwnedAssemblies = null,
-        Func<Type, string?>? layerResolver = null)
+        Func<Type, string?>? layerResolver = null,
+        IReadOnlyList<RelationshipRule>? relationshipRules = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(assemblies);
@@ -65,5 +68,6 @@ public sealed class ScanContext
         Categories = categories;
         ExternallyOwnedAssemblies = externallyOwnedAssemblies ?? [];
         LayerResolver = layerResolver;
+        RelationshipRules = relationshipRules ?? [];
     }
 }

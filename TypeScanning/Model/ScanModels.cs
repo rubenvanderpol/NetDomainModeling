@@ -39,22 +39,13 @@ public sealed class ScannedRelationship
 {
     public required string SourceType { get; init; }
     public required string TargetType { get; init; }
-    public required RelationshipKind Kind { get; init; }
-    public string? Label { get; init; }
-}
 
-/// <summary>
-/// Generic relationship kinds produced by the scanner.
-/// </summary>
-public enum RelationshipKind
-{
-    References,
-    ReferencesById,
-    Has,
-    HasMany,
-    Calls,
-    Creates,
-    Handles
+    /// <summary>
+    /// Consumer-defined relationship type name (e.g. "Has", "Emits", "manages").
+    /// </summary>
+    public required string Kind { get; init; }
+
+    public string? Label { get; init; }
 }
 
 /// <summary>
@@ -82,7 +73,7 @@ public sealed class ScanResult
     public required IReadOnlyList<Type> AllExportedTypes { get; init; }
     public required HashSet<string> KnownTypeFullNames { get; init; }
     public required IReadOnlyDictionary<string, IReadOnlyList<Type>> AllMatchedTypes { get; init; }
-    public IReadOnlyList<ScannedRelationship> PropertyRelationships { get; init; } = [];
+    public IReadOnlyList<ScannedRelationship> Relationships { get; init; } = [];
 }
 
 /// <summary>

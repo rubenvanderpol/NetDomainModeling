@@ -123,7 +123,7 @@ public class TypeScannerTests
     }
 
     [Fact]
-    public void Scan_BuildsPropertyRelationships()
+    public void Scan_BuildsConfiguredPropertyRelationships()
     {
         var assembly = typeof(PlaceOrderCommand).Assembly;
 
@@ -131,12 +131,16 @@ public class TypeScannerTests
             .WithContext("Test", ctx => ctx
                 .WithAssemblies(assembly)
                 .WithCategory("Command", c => c.Implements(typeof(ICommand)))
-                .WithCategory("Summary", c => c.NameEndsWith("Summary")))
+                .WithCategory("Summary", c => c.NameEndsWith("Summary"))
+                .WithRelationship("owns", r => r
+                    .FromCategories("Command")
+                    .PropertyReference()))
             .Build();
 
         var result = graph.Contexts.Single();
-        result.PropertyRelationships.Should().Contain(r =>
-            r.SourceType.Contains("PlaceOrderCommand")
+        result.Relationships.Should().Contain(r =>
+            r.Kind == "owns"
+            && r.SourceType.Contains("PlaceOrderCommand")
             && r.TargetType.Contains("OrderSummary")
             && r.Label == "Summary");
     }
